@@ -1,0 +1,48 @@
+name: V3.1 isolated design and PostgreSQL checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ms_test
+          POSTGRES_PASSWORD: mock_only_never_use_in_production
+          POSTGRES_DB: ms_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ms_test -d ms_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Static cross-spec tests (not service E2E)
+        run: node --test tests/contracts/contracts.test.mjs
+      - name: PostgreSQL initial and integrity migrations (fictional isolated DB)
+        env:
+          PGPASSWORD: mock_only_never_use_in_production
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGDATABASE: ms_test
+          PGUSER: ms_test
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/001_initial_schema.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/002_financial_integrity_draft.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/sql/financial_integrity.smoke.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/sql/payment_concurrency.seed.sql
+          bash tests/scripts/payment_concurrency_smoke.sh

@@ -1,0 +1,2779 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Independent Market & Sales API",
+    "version": "1.0.0-draft",
+    "description": "DESIGN ONLY: internal market sales API for V3.1-02, not deployed. CRM /integration/v1 APIs defined separately."
+  },
+  "servers": [
+    {
+      "url": "https://market-sales.invalid",
+      "description": "占位域名，非实际部署"
+    }
+  ],
+  "security": [
+    {
+      "staffBearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/leads": {
+      "post": {
+        "operationId": "createLead",
+        "summary": "创建可暂未识别学生的真实线索",
+        "tags": [
+          "M03"
+        ],
+        "description": "不要求先创建虚构学生或家庭；来源事件应保持唯一。禁止通过相同电话自动合并。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source_event_ref"
+                ],
+                "properties": {
+                  "source_event_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "contact_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_channel_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/leads/{leadId}/students": {
+      "post": {
+        "operationId": "linkLeadStudents",
+        "summary": "核实线索涉及的学生",
+        "tags": [
+          "M03/M04"
+        ],
+        "description": "校验学生权限及证据；一条线索可对应多个学生，不复制真实咨询次数。",
+        "parameters": [
+          {
+            "name": "leadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "student_ids",
+                  "evidence_ref"
+                ],
+                "properties": {
+                  "student_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "confirmation_state": {
+                    "type": "string",
+                    "enum": [
+                      "verified",
+                      "pending_review"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/students": {
+      "post": {
+        "operationId": "createStudent",
+        "summary": "新建独立学生客户档案",
+        "tags": [
+          "M04"
+        ],
+        "description": "只创建学生，不自动创建家庭。若身份疑似重复，应先走人工核实。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "display_name"
+                ],
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "grade_label": {
+                    "type": "string"
+                  },
+                  "school_name": {
+                    "type": "string"
+                  },
+                  "owner_user_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/students/{studentId}/contacts": {
+      "post": {
+        "operationId": "linkStudentContact",
+        "summary": "关联一个已有联系人与指定学生",
+        "tags": [
+          "M04"
+        ],
+        "description": "共享联系人不等于兄弟姐妹，也不授予跨学生访问权。",
+        "parameters": [
+          {
+            "name": "studentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "contact_id",
+                  "relation_type"
+                ],
+                "properties": {
+                  "contact_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "relation_type": {
+                    "type": "string"
+                  },
+                  "verification_state": {
+                    "type": "string",
+                    "enum": [
+                      "unverified",
+                      "verified",
+                      "disputed"
+                    ]
+                  },
+                  "permission_basis_ref": {
+                    "type": "string"
+                  },
+                  "is_primary": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/family-groups": {
+      "post": {
+        "operationId": "createVerifiedFamily",
+        "summary": "核实后建立可选家庭关联",
+        "tags": [
+          "M04"
+        ],
+        "description": "至少两名真实核实的家庭成员；拒绝仅凭电话自动组建；保留撤销历史。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "display_name",
+                  "student_ids",
+                  "verification_evidence_ref"
+                ],
+                "properties": {
+                  "display_name": {
+                    "type": "string"
+                  },
+                  "student_ids": {
+                    "type": "array",
+                    "minItems": 2,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "verification_evidence_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/opportunities": {
+      "post": {
+        "operationId": "createOpportunity",
+        "summary": "为指定学生创建销售商机",
+        "tags": [
+          "M06"
+        ],
+        "description": "默认负责人从学生当前负责人继承，授权主管才可独立指派。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "student_id",
+                  "source_channel_id"
+                ],
+                "properties": {
+                  "student_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_channel_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "owner_user_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "intended_crm_course_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "predicted_amount_cents": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/interactions": {
+      "post": {
+        "operationId": "recordInteraction",
+        "summary": "记录一次沟通关联多个业务对象",
+        "tags": [
+          "M05"
+        ],
+        "description": "一次真实沟通只存一次，访问内容按实际对象权限裁剪。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "occurred_at",
+                  "contact_method",
+                  "summary",
+                  "subjects"
+                ],
+                "properties": {
+                  "occurred_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "contact_method": {
+                    "type": "string"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "subjects": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [],
+                      "properties": {
+                        "student_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "opportunity_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "lead_id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/trials": {
+      "post": {
+        "operationId": "requestTrial",
+        "summary": "发起本地试听需求",
+        "tags": [
+          "M07"
+        ],
+        "description": "此请求只创建本地试听申请，CRM 正式确认前不能返回 confirmed。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "student_id",
+                  "crm_course_id",
+                  "slot_start",
+                  "slot_end"
+                ],
+                "properties": {
+                  "student_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "opportunity_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "crm_course_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "slot_start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "slot_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "crm_class_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "trial_id",
+                        "booking_state"
+                      ],
+                      "properties": {
+                        "trial_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "booking_state": {
+                          "type": "string",
+                          "enum": [
+                            "requested",
+                            "confirmation_unknown"
+                          ]
+                        },
+                        "crm_trial_id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/trials/{trialId}": {
+      "get": {
+        "operationId": "getTrialStatus",
+        "summary": "查询试听是否获得 CRM 真实确认",
+        "tags": [
+          "M07"
+        ],
+        "description": "返回结果未知或明确确认，不以本地提交成功代表 CRM 排课成功。",
+        "parameters": [
+          {
+            "name": "trialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "trial_id",
+                        "booking_state"
+                      ],
+                      "properties": {
+                        "trial_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "booking_state": {
+                          "type": "string",
+                          "enum": [
+                            "requested",
+                            "confirming",
+                            "confirmation_unknown",
+                            "confirmed",
+                            "completed",
+                            "cancelled",
+                            "manual_review"
+                          ]
+                        },
+                        "crm_trial_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "confirmed_slot_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "source_version": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/quotes": {
+      "post": {
+        "operationId": "createQuote",
+        "summary": "创建保留 CRM 原价及版本的学生报价",
+        "tags": [
+          "M08"
+        ],
+        "description": "价格来源必须是 CRM 当前可信投影；BP-03/04 仍影响正式履约。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "student_id",
+                  "opportunity_id",
+                  "items"
+                ],
+                "properties": {
+                  "student_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "opportunity_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "crm_course_id",
+                        "price_source_version",
+                        "billing_quantity",
+                        "standard_price_cents"
+                      ],
+                      "properties": {
+                        "crm_course_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "price_source_version": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "billing_quantity": {
+                          "type": "string",
+                          "pattern": "^[0-9]+(\\.[0-9]{1,4})?$"
+                        },
+                        "standard_price_cents": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 0
+                        },
+                        "discount_cents": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  },
+                  "valid_until": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "quote_id",
+                        "version",
+                        "approval_state"
+                      ],
+                      "properties": {
+                        "quote_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "approval_state": {
+                          "type": "string"
+                        },
+                        "total_cents": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/quotes/{quoteId}/submit-approval": {
+      "post": {
+        "operationId": "submitQuoteApproval",
+        "summary": "按指定报价版本提交优惠审批",
+        "tags": [
+          "M08/M12"
+        ],
+        "description": "审批绑定报价版本，旧版本审批不能授权后续改价；禁止自审批。",
+        "parameters": [
+          {
+            "name": "quoteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "quote_version",
+                  "reason"
+                ],
+                "properties": {
+                  "quote_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/orders": {
+      "post": {
+        "operationId": "createSalesOrder",
+        "summary": "从有效报价建立单学生订单",
+        "tags": [
+          "M09"
+        ],
+        "description": "校验学生、商机、报价一致及最新状态，订单课程明细金额必须精确求和。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "student_id",
+                  "opportunity_id",
+                  "quote_id",
+                  "quote_version"
+                ],
+                "properties": {
+                  "student_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "opportunity_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "quote_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "quote_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "order_id",
+                        "order_state",
+                        "amount_due_cents"
+                      ],
+                      "properties": {
+                        "order_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "order_state": {
+                          "type": "string"
+                        },
+                        "amount_due_cents": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/orders/{orderId}/allocation-proposals": {
+      "post": {
+        "operationId": "proposeAllocation",
+        "summary": "提出一笔实际付款对订单的用途分配建议",
+        "tags": [
+          "M09"
+        ],
+        "description": "BP-02/TP-03 阻断：只提交用途建议，不能据此确认收款、成交或发课时。此端点正式启用前须落实审批责任及账务事务。",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "verified_receipt_ref",
+                  "proposed_amount_cents",
+                  "allocation_basis_ref"
+                ],
+                "properties": {
+                  "verified_receipt_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "proposed_amount_cents": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1
+                  },
+                  "allocation_basis_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "proposal_id",
+                        "status"
+                      ],
+                      "properties": {
+                        "proposal_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string",
+                          "const": "pending_verification"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/orders/{orderId}/settlement": {
+      "get": {
+        "operationId": "getOrderSettlement",
+        "summary": "返回财务权威确认的单学生订单结算事实",
+        "tags": [
+          "M09"
+        ],
+        "description": "结算结果根据已确认收款和退款事实计算，不信任销售手工修改 payment_state。",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "order_id",
+                        "amount_due_cents",
+                        "net_allocated_cents",
+                        "outstanding_cents",
+                        "payment_state",
+                        "sale_state",
+                        "entitlement_state"
+                      ],
+                      "properties": {
+                        "order_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "amount_due_cents": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 0
+                        },
+                        "net_allocated_cents": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 0
+                        },
+                        "outstanding_cents": {
+                          "type": "integer",
+                          "format": "int64",
+                          "minimum": 0
+                        },
+                        "payment_state": {
+                          "type": "string",
+                          "enum": [
+                            "unpaid",
+                            "partially_paid",
+                            "fully_paid",
+                            "disputed",
+                            "adjusted"
+                          ]
+                        },
+                        "sale_state": {
+                          "type": "string",
+                          "enum": [
+                            "not_recognized",
+                            "recognized",
+                            "adjusted_after_sale"
+                          ]
+                        },
+                        "entitlement_state": {
+                          "type": "string",
+                          "enum": [
+                            "not_requested",
+                            "pending",
+                            "unknown",
+                            "completed",
+                            "manual_review"
+                          ]
+                        },
+                        "authority_source": {
+                          "type": "string"
+                        },
+                        "calculated_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/sales/{saleId}/credit-approvals": {
+      "post": {
+        "operationId": "submitSalesCreditApproval",
+        "summary": "提交指定成交事件的多人业绩分配审批",
+        "tags": [
+          "M10"
+        ],
+        "description": "最终批准版本基点总数必须等于10000，整数分总额守恒；不重复增加机构收入。",
+        "parameters": [
+          {
+            "name": "saleId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            },
+            "description": "重复请求同一键/同一负载只能写入一次；响应不明时先核实原结果"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "allocation_version",
+                  "splits",
+                  "reason"
+                ],
+                "properties": {
+                  "allocation_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "splits": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "salesperson_id",
+                        "share_basis_points"
+                      ],
+                      "properties": {
+                        "salesperson_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "share_basis_points": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 10000
+                        }
+                      }
+                    }
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/integrations/tasks": {
+      "get": {
+        "operationId": "listIntegrationTasks",
+        "summary": "查看授权范围内的 M13 同步待核实任务",
+        "tags": [
+          "M13"
+        ],
+        "description": "禁止跨组织/未授权学生任务被读取。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "task_id",
+                              "result_state"
+                            ],
+                            "properties": {
+                              "task_id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "result_state": {
+                                "type": "string"
+                              },
+                              "request_key": {
+                                "type": "string"
+                              },
+                              "related_object_id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          }
+                        },
+                        "next_cursor": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/reports/acquisition": {
+      "get": {
+        "operationId": "getAcquisitionReport",
+        "summary": "区分新增学生与首次来源的获客报表",
+        "tags": [
+          "M11"
+        ],
+        "description": "家庭关联数不是总家庭数；不同来源归因口径总额不可相加。",
+        "parameters": [
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "basis",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "basis",
+                        "unique_students",
+                        "source_breakdown"
+                      ],
+                      "properties": {
+                        "basis": {
+                          "type": "string",
+                          "enum": [
+                            "first_source",
+                            "opportunity_source"
+                          ]
+                        },
+                        "unique_students": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "source_breakdown": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "channel_id",
+                              "student_count"
+                            ],
+                            "properties": {
+                              "channel_id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "student_count": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "operationId": "getHumanReadableAudit",
+        "summary": "读取业务可理解的审批与审计变更",
+        "tags": [
+          "M12"
+        ],
+        "description": "无权限返回拒绝/脱敏；不直接展示 JSON、数据库列名或程序堆栈。",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "object_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功；业务状态以 data 字段为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "event_id",
+                              "summary_zh",
+                              "happened_at"
+                            ],
+                            "properties": {
+                              "event_id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "summary_zh": {
+                                "type": "string"
+                              },
+                              "happened_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "before_business_summary_zh": {
+                                "type": "string"
+                              },
+                              "after_business_summary_zh": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "next_cursor": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "x-contract-status": "proposed-unimplemented",
+        "x-authority": "market-sales-system"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "staffBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "staff-session-token",
+        "description": "需服务端细粒度授权；实际员工认证技术待选择"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message",
+          "request_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Settlement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "order_id",
+          "amount_due_cents",
+          "net_allocated_cents",
+          "outstanding_cents",
+          "payment_state",
+          "sale_state",
+          "entitlement_state"
+        ],
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "amount_due_cents": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "net_allocated_cents": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "outstanding_cents": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "payment_state": {
+            "type": "string",
+            "enum": [
+              "unpaid",
+              "partially_paid",
+              "fully_paid",
+              "disputed",
+              "adjusted"
+            ]
+          },
+          "sale_state": {
+            "type": "string",
+            "enum": [
+              "not_recognized",
+              "recognized",
+              "adjusted_after_sale"
+            ]
+          },
+          "entitlement_state": {
+            "type": "string",
+            "enum": [
+              "not_requested",
+              "pending",
+              "unknown",
+              "completed",
+              "manual_review"
+            ]
+          },
+          "authority_source": {
+            "type": "string"
+          },
+          "calculated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Entity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "responses": {
+      "Invalid": {
+        "description": "字段不合法",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "未认证",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "无操作或对象权限",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "业务对象不存在或不可见",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "幂等、状态或版本冲突",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unknown": {
+        "description": "业务结果可能未知，需核实原请求",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-contract-status": "proposed-unimplemented",
+  "x-owning-system": "market-sales-system",
+  "x-business-baseline": "V2.8/BR-M04-001"
+}

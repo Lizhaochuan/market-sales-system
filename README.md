@@ -18,6 +18,18 @@
 - 全额付清且经过财务权威确认后，才认定正式销售成交。
 - 收款、退款、数据同步及自动化必须遵守服务端权限、幂等和审计要求。
 
+## V3.1-04 开发前技术整合审核候选
+
+本次以 **PR #1（数据库）+ PR #2（API）+ PR #3（财务状态机）** 三份草稿的原有文件为基础建立独立整合分支。此前 PR 均未合并，不应重复合并造成覆盖。
+
+- [整合差距与实施阻断审查](docs/INTEGRATION_REVIEW_V3.1-04.md)：8 项差距、已补充的约束与未关闭的生产风险。
+- [追加财务完整性迁移草案](db/migrations/002_financial_integrity_draft.sql)：隔离 PostgreSQL 测试用，**未批准生产运行**。
+- [模拟数据 PostgreSQL 冒烟测试](tests/sql/financial_integrity.smoke.sql)：验证基本金额守恒、跨学生身份、退款及原成交历史。
+- [Node 合同静态检查](tests/contracts/contracts.test.mjs)：验证数据库表名、API 引用及状态机结构。
+- [CI 隔离验证工作流](.github/workflows/v3-1-isolated-review.yml)：预定运行 PostgreSQL 16、Node 22；是否通过需看 GitHub Actions 实际证据。
+
+**不变边界：** 新市场销售系统资料独立维护；现有 CRM 仓库代码和技术文档未因本 PR 改动。最终完成两系统真实集成和联合验收后才融合技术说明。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
