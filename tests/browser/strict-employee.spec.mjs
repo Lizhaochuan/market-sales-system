@@ -79,7 +79,12 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
     expect(await page.evaluate(()=>localStorage.length)).toBe(0);
     await expect(page.locator('nav button[data-view="opportunities"]')).toBeHidden();
     await expect(page.locator('nav button[data-view="families"]')).toBeHidden();
-    await expect(page.locator('nav button[data-view="leads"]')).toBeHidden();
+    await expect(page.locator('nav button[data-view="leads"]')).toBeVisible();
+    // Consultation is migrated, but lead creation itself must remain closed.
+    await page.locator('nav button[data-view="leads"]').click();
+    await expect(page.locator('#event-form')).toBeVisible();
+    await expect(page.locator('#lead-form')).toBeHidden();
+    await page.locator('nav button[data-view="overview"]').click();
     return page;
   }
   try{
