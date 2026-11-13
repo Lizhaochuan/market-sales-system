@@ -92,9 +92,16 @@ test('V3.2-01 real PostgreSQL HTTP student-first flows and permission guards',as
     });
 
     await t.test('one shared contact links two distinct students but no verified family',async()=>{
+      const rejectedPhone=await post('/api/v1/contacts',tokenA,
+        {display_name:'不能采集明文手机号',phone:'13300000000'});
+      assert.equal(rejectedPhone.status,422);
       const c=await post('/api/v1/contacts',tokenA,{display_name:'模拟家长'});
       assert.equal(c.status,200);
       saved.contact=c.data.contact_id;
+      const unauthorizedEvent=await post('/api/v1/contact-events',tokenB,{
+        contact_id:saved.contact,event_type:'冒领他人咨询',occurred_at:'2026-11-13T11:00:00Z'
+      });
+      assert.equal(unauthorizedEvent.status,403);
       const first=await post('/api/v1/students/'+saved.studentA+'/contacts',tokenA,
         {contact_id:saved.contact,relation_type:'父亲'});
       const second=await post('/api/v1/students/'+saved.studentB+'/contacts',tokenB,
