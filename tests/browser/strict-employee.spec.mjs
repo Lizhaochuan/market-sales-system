@@ -93,10 +93,40 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
     await expect(a.locator('#students-list')).toContainText(name);
     await expect(a.locator('#students-list')).not.toContainText('孩子个人年级');
     await a.getByRole('button',{name:'家长与联系人'}).click();
-    await expect(a.locator('#contact-link-form')).toBeHidden();
+    await expect(a.locator('#contact-link-form')).toBeVisible();
     await a.locator('#contact-form input[name="display_name"]').fill(contactName);
     await a.getByRole('button',{name:'保存联系人'}).click();
     await expect(a.locator('#contacts-list')).toContainText(contactName);
+    // Original Chinese relationship form now actually uses the employee-only
+    // writer: an unverified contact link, NOT family proof or sibling merger.
+    await a.locator('#contact-link-form select[name="student_id"]').selectOption({label:name});
+    await a.locator('#contact-link-form select[name="contact_id"]').selectOption({label:contactName});
+    await a.getByRole('button',{name:'关联至该学生'}).click();
+    await expect(a.locator('#toast')).toContainText('待核实');
+    const link=await owner.query(
+      'SELECT verification_state,verified_at,is_primary FROM ms.student_contacts '+
+      'WHERE student_id=(SELECT id FROM ms.students WHERE display_name=$1) '+
+      'AND contact_id=(SELECT id FROM ms.contacts WHERE display_name=$2)',
+      [name,contactName]);
+    expect(link.rowCount).toBe(1);
+    expect(link.rows[0].verification_state).toBe('unverified');
+    expect(link.rows[0].verified_at).toBeNull();
+    expect(link.rows[0].is_primary).toBe(false);
+
+    await a.getByRole('button',{name:'咨询与线索'}).click();
+    await expect(a.locator('#event-form')).toBeVisible();
+    await expect(a.locator('#lead-form')).toBeHidden();
+    await a.locator('#event-form select[name="contact_id"]').selectOption({label:contactName});
+    await a.getByRole('button',{name:'保存本次咨询'}).click();
+    await expect(a.locator('#strict-consultation-card')).toBeVisible();
+    await expect(a.locator('#strict-consultation-list')).toContainText('电话咨询');
+    const consultation=await owner.query(
+      'SELECT id,recorded_by,event_type FROM ms.contact_events '+
+      'WHERE contact_id=(SELECT id FROM ms.contacts WHERE display_name=$1)',
+      [contactName]);
+    expect(consultation.rowCount).toBe(1);
+    expect(consultation.rows[0].recorded_by).toBe(A);
+    expect(consultation.rows[0].event_type).toBe('电话咨询');
     await testInfo.attach('chinese-strict-employee-workbench',{
       body:await a.screenshot({fullPage:true}),contentType:'image/png'
     });
@@ -112,6 +142,9 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
     await expect(b.locator('#students-list')).not.toContainText(name);
     await b.getByRole('button',{name:'家长与联系人'}).click();
     await expect(b.locator('#contacts-list')).not.toContainText(contactName);
+    await b.getByRole('button',{name:'咨询与线索'}).click();
+    await expect(b.locator('#strict-consultation-list')).not.toContainText('电话咨询');
+    await b.getByRole('button',{name:'家长与联系人'}).click();
     await b.locator('#contact-form input[name="display_name"]').fill('只属于销售B-'+randomUUID());
     await b.getByRole('button',{name:'保存联系人'}).click();
     await expect(b.locator('#toast')).toContainText('未采集电话和微信');
