@@ -71,7 +71,7 @@
       <div class="topbar-actions"><span class="status-pill"><span class="status-dot"></span>本机测试环境</span><button id="refresh-button" class="secondary" type="button">刷新数据</button></div>
     </header>
 
-    <p id="strict-scope-note" class="strict-scope-note" hidden>严格员工权限测试模式：本人学生和联系人登记、待核实的学生—联系人关联、本人联系人真实咨询已开放。销售线索、商机、家庭核实审批和收款等尚未迁移功能仍关闭。</p>
+    <p id="strict-scope-note" class="strict-scope-note" hidden>严格员工权限测试模式：本人学生/联系人、待核实关联和真实咨询可操作；联系人交接须独立主管批准，绝不改变原学生负责人及已有咨询。线索、商机、家庭审核和收款仍关闭。</p>
     <section class="view active" data-panel="overview">
       <div class="welcome"><div><p class="eyebrow">STUDENT-FIRST CRM</p><h2>每位学生独立管理，家庭关系按需关联</h2><p>营销咨询、学生、联系人和销售商机分开记录，避免重复统计。</p></div><span class="welcome-mark" aria-hidden="true">MS</span></div>
       <div class="stats">
@@ -135,6 +135,38 @@
         </article>
       </div>
       <article class="panel space-top"><div class="panel-header"><h3>联系人列表</h3><span id="contacts-total" class="count">0 人</span></div><div id="contacts-list" class="record-list"></div></article>
+      <div id="contact-custody-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>联系人管理权交接（独立主管审批）</h2>
+          <p>只转交这一位联系人的当前管理权；原创建人、学生负责人、已登记咨询、家庭和业绩不变。</p></div>
+        <div class="two-col">
+          <article class="panel">
+            <h3>申请联系人交接</h3>
+            <form id="custody-request-form" class="field-stack">
+              <label>需交接的联系人 <select name="contact_id" data-options="contacts" required></select></label>
+              <label>接收员工 <select name="target_staff_id" data-options="custodyStaff" required></select></label>
+              <label>申请理由 <textarea name="reason_zh" maxlength="400" rows="3" required placeholder="填写为什么需要交接这位联系人的管理权"></textarea></label>
+              <label>虚构核实材料说明 <input name="evidence_ref" maxlength="200" required placeholder="请勿输入真实身份证或联系方式"></label>
+              <div class="form-hint">只有本人当前管理的联系人可提出申请。提交后仍须另一位主管审批。</div>
+              <button class="primary" type="submit">提交联系人交接申请</button>
+            </form>
+          </article>
+          <article class="panel" id="custody-decision-card" hidden>
+            <h3>独立主管审核</h3>
+            <form id="custody-decision-form" class="field-stack">
+              <label>待审核申请 <select name="request_id" data-options="custodyPending" required></select></label>
+              <label>审核结果 <select name="decision">
+                <option value="approved">批准交接</option><option value="rejected">驳回申请</option></select></label>
+              <label>独立审核理由 <textarea name="reason_zh" maxlength="400" rows="3" required placeholder="记录对这项具体联系人交接的判断"></textarea></label>
+              <label>虚构独立复核说明 <input name="evidence_ref" maxlength="200" required></label>
+              <button class="primary" type="submit">保存联系人交接审核</button>
+            </form>
+          </article>
+        </div>
+        <article class="panel space-top">
+          <h3>我参与或有权审核的交接记录</h3>
+          <div id="custody-requests-list" class="record-list"></div>
+        </article>
+      </div>
     </section>
 
     <section class="view" data-panel="leads">

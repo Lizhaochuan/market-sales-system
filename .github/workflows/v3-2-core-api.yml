@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope, chatgpt/v3-2-09-scoped-read-business-api, chatgpt/v3-2-10-legacy-read-hardening, chatgpt/v3-2-11-student-access-governance, chatgpt/v3-2-12-chinese-access-ui-lowrisk-writes, chatgpt/v3-2-13-legacy-lowrisk-writes-trusted-ui]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope, chatgpt/v3-2-09-scoped-read-business-api, chatgpt/v3-2-10-legacy-read-hardening, chatgpt/v3-2-11-student-access-governance, chatgpt/v3-2-12-chinese-access-ui-lowrisk-writes, chatgpt/v3-2-13-legacy-lowrisk-writes-trusted-ui, chatgpt/v3-2-14-scoped-contact-links-consultations]
   workflow_dispatch:
 
 permissions:
@@ -42,7 +42,9 @@ jobs:
       DATABASE_URL_ACCESS_A: postgresql://ms_access_a:fictional_access_a_2026_982a1e@127.0.0.1:5432/ms_test
       DATABASE_URL_ACCESS_B: postgresql://ms_access_b:fictional_access_b_2026_819a0f@127.0.0.1:5432/ms_test
       DATABASE_URL_ACCESS_MANAGER: postgresql://ms_access_manager:fictional_access_manager_2026_15be2c@127.0.0.1:5432/ms_test
+      DATABASE_URL_AUTH_DIRECTORY: postgresql://ms_strict_auth_login:fictional_auth_directory_2026_12f4c8@127.0.0.1:5432/ms_test
       DATABASE_URL_WRITE_A: postgresql://ms_write_a:fictional_write_a_2026_618f92@127.0.0.1:5432/ms_test
+      DATABASE_URL_WRITE_MANAGER: postgresql://ms_write_manager:fictional_write_manager_2026_6b31e2@127.0.0.1:5432/ms_test
       DATABASE_URL_WRITE_B: postgresql://ms_write_b:fictional_write_b_2026_a0c33f@127.0.0.1:5432/ms_test
       DATABASE_URL_DIRECTORY_A: postgresql://ms_directory_reader_a:fictional_viewonly_a_2026_d2ea45@127.0.0.1:5432/ms_test
       DATABASE_URL_DIRECTORY_B: postgresql://ms_directory_reader_b:fictional_viewonly_b_2026_c72180@127.0.0.1:5432/ms_test
@@ -87,11 +89,15 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/015_student_access_governance.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/016_access_ui_choices_and_scoped_lowrisk_writes.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/017_scoped_contact_links_consultations.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/018_strict_function_only_auth_directory.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/019_independent_contact_custody_approval.sql
           psql -X -v ON_ERROR_STOP=1             -v "route_password=fictional_approved_route_2026_8136bc"             -v "assignee_password_a=fictional_assignee_a_2026_74e5a9"             -v "assignee_password_b=fictional_assignee_b_2026_129b6e"             -f tests/sql/create_v3_2_08_readonly_principals.sql
           psql -X -v ON_ERROR_STOP=1 -v "manager_password=fictional_assignee_manager_2026_0bc5ea" -f tests/sql/create_v3_2_10_manager_readonly_login.sql
           psql -X -v ON_ERROR_STOP=1             -v "pass_a=fictional_access_a_2026_982a1e"             -v "pass_b=fictional_access_b_2026_819a0f"             -v "pass_m=fictional_access_manager_2026_15be2c"             -f tests/sql/create_v3_2_11_access_operator_logins.sql
           psql -X -v ON_ERROR_STOP=1             -v "write_password_a=fictional_write_a_2026_618f92"             -v "write_password_b=fictional_write_b_2026_a0c33f"             -f tests/sql/create_v3_2_12_lowrisk_writer_logins.sql
           psql -X -v ON_ERROR_STOP=1             -v "reader_password_a=fictional_viewonly_a_2026_d2ea45"             -v "reader_password_b=fictional_viewonly_b_2026_c72180"             -f tests/sql/create_directory_projection_readers.sql
+          psql -X -v ON_ERROR_STOP=1 -v "directory_password=fictional_auth_directory_2026_12f4c8" -f tests/sql/create_v3_2_15_strict_auth_directory_login.sql
+          psql -X -v ON_ERROR_STOP=1 -v "manager_write_password=fictional_write_manager_2026_6b31e2" -f tests/sql/create_v3_2_15_manager_function_only_writer.sql
       - name: Restricted runtime role and forbidden finance operations
         run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/lowrisk_runtime_permissions.smoke.sql
       - name: Restricted actual LOGIN and tenant row-level security E2E
@@ -110,6 +116,7 @@ jobs:
           node --check src/scoped-lowrisk-write-server.mjs
           node --check src/scoped-legacy-write-adapter.mjs
           node --check src/strict-staff-pools.mjs
+          node --check src/strict-auth-directory.mjs
           node --check src/server.mjs
       - name: Core API, authorization, idempotency and Chinese audit E2E
         run: node --test --test-concurrency=1 tests/core/*.test.mjs tests/ui/*.test.mjs tests/security/*.test.mjs

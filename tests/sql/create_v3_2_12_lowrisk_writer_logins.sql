@@ -34,6 +34,10 @@ BEGIN
         'ms.link_scoped_student_contact(uuid,uuid,text,text)','EXECUTE')
       OR NOT has_function_privilege(p,
         'ms.create_scoped_contact_consultation(uuid,text,timestamptz,text)','EXECUTE')
+      OR NOT has_function_privilege(p,
+        'ms.request_scoped_contact_custody(uuid,uuid,text,text,text)','EXECUTE')
+      OR NOT has_function_privilege(p,
+        'ms.decide_scoped_contact_custody(uuid,text,text,text,text)','EXECUTE')
    THEN RAISE EXCEPTION 'Low-risk writer must retain function-only privileges: %',p;
    END IF;
  END LOOP;

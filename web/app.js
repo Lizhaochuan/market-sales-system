@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -61,7 +61,10 @@ function fillOptions(){
     students:[state.students,'student_id',v=>v.display_name],
     contacts:[state.contacts,'contact_id',v=>v.display_name],
     events:[state.events,'event_id',v=>(v.contact_display_name||'未知联系人')+' · '+v.event_type+' · '+formatDate(v.occurred_at)],
-    leads:[state.leads,'lead_id',v=>'线索 · '+(v.contact_display_name||'未指定联系人')+' · '+labelStatus(v.lead_state)]
+    leads:[state.leads,'lead_id',v=>'线索 · '+(v.contact_display_name||'未指定联系人')+' · '+labelStatus(v.lead_state)],
+    custodyStaff:[state.custodyStaff,'staff_id',v=>v.staff_name],
+    custodyPending:[state.custodyRequests.filter(v=>v.status==='pending'),
+      'request_id',v=>v.contact_name+' · '+v.requester_name+' → '+v.target_name]
   };
   document.querySelectorAll('select[data-options]').forEach(el=>{
     const [items,key,label]=defs[el.dataset.options]||[[],'id',v=>String(v.id)];
@@ -146,6 +149,14 @@ function render(){
       (x.verified_by_name?' · 审核人：'+x.verified_by_name:''),
     labelStatus(x.verification_state),'家'));
   fillOptions();
+  $('contact-custody-workbench').hidden=!state.strict;
+  $('custody-decision-card').hidden=!state.strict||
+    state.capabilities.review_contact_custody!==true;
+  if(state.strict)paint('custody-requests-list',state.custodyRequests,
+    x=>record(x.contact_name,
+      '原管理人：'+x.requester_name+' · 申请接收：'+x.target_name+
+      ' · 时间：'+formatDate(x.created_at),
+      labelStatus(x.status),'交'));
   const familyCanReview=state.capabilities.decide_other_person_family_review===true;
   const form=$('family-decision-form');
   form.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=!familyCanReview);
@@ -176,7 +187,9 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
 async function refresh(){
   const endpoints=state.strict?[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
-    ['events','/api/v1/contact-events']
+    ['events','/api/v1/contact-events'],
+    ['custodyRequests','/api/v1/contact-custody/requests'],
+    ['custodyStaff','/api/v1/contact-custody/staff']
   ]:[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],['leads','/api/v1/leads'],
@@ -184,6 +197,7 @@ async function refresh(){
   ];
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
   if(state.strict)for(const key of ['leads','opportunities','families'])state[key]=[];
+  else {state.custodyRequests=[];state.custodyStaff=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     state[key]=r.status==='fulfilled'?r.value.items||[]:[];
@@ -206,7 +220,7 @@ function setView(view){
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   applyStrictLayout();
-  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings'])state[key]=[];
+  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff'])state[key]=[];
   document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
   $('workspace').hidden=true;$('login-screen').hidden=false;
   $('login-form').reset();$('external-login-form').reset();$('audit-list').replaceChildren();
@@ -305,6 +319,23 @@ register('contact-link-form',async d=>{
     contact_id:d.contact_id,relation_type:d.relation_type,verification_state:'unverified'
   }});
   return '联系人已关联至指定学生，关系状态仍待核实';
+});
+register('custody-request-form',async d=>{
+  await api('/api/v1/contact-custody/requests',{method:'POST',body:{
+    contact_id:d.contact_id,target_staff_id:d.target_staff_id,
+    reason_zh:d.reason_zh.trim(),evidence_ref:d.evidence_ref.trim()
+  }});
+  return '已提交联系人交接申请，当前管理人尚未改变；须由另一位有效主管独立审核';
+});
+register('custody-decision-form',async d=>{
+  await api('/api/v1/contact-custody/requests/'+
+    encodeURIComponent(d.request_id)+'/decision',{method:'POST',body:{
+      decision:d.decision,reason_zh:d.reason_zh.trim(),
+      evidence_ref:d.evidence_ref.trim()
+    }});
+  return d.decision==='approved'?
+    '独立主管已批准这位联系人的管理权交接；学生、旧咨询和归因不变':
+    '独立主管已驳回这项联系人交接申请';
 });
 register('event-form',async d=>{
   const created=await api('/api/v1/contact-events',{method:'POST',body:{

@@ -58,6 +58,8 @@ export async function assertScopedLowriskWriter(pool){
     "has_function_privilege(current_user,'ms.create_scoped_contact(text,boolean,text)','EXECUTE') AS contact_fn,"+
     "has_function_privilege(current_user,'ms.link_scoped_student_contact(uuid,uuid,text,text)','EXECUTE') AS relationship_fn,"+
     "has_function_privilege(current_user,'ms.create_scoped_contact_consultation(uuid,text,timestamptz,text)','EXECUTE') AS consultation_fn,"+
+    "has_function_privilege(current_user,'ms.request_scoped_contact_custody(uuid,uuid,text,text,text)','EXECUTE') AS custody_request_fn,"+
+    "has_function_privilege(current_user,'ms.decide_scoped_contact_custody(uuid,text,text,text,text)','EXECUTE') AS custody_decide_fn,"+
     "has_function_privilege(current_user,'ms.scoped_employee_identity_valid(text,text)','EXECUTE') AS identity_fn,"+
     "ms.current_scoped_staff_id() AS staff_id,"+
     "ms.current_scoped_organization_id() AS organization_id "+
@@ -65,7 +67,7 @@ export async function assertScopedLowriskWriter(pool){
   const x=r.rows[0];
   if(!x||x.login!==x.principal||x.rolsuper||x.rolbypassrls||
     x.students_read||x.students_insert||x.contacts_insert||x.finance_read||
-    x.audit_edit||!x.student_fn||!x.contact_fn||!x.relationship_fn||!x.consultation_fn||!x.identity_fn||
+    x.audit_edit||!x.student_fn||!x.contact_fn||!x.relationship_fn||!x.consultation_fn||!x.custody_request_fn||!x.custody_decide_fn||!x.identity_fn||
     !x.staff_id||!x.organization_id)
     throw new Error('Low-risk service must use mapped nonowner function-only staff login');
   return {login:x.login,restricted:true};
