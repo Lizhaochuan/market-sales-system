@@ -1,0 +1,297 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Market Sales V3.2-03 External Identity & Family Review Extensions",
+    "version": "3.2.03-isolated",
+    "description": "Only 2 implemented isolated endpoints. External RS256 identity verifier is an auth adapter, not a login endpoint. Business policy and real identity provider are NOT production-ready."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3100",
+      "description": "本机虚构测试"
+    }
+  ],
+  "security": [
+    {
+      "staffBearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getCurrentStaffCapabilities",
+        "summary": "取得本机构当前员工的实际职权",
+        "description": "从每次数据库角色授权查询获得权限；不从前端声称的角色或外部签名令牌自行提升权限。",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "仅当身份/业务授权成功时返回",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "staff_id",
+                        "display_name",
+                        "organization_id",
+                        "role_codes",
+                        "capabilities",
+                        "environment"
+                      ],
+                      "properties": {
+                        "staff_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "organization_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "role_codes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "capabilities": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "view_own_students",
+                            "manage_own_leads",
+                            "propose_family_review",
+                            "decide_other_person_family_review",
+                            "review_family_audit"
+                          ],
+                          "properties": {
+                            "view_own_students": {
+                              "type": "boolean"
+                            },
+                            "manage_own_leads": {
+                              "type": "boolean"
+                            },
+                            "propose_family_review": {
+                              "type": "boolean"
+                            },
+                            "decide_other_person_family_review": {
+                              "type": "boolean"
+                            },
+                            "review_family_audit": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        "environment": {
+                          "type": "string",
+                          "const": "isolated-test"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份未认证或签名无效"
+          },
+          "403": {
+            "description": "没有当前对象/职权的操作权限"
+          },
+          "404": {
+            "description": "业务对象不存在或不可见"
+          },
+          "409": {
+            "description": "已审核、冲突或重复业务意图"
+          },
+          "422": {
+            "description": "业务输入有误或不符合保护约束"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/family-groups/{familyId}/decision": {
+      "post": {
+        "operationId": "decideFamilyReview",
+        "summary": "独立主管批准或驳回家庭关系核实",
+        "description": "服务端和数据库双重校验：同机构、至少两名独立学生、pending、审批人与申请人不同、审核只发生一次；原始审核历史不可修改。",
+        "parameters": [
+          {
+            "name": "familyId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "decision",
+                  "review_evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "rejected"
+                    ]
+                  },
+                  "review_evidence_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "reason_zh": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "仅当身份/业务授权成功时返回",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "family_group_id",
+                        "verification_state",
+                        "reviewer_name"
+                      ],
+                      "properties": {
+                        "family_group_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "verification_state": {
+                          "type": "string",
+                          "enum": [
+                            "verified",
+                            "rejected"
+                          ]
+                        },
+                        "reviewer_name": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份未认证或签名无效"
+          },
+          "403": {
+            "description": "没有当前对象/职权的操作权限"
+          },
+          "404": {
+            "description": "业务对象不存在或不可见"
+          },
+          "409": {
+            "description": "已审核、冲突或重复业务意图"
+          },
+          "422": {
+            "description": "业务输入有误或不符合保护约束"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "staffBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Either isolated demo token or pre-configured RS256 signed external token mapped to active staff; no automatic role provisioning."
+      }
+    }
+  },
+  "x-production-ready": false,
+  "x-identity-provider-connected": false,
+  "x-business-scope": "family two-person decision only"
+}
