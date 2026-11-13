@@ -40,7 +40,7 @@ test('V3.2-03 external OIDC verification and two-person family approval on real 
   const post=(path,token,body,key)=>call('POST',path,token,body,key);
   const get=(path,token)=>call('GET',path,token);
   const demo=async account=>{
-    const r=await post('/api/v1/dev/login',{unused:true},{account_code:account,passphrase:demoPass});
+    const r=await post('/api/v1/dev/login',null,{account_code:account,passphrase:demoPass});
     // /dev/login ignores Authorization; this route uses JSON password only.
     assert.equal(r.status,200);
     return r.data.token;
