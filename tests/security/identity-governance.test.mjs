@@ -145,10 +145,16 @@ test('V3.2-04 identity binding governance, revocation and role isolation',async 
       assert.equal(count.rows[0].n,0);
     });
     await t.test('live role revocation immediately blocks manager-only API',async()=>{
-      await pool.query("UPDATE ms.user_role_grants SET revoked_at=now() WHERE user_id=$1",[reviewer]);
-      assert.equal((await get('/api/v1/identity/change-requests',reviewerToken)).status,403);
-      await pool.query("UPDATE ms.staff_users SET status='disabled' WHERE id=$1",[staff]);
-      assert.equal((await get('/api/v1/me',employeeToken)).status,403);
+      try {
+        await pool.query("UPDATE ms.user_role_grants SET revoked_at=now() WHERE user_id=$1",[reviewer]);
+        assert.equal((await get('/api/v1/identity/change-requests',reviewerToken)).status,403);
+        await pool.query("UPDATE ms.staff_users SET status='disabled' WHERE id=$1",[staff]);
+        assert.equal((await get('/api/v1/me',employeeToken)).status,403);
+      } finally {
+        // Restore fictional fixture so later Chromium runs start with valid demo users.
+        await pool.query("UPDATE ms.staff_users SET status='active' WHERE id=$1",[staff]);
+        await pool.query("UPDATE ms.user_role_grants SET revoked_at=NULL WHERE user_id=$1",[reviewer]);
+      }
     });
   } finally {
     await new Promise(ok=>app.close(ok));
