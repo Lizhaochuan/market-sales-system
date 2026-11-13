@@ -1,0 +1,1901 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Edu CRM - proposed market-sales integration API",
+    "version": "1.0.0-draft",
+    "description": "DESIGN ONLY. 当前教培 CRM 并未实现这些 /integration/v1 路由。不得用通用管理数据库 API 替代。"
+  },
+  "servers": [
+    {
+      "url": "https://crm-integration.invalid",
+      "description": "占位域名，禁止视为真实部署地址"
+    }
+  ],
+  "security": [
+    {
+      "serviceBearer": []
+    }
+  ],
+  "paths": {
+    "/integration/v1/students/lookup": {
+      "post": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "查找 CRM 学员（只读 POST，敏感条件不放 URL）",
+        "description": "trusted_external_id 可能返回 verified_unique；姓名或电话的候选仅返回 needs_human_review，不自动合并。",
+        "operationId": "lookupCrmStudent",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "lookup_kind"
+                ],
+                "properties": {
+                  "lookup_kind": {
+                    "type": "string",
+                    "enum": [
+                      "trusted_external_id",
+                      "restricted_candidate"
+                    ]
+                  },
+                  "external_tenant": {
+                    "type": "string"
+                  },
+                  "trusted_student_ref": {
+                    "type": "string"
+                  },
+                  "comparison_data": {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "display_name": {
+                        "type": "string"
+                      },
+                      "phone_token": {
+                        "type": "string"
+                      },
+                      "birth_date": {
+                        "type": "string",
+                        "format": "date"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "match_status"
+                      ],
+                      "properties": {
+                        "match_status": {
+                          "type": "string",
+                          "enum": [
+                            "no_match",
+                            "verified_unique",
+                            "candidates",
+                            "needs_human_review"
+                          ]
+                        },
+                        "crm_student_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "identity_proof": {
+                          "type": "string"
+                        },
+                        "source_version": {
+                          "type": "string"
+                        },
+                        "candidates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "crm_student_id",
+                              "display_name_masked"
+                            ],
+                            "properties": {
+                              "crm_student_id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "display_name_masked": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "students:lookup"
+        ]
+      }
+    },
+    "/integration/v1/students/ensure": {
+      "post": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "受控确保学员/试听临时身份（需 CRM 另行实现）",
+        "description": "provisional 试听身份不得自动创设已付课程权益；当前 CRM 尚无此专用能力，TP-02 阻断。",
+        "operationId": "ensureCrmStudent",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "description": "同一业务意图原键原负载重复调用必须重放原结果；超时先查询原请求"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "external_student_key",
+                  "participant_kind"
+                ],
+                "properties": {
+                  "external_student_key": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "participant_kind": {
+                    "type": "string",
+                    "enum": [
+                      "formal",
+                      "trial_provisional"
+                    ]
+                  },
+                  "crm_student_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "verified_identity_reference": {
+                    "type": "string"
+                  },
+                  "approved_trial_reference": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "crm_student_id",
+                        "identity_state",
+                        "entitlement_created"
+                      ],
+                      "properties": {
+                        "crm_student_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "identity_state": {
+                          "type": "string",
+                          "enum": [
+                            "provisional",
+                            "verified_formal",
+                            "manual_review"
+                          ]
+                        },
+                        "entitlement_created": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "source_version": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "students:ensure"
+        ]
+      }
+    },
+    "/integration/v1/courses": {
+      "get": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "查询 CRM 可售课程和标准价权威版本",
+        "description": "CRM 唯一权威标准价；班级特殊价与标准价须分开，返回版本和计费单位。",
+        "operationId": "getCrmCourses",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "only_sellable",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "crm_course_id",
+                              "display_name",
+                              "standard_price_cents",
+                              "currency",
+                              "billing_unit",
+                              "sellable",
+                              "source_version"
+                            ],
+                            "properties": {
+                              "crm_course_id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "class_type": {
+                                "type": "string"
+                              },
+                              "standard_price_cents": {
+                                "type": "integer",
+                                "format": "int64",
+                                "minimum": 0
+                              },
+                              "currency": {
+                                "type": "string",
+                                "const": "CNY"
+                              },
+                              "billing_unit": {
+                                "type": "string"
+                              },
+                              "duration_minutes": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "sellable": {
+                                "type": "boolean"
+                              },
+                              "source_version": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "valid_from": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "valid_until": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "next_cursor": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "courses:read"
+        ]
+      }
+    },
+    "/integration/v1/availability/search": {
+      "post": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "只读查询候选教学时段，不保留资源",
+        "description": "查询结果是建议，不是资源占用；POST /trials 必须原子再次核查冲突。",
+        "operationId": "searchCrmAvailability",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "crm_course_id",
+                  "slot_start",
+                  "slot_end"
+                ],
+                "properties": {
+                  "crm_course_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "slot_start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "slot_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "crm_teacher_id": {
+                    "type": "string"
+                  },
+                  "crm_class_id": {
+                    "type": "string"
+                  },
+                  "campus_id": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "candidates",
+                        "source_version"
+                      ],
+                      "properties": {
+                        "candidates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "candidate_id",
+                              "available",
+                              "expires_at"
+                            ],
+                            "properties": {
+                              "candidate_id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "available": {
+                                "type": "boolean"
+                              },
+                              "expires_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "crm_class_id": {
+                                "type": "string"
+                              },
+                              "crm_teacher_id": {
+                                "type": "string"
+                              },
+                              "crm_room_id": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "source_version": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "availability:read"
+        ]
+      }
+    },
+    "/integration/v1/trials": {
+      "post": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "CRM 原子确认试听预约与资源冲突",
+        "description": "只有 CRM 真正确认资源并返回 crm_trial_id 才视为 confirmed；超时结果未知。",
+        "operationId": "confirmCrmTrial",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "description": "同一业务意图原键原负载重复调用必须重放原结果；超时先查询原请求"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "crm_student_id",
+                  "crm_course_id",
+                  "slot_start",
+                  "slot_end",
+                  "external_trial_request_id"
+                ],
+                "properties": {
+                  "crm_student_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "crm_course_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "slot_start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "slot_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "external_trial_request_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "crm_class_id": {
+                    "type": "string"
+                  },
+                  "crm_teacher_id": {
+                    "type": "string"
+                  },
+                  "crm_room_id": {
+                    "type": "string"
+                  },
+                  "availability_version": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "crm_trial_id",
+                        "crm_student_id",
+                        "status",
+                        "source_version"
+                      ],
+                      "properties": {
+                        "crm_trial_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "crm_student_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "confirmed",
+                            "completed",
+                            "cancelled",
+                            "manual_review"
+                          ]
+                        },
+                        "crm_schedule_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "source_version": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "confirmed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "trials:write"
+        ]
+      }
+    },
+    "/integration/v1/trials/{trialId}/reschedule": {
+      "post": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "试听原子改期",
+        "description": "拟议 CRM 专用 API；当前原 CRM 未实现，不得直接接入生产。",
+        "operationId": "rescheduleCrmTrial",
+        "parameters": [
+          {
+            "name": "trialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "description": "同一业务意图原键原负载重复调用必须重放原结果；超时先查询原请求"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "slot_start",
+                  "slot_end",
+                  "expected_version"
+                ],
+                "properties": {
+                  "slot_start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "slot_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expected_version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "crm_trial_id",
+                        "crm_student_id",
+                        "status",
+                        "source_version"
+                      ],
+                      "properties": {
+                        "crm_trial_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "crm_student_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "confirmed",
+                            "completed",
+                            "cancelled",
+                            "manual_review"
+                          ]
+                        },
+                        "crm_schedule_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "source_version": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "confirmed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "trials:write"
+        ]
+      }
+    },
+    "/integration/v1/trials/{trialId}/cancel": {
+      "post": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "取消试听并安全释放资源",
+        "description": "拟议 CRM 专用 API；当前原 CRM 未实现，不得直接接入生产。",
+        "operationId": "cancelCrmTrial",
+        "parameters": [
+          {
+            "name": "trialId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "description": "同一业务意图原键原负载重复调用必须重放原结果；超时先查询原请求"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expected_version",
+                  "reason"
+                ],
+                "properties": {
+                  "expected_version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "crm_trial_id",
+                        "crm_student_id",
+                        "status",
+                        "source_version"
+                      ],
+                      "properties": {
+                        "crm_trial_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "crm_student_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "confirmed",
+                            "completed",
+                            "cancelled",
+                            "manual_review"
+                          ]
+                        },
+                        "crm_schedule_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "source_version": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "confirmed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "trials:write"
+        ]
+      }
+    },
+    "/integration/v1/requests/{requestKey}": {
+      "get": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "按原请求键查询跨系统写请求最终结果",
+        "description": "查询权限必须限于所属服务身份；未知时绝不建议换键重试，记录必须足以恢复。",
+        "operationId": "getCrmRequestResult",
+        "parameters": [
+          {
+            "name": "requestKey",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "request_key"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "confirmed",
+                            "rejected",
+                            "unknown",
+                            "manual_review"
+                          ]
+                        },
+                        "request_key": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "crm_object_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "original_operation": {
+                          "type": "string"
+                        },
+                        "result": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "source_version": {
+                          "type": "string"
+                        },
+                        "processed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "requests:read"
+        ]
+      }
+    },
+    "/integration/v1/entitlements": {
+      "post": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "按唯一销售订单明细创建/查询实际课时权益",
+        "description": "订单明细 external_order_item_id 为业务领域防重键；付款凭证不能只是销售自证。BP-01/TP-03/05 未决，禁止生产上线。",
+        "operationId": "provisionCrmEntitlement",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "description": "同一业务意图原键原负载重复调用必须重放原结果；超时先查询原请求"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "external_order_item_id",
+                  "crm_student_id",
+                  "crm_course_id",
+                  "paid_units",
+                  "gift_units",
+                  "billing_unit",
+                  "financial_evidence_ref",
+                  "entitlement_policy_version"
+                ],
+                "properties": {
+                  "external_order_item_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "crm_student_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "crm_course_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "paid_units": {
+                    "type": "string",
+                    "pattern": "^[0-9]+(\\.[0-9]{1,4})?$"
+                  },
+                  "gift_units": {
+                    "type": "string",
+                    "pattern": "^[0-9]+(\\.[0-9]{1,4})?$"
+                  },
+                  "billing_unit": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "financial_evidence_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "entitlement_policy_version": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "crm_entitlement_id",
+                        "crm_student_id",
+                        "status"
+                      ],
+                      "properties": {
+                        "crm_entitlement_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "crm_student_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "crm_package_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "completed",
+                            "revoked",
+                            "unknown",
+                            "manual_review"
+                          ]
+                        },
+                        "source_version": {
+                          "type": "string"
+                        },
+                        "verified_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "entitlements:write"
+        ]
+      }
+    },
+    "/integration/v1/entitlements/{entitlementId}": {
+      "get": {
+        "tags": [
+          "CRM M13"
+        ],
+        "summary": "核实 CRM 已建权益与真实状态",
+        "description": "拟议 CRM 专用 API；当前原 CRM 未实现，不得直接接入生产。",
+        "operationId": "getCrmEntitlement",
+        "parameters": [
+          {
+            "name": "entitlementId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功或已知查询结果；真实业务状态以 data.status 为准",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "crm_entitlement_id",
+                        "crm_student_id",
+                        "status"
+                      ],
+                      "properties": {
+                        "crm_entitlement_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "crm_student_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "crm_package_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "completed",
+                            "revoked",
+                            "unknown",
+                            "manual_review"
+                          ]
+                        },
+                        "source_version": {
+                          "type": "string"
+                        },
+                        "verified_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "source_version": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Unknown"
+          }
+        },
+        "security": [
+          {
+            "serviceBearer": []
+          }
+        ],
+        "x-contract-status": "proposed",
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "entitlements:read"
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "serviceBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "scoped-service-token",
+        "description": "仅为拟议独立服务身份；禁止使用超管共享登录；真实认证方案待评审"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "request_id"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "current_version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Course": {
+        "type": "object",
+        "required": [
+          "crm_course_id",
+          "display_name",
+          "standard_price_cents",
+          "currency",
+          "billing_unit",
+          "sellable",
+          "source_version"
+        ],
+        "properties": {
+          "crm_course_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "class_type": {
+            "type": "string"
+          },
+          "standard_price_cents": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "const": "CNY"
+          },
+          "billing_unit": {
+            "type": "string"
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sellable": {
+            "type": "boolean"
+          },
+          "source_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StudentLookupResult": {
+        "type": "object",
+        "required": [
+          "match_status"
+        ],
+        "properties": {
+          "match_status": {
+            "type": "string",
+            "enum": [
+              "no_match",
+              "verified_unique",
+              "candidates",
+              "needs_human_review"
+            ]
+          },
+          "crm_student_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "identity_proof": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "crm_student_id",
+                "display_name_masked"
+              ],
+              "properties": {
+                "crm_student_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "display_name_masked": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "Trial": {
+        "type": "object",
+        "required": [
+          "crm_trial_id",
+          "crm_student_id",
+          "status",
+          "source_version"
+        ],
+        "properties": {
+          "crm_trial_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "crm_student_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "completed",
+              "cancelled",
+              "manual_review"
+            ]
+          },
+          "crm_schedule_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Entitlement": {
+        "type": "object",
+        "required": [
+          "crm_entitlement_id",
+          "crm_student_id",
+          "status"
+        ],
+        "properties": {
+          "crm_entitlement_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "crm_student_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "crm_package_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "completed",
+              "revoked",
+              "unknown",
+              "manual_review"
+            ]
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "verified_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RequestResult": {
+        "type": "object",
+        "required": [
+          "status",
+          "request_key"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "confirmed",
+              "rejected",
+              "unknown",
+              "manual_review"
+            ]
+          },
+          "request_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "crm_object_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "original_operation": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "source_version": {
+            "type": "string"
+          },
+          "processed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "Invalid": {
+        "description": "输入无效",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "未认证",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "服务或资源权限不足",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "业务状态、版本、价格或幂等冲突",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unknown": {
+        "description": "结果未知；核实原请求键",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-contract-status": "proposed-unimplemented",
+  "x-owning-system": "edu-management-system",
+  "x-business-baseline": "V2.8/BR-M04-001"
+}
