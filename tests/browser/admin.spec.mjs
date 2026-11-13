@@ -108,3 +108,47 @@ test('真实 Chromium：移动窄屏可操作、业务名称安全显示、无�
   await navigate(page,'工作概览');
   await expect(page.locator('.footnote')).toContainText('未启用');
 });
+
+
+test('真实 Chromium：独立两位主管审核家庭关系，记录中文变更和角色边界',async({page})=>{
+  await login(page,'supervisor');
+  await navigate(page,'学生客户');
+  for(const name of ['双人审核虚构学生甲','双人审核虚构学生乙']){
+    await page.locator('#student-form input[name="display_name"]').fill(name);
+    await page.getByRole('button',{name:'保存学生档案'}).click();
+    await expect(page.locator('#students-list')).toContainText(name);
+  }
+  await navigate(page,'家庭关系核实');
+  await page.locator('#family-form input[name="display_name"]').fill('双人审核浏览器演示家庭');
+  await page.locator('#family-form select[name="student_a"]').selectOption({label:'双人审核虚构学生甲'});
+  await page.locator('#family-form select[name="student_b"]').selectOption({label:'双人审核虚构学生乙'});
+  await page.locator('#family-form input[name="verification_evidence_ref"]').fill('申请人待核实的材料编号');
+  await page.getByRole('button',{name:'提交核实申请'}).click();
+  await expect(page.locator('#families-list')).toContainText('双人审核浏览器演示家庭');
+  await expect(page.locator('#families-list')).toContainText('待核实');
+  await expect(page.locator('#family-decision-form button[type="submit"]')).toBeDisabled();
+
+  await logout(page);
+  await login(page,'supervisor-2');
+  await navigate(page,'家庭关系核实');
+  await page.locator('#family-review-select').selectOption({label:'双人审核浏览器演示家庭（申请人：模拟销售主管）'});
+  await expect(page.locator('#family-decision-form button[type="submit"]')).toBeEnabled();
+  await page.locator('#family-decision-form input[name="review_evidence_ref"]').fill('第二主管独立核对编号');
+  await page.locator('#family-decision-form textarea[name="reason_zh"]').fill('第二主管人工核实：两名学生关系符合模拟证据');
+  await page.getByRole('button',{name:'提交独立审核决定'}).click();
+  await expect(page.locator('#families-list')).toContainText('已核实');
+  await expect(page.locator('#families-list')).toContainText('审核人：模拟第二主管');
+
+  await navigate(page,'业务变更记录');
+  await page.locator('#audit-type').selectOption('family');
+  await page.locator('#audit-object').selectOption({label:'双人审核浏览器演示家庭 · 已核实'});
+  await page.getByRole('button',{name:'查看记录'}).click();
+  await expect(page.locator('#audit-list')).toContainText('独立主管核实批准');
+  await expect(page.locator('#audit-list')).toContainText('第二主管');
+  await expect(page.locator('#audit-list')).not.toContainText('before_business_json');
+  await logout(page);
+  await login(page,'sales-a');
+  await navigate(page,'家庭关系核实');
+  await expect(page.locator('#family-form button[type="submit"]')).toBeDisabled();
+  await expect(page.locator('#family-decision-form button[type="submit"]')).toBeDisabled();
+});
