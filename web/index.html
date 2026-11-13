@@ -71,7 +71,7 @@
       <div class="topbar-actions"><span class="status-pill"><span class="status-dot"></span>本机测试环境</span><button id="refresh-button" class="secondary" type="button">刷新数据</button></div>
     </header>
 
-    <p id="strict-scope-note" class="strict-scope-note" hidden>严格员工权限测试模式：只开放本人授权的学生、联系人查询和低风险登记。其他咨询、商机、家庭审批和收款操作仍关闭。</p>
+    <p id="strict-scope-note" class="strict-scope-note" hidden>严格员工权限测试模式：本人学生和联系人登记、待核实的学生—联系人关联、本人联系人真实咨询已开放。销售线索、商机、家庭核实审批和收款等尚未迁移功能仍关闭。</p>
     <section class="view active" data-panel="overview">
       <div class="welcome"><div><p class="eyebrow">STUDENT-FIRST CRM</p><h2>每位学生独立管理，家庭关系按需关联</h2><p>营销咨询、学生、联系人和销售商机分开记录，避免重复统计。</p></div><span class="welcome-mark" aria-hidden="true">MS</span></div>
       <div class="stats">
@@ -166,6 +166,10 @@
           </form>
         </article>
       </div>
+      <article class="panel space-top" id="strict-consultation-card" hidden>
+        <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
+        <div id="strict-consultation-list" class="record-list"></div>
+      </article>
       <article class="panel space-top"><div class="panel-header"><h3>销售线索</h3><span id="leads-total" class="count">0 条</span></div><div id="leads-list" class="record-list"></div></article>
     </section>
 
