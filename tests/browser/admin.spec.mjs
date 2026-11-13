@@ -40,6 +40,8 @@ test('真实 Chromium：中文学生、联系人、咨询、商机、审计及�
   await page.locator('#event-form select[name="contact_id"]').selectOption({label:'浏览器模拟家长'});
   await page.getByRole('button',{name:'保存本次咨询'}).click();
   await expect(page.locator('#toast')).toContainText('真实咨询已登记');
+  await expect(page.locator('#lead-form select[name="source_event_ref"] option:checked'))
+    .toContainText('浏览器模拟家长');
   await page.getByRole('button',{name:'创建销售线索'}).click();
   await expect(page.locator('#leads-list')).toContainText('浏览器模拟家长');
   await expect(page.locator('#leads-list')).toContainText('未识别具体学生');
