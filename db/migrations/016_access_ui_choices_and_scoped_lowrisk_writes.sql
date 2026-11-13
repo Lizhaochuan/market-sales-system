@@ -38,6 +38,10 @@ CREATE ROLE ms_scoped_lowrisk_writer NOLOGIN;
 GRANT USAGE ON SCHEMA ms TO ms_scoped_lowrisk_writer;
 GRANT EXECUTE ON FUNCTION ms.scoped_employee_identity_valid(text,text)
  TO ms_scoped_lowrisk_writer;
+GRANT EXECUTE ON FUNCTION ms.current_scoped_staff_id()
+ TO ms_scoped_lowrisk_writer;
+GRANT EXECUTE ON FUNCTION ms.current_scoped_organization_id()
+ TO ms_scoped_lowrisk_writer;
 
 CREATE TABLE ms.scoped_lowrisk_write_receipts(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
