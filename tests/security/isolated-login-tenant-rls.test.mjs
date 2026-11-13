@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createHmac, randomBytes} from 'node:crypto';
 import pg from 'pg';
 import {createApp} from '../../src/app.mjs';
+import {assertRestrictedRuntime} from '../../src/runtime-preflight.mjs';
 
 const secret='fictional-test-only-strong-token-secret-9c92789dc3b9';
 const demoPass='fictional-strong-ui-demo-passphrase-0001';
@@ -54,6 +55,12 @@ test('V3.2-05 real nonowner LOGIN role with isolated HTTP tenant RLS and finance
       assert.equal(priv.rows[0].finance,false);
       assert.equal(priv.rows[0].can_suspend,false);
       assert.equal(priv.rows[0].can_create,false);
+    });
+    await t.test('fail-closed startup gate accepts runtime login but rejects database owner',async()=>{
+      const acceptable=await assertRestrictedRuntime(restricted);
+      assert.equal(acceptable.role,'ms_isolated_api');
+      await assert.rejects(assertRestrictedRuntime(owner),
+        e=>e.message.includes('owner/elevated DB credentials'));
     });
     await t.test('RLS hides unscoped student rows from direct restricted LOGIN',async()=>{
       const r=await restricted.query('SELECT count(*)::int AS total FROM ms.students');
