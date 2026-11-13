@@ -104,7 +104,10 @@ test('V3.2-01 real PostgreSQL HTTP student-first flows and permission guards',as
       assert.equal(unauthorizedEvent.status,403);
       const first=await post('/api/v1/students/'+saved.studentA+'/contacts',tokenA,
         {contact_id:saved.contact,relation_type:'父亲'});
-      const second=await post('/api/v1/students/'+saved.studentB+'/contacts',tokenB,
+      const blocked=await post('/api/v1/students/'+saved.studentB+'/contacts',tokenB,
+        {contact_id:saved.contact,relation_type:'父亲'});
+      assert.equal(blocked.status,403,'Another salesperson cannot claim a contact without permission');
+      const second=await post('/api/v1/students/'+saved.studentB+'/contacts',tokenM,
         {contact_id:saved.contact,relation_type:'父亲'});
       assert.equal(first.status,200);assert.equal(second.status,200);
       const duplicate=await post('/api/v1/students/'+saved.studentA+'/contacts',tokenA,
