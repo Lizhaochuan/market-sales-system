@@ -193,7 +193,7 @@ test('V3.2-08: only independently approved LIVE identity bindings can route',asy
         tenantUpstreams:[{tenantId:orgA,upstream:origin(appA)}],
         registrations:[{issuer,subject:subjectA,upstream:origin(appA)}]
       }));
-      assert.equal((await call(token(subjectA,{aud:'wrong'})).status),401);
+      assert.equal((await call(token(subjectA,{aud:'wrong'}))).status,401);
     });
   }finally{
     await Promise.allSettled([gateway,appA,appB].filter(x=>x?.listening).map(close));
