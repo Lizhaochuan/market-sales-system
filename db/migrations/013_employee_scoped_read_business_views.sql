@@ -72,11 +72,9 @@ SELECT e.id AS event_id,e.event_type,e.occurred_at
 FROM ms.contact_events e
 WHERE e.organization_id=ms.current_database_tenant()
   AND ms.current_scoped_staff_id() IS NOT NULL
-  AND (
-    e.recorded_by=ms.current_scoped_staff_id()
-    OR EXISTS (
-      SELECT 1 FROM ms.scoped_contacts_directory c WHERE c.contact_id=e.contact_id)
-  );
+  AND e.recorded_by=ms.current_scoped_staff_id();
+-- A shared contact may represent several different students. Contact-level
+-- visibility MUST NOT imply access to every consultation about siblings.
 
 CREATE VIEW ms.scoped_leads_directory
 WITH (security_barrier=true) AS
