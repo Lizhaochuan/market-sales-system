@@ -72,6 +72,23 @@ PR #6 从 V3.2-01 PR #5 叠加开发，而后者依赖 V3.1-04 PR #4。以上均
 
 PR #7 基于 V3.2-02 PR #6，且依赖 #5 和 #4；在依赖审核和基线明确前不得直接合并 main。现有 CRM 和技术文档不修改，真正完成双系统集成与联合验收后才融合文档。
 
+## V3.2-04 员工身份绑定/撤销治理与受限数据库运行角色（草稿 PR #8）
+
+新建身份关联不再只是直接写入员工身份表，而是由本机构两名不同主管完成申请、独立核实及最终批准。正式账号离职/身份撤销也需独立审核，批准后外部身份令牌立即失去对应员工访问资格。
+
+- [V3.2-04 技术实现、审批操作和生产阻断说明](docs/V3.2-04_IDENTITY_GOVERNANCE_AND_RUNTIME_SECURITY.md)
+- [身份变更审批与不可变审核记录](db/migrations/007_identity_change_governance.sql)
+- [隔离低风险数据库角色及身份变更约束](db/migrations/008_lowrisk_runtime_permissions.sql)
+- [中文身份审批界面](web/identity.js)
+- [5个新实现的低风险身份管理接口规范](api/openapi/identity-governance-implemented.v3.2.json)
+- [双主管绑定/撤销、员工停用和角色撤销测试](tests/security/identity-governance.test.mjs)
+- [受限数据库角色拒绝财务、审计篡改和随意授权的实际 SQL](tests/sql/lowrisk_runtime_permissions.smoke.sql)
+- [真实 Chromium 全流程自动化测试](tests/browser/admin.spec.mjs)
+
+**累计 28 个隔离测试接口，不包括真实收款、自动成交、CRM 课时发放。** 本轮增加一项字段保护：跨负责人被明确授权查看的学生，其年级信息在列表中显示“已隐藏”，并通过独立安全用例验证授权撤销生效。
+
+该项目仍然 **MS_STAGE=isolated-test + localhost + 虚构数据**，尚无生产身份供应商或已完整验证的低权限生产运行账号。旧的 PR #4–#7 都是待审草稿，本 PR 依赖 PR #7；不可多分支重复合并。**不修改现有 edu-management-system 的代码及技术文档，实际完成双系统集成和联合验收后才融合文档。**
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。

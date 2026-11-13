@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 const files=new Map([
   ['/',['../web/index.html','text/html; charset=utf-8']],
   ['/app.js',['../web/app.js','text/javascript; charset=utf-8']],
+  ['/identity.js',['../web/identity.js','text/javascript; charset=utf-8']],
   ['/styles.css',['../web/styles.css','text/css; charset=utf-8']]
 ]);
 const csp="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";
