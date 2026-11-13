@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[]};
+const state={token:null,user:null,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],preferredEventId:null,preferredLeadId:null};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -60,13 +60,23 @@ function fillOptions(){
   const defs={
     students:[state.students,'student_id',v=>v.display_name],
     contacts:[state.contacts,'contact_id',v=>v.display_name],
-    events:[state.events,'event_id',v=>v.event_type+' · '+formatDate(v.occurred_at)],
+    events:[state.events,'event_id',v=>(v.contact_display_name||'未知联系人')+' · '+v.event_type+' · '+formatDate(v.occurred_at)],
     leads:[state.leads,'lead_id',v=>'线索 · '+(v.contact_display_name||'未指定联系人')+' · '+labelStatus(v.lead_state)]
   };
   document.querySelectorAll('select[data-options]').forEach(el=>{
     const [items,key,label]=defs[el.dataset.options]||[[],'id',v=>String(v.id)];
     setSelect(el,items,key,label,!!el.dataset.empty);
   });
+  if(state.preferredEventId){
+    const select=document.querySelector('#lead-form select[name="source_event_ref"]');
+    if([...select.options].some(o=>o.value===state.preferredEventId))select.value=state.preferredEventId;
+    state.preferredEventId=null;
+  }
+  if(state.preferredLeadId){
+    const select=document.querySelector('#lead-link-form select[name="lead_id"]');
+    if([...select.options].some(o=>o.value===state.preferredLeadId))select.value=state.preferredLeadId;
+    state.preferredLeadId=null;
+  }
   fillAuditSelect();
 }
 function fillAuditSelect(){
@@ -218,14 +228,16 @@ register('contact-link-form',async d=>{
   return '联系人已关联至指定学生，关系状态仍待核实';
 });
 register('event-form',async d=>{
-  await api('/api/v1/contact-events',{method:'POST',body:{
+  const created=await api('/api/v1/contact-events',{method:'POST',body:{
     contact_id:d.contact_id,event_type:d.event_type,occurred_at:localIso(d.occurred_at)
   }});
-  return '一次真实咨询已登记';
+  state.preferredEventId=created.event_id;
+  return '一次真实咨询已登记，已自动选中本次咨询用于下一步创建线索';
 });
 register('lead-form',async d=>{
-  await api('/api/v1/leads',{method:'POST',body:{source_event_ref:d.source_event_ref}});
-  return '咨询已转为销售线索，未虚构学生身份';
+  const lead=await api('/api/v1/leads',{method:'POST',body:{source_event_ref:d.source_event_ref}});
+  state.preferredLeadId=lead.lead_id;
+  return '咨询已转为销售线索，已选中新线索用于关联学生';
 });
 register('lead-link-form',async d=>{
   await api('/api/v1/leads/'+encodeURIComponent(d.lead_id)+'/students',{method:'POST',body:{
