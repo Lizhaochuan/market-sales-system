@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>市场与销售工作台 · 隔离演示</title>
+<link rel="stylesheet" href="/styles.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div id="login-screen" class="login-screen">
+  <div class="login-panel">
+    <div class="brand-row"><span class="brand-logo">M</span><span>市场与销售系统 <small>独立业务平台</small></span></div>
+    <p class="eyebrow">V3.2-02 · ISOLATED DEMO</p>
+    <h1>登录演示工作台</h1>
+    <p class="muted">这里只使用虚构数据。没有真实客户、正式账号、收款或 CRM 课时操作。</p>
+    <form id="login-form" class="field-stack">
+      <label>选择演示员工
+        <select name="account_code" required>
+          <option value="sales-a">销售顾问 A</option>
+          <option value="sales-b">销售顾问 B</option>
+          <option value="supervisor">销售主管</option>
+        </select>
+      </label>
+      <label>隔离演示访问口令
+        <input name="passphrase" type="password" autocomplete="off" required minlength="32" placeholder="由本地环境管理员设置">
+      </label>
+      <button class="primary full" type="submit">进入工作台</button>
+      <p class="fineprint">演示访问口令必须由运行者在本地配置。正式身份认证尚未实现。</p>
+    </form>
+  </div>
+</div>
+<div id="workspace" class="app-shell" hidden>
+  <aside class="sidebar">
+    <div class="brand-row"><span class="brand-logo">M</span><span>市场与销售系统<small>工作台 · 演示版</small></span></div>
+    <div class="sidebar-group-title">业务管理</div>
+    <nav aria-label="模块导航">
+      <button data-view="overview" class="nav-item active"><span class="nav-glyph">▦</span>工作概览</button>
+      <button data-view="students" class="nav-item"><span class="nav-glyph">◉</span>学生客户</button>
+      <button data-view="contacts" class="nav-item"><span class="nav-glyph">♧</span>家长与联系人</button>
+      <button data-view="leads" class="nav-item"><span class="nav-glyph">✦</span>咨询与线索</button>
+      <button data-view="opportunities" class="nav-item"><span class="nav-glyph">▤</span>销售商机</button>
+      <button data-view="interactions" class="nav-item"><span class="nav-glyph">✎</span>跟进记录</button>
+      <button data-view="families" class="nav-item"><span class="nav-glyph">♢</span>家庭关系核实</button>
+      <button data-view="audit" class="nav-item"><span class="nav-glyph">◷</span>业务变更记录</button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="demo-note"><strong>隔离演示环境</strong><p>当前未连接真实 CRM、正式收款或教学课时。</p></div>
+      <div class="user-row"><span class="avatar" id="avatar">A</span><span><strong id="staff-name">演示员工</strong><small id="staff-role">销售顾问</small></span></div>
+      <button id="logout-button" class="text-button">退出演示账号</button>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div><p class="eyebrow" id="page-eyebrow">业务总览</p><h1 id="page-title">工作概览</h1></div>
+      <div class="topbar-actions"><span class="status-pill"><span class="status-dot"></span>本机测试环境</span><button id="refresh-button" class="secondary" type="button">刷新数据</button></div>
+    </header>
+
+    <section class="view active" data-panel="overview">
+      <div class="welcome"><div><p class="eyebrow">STUDENT-FIRST CRM</p><h2>每位学生独立管理，家庭关系按需关联</h2><p>营销咨询、学生、联系人和销售商机分开记录，避免重复统计。</p></div><span class="welcome-mark" aria-hidden="true">MS</span></div>
+      <div class="stats">
+        <article class="stat-card"><span>我有权查看的学生</span><strong id="stat-students">—</strong><small>按具体学生授权</small></article>
+        <article class="stat-card"><span>可查看的联系人</span><strong id="stat-contacts">—</strong><small>不推断家庭关系</small></article>
+        <article class="stat-card"><span>我的销售线索</span><strong id="stat-leads">—</strong><small>可暂不明确学生</small></article>
+        <article class="stat-card"><span>我的销售商机</span><strong id="stat-opportunities">—</strong><small>一名学生分别计算</small></article>
+      </div>
+      <div class="panel">
+        <div class="panel-header"><h3>当前业务范围</h3><span class="muted">已接入隔离数据库的功能</span></div>
+        <div class="scope-grid">
+          <div><span class="scope-icon">✓</span><strong>客户与线索</strong><p>学生、联系人、咨询和销售商机</p></div>
+          <div><span class="scope-icon">✓</span><strong>负责人权限</strong><p>未经授权不得查看其他学生</p></div>
+          <div><span class="scope-icon">✓</span><strong>中文业务记录</strong><p>显示实际业务含义，不展示源码</p></div>
+        </div>
+      </div>
+      <p class="muted footnote">未启用：真实付款、退款、自动成交、试听排课、CRM 发课时权益。这里显示的数字仅来自虚构演示数据。</p>
+    </section>
+
+    <section class="view" data-panel="students">
+      <div class="section-head"><h2>学生客户</h2><p>每位学生都有自己的负责人和商机，不因共享家长而合并。</p></div>
+      <div class="two-col">
+        <article class="panel">
+          <h3>新建学生档案</h3>
+          <form id="student-form" class="field-stack">
+            <label>学生姓名 <input name="display_name" maxlength="100" placeholder="例如：模拟学生小林" required></label>
+            <label>年级 <input name="grade_label" maxlength="100" placeholder="例如：三年级"></label>
+            <label>学校 <input name="school_name" maxlength="100" placeholder="可不填"></label>
+            <div class="form-hint">学生默认归属当前登录销售；不会自动生成家庭组。</div>
+            <button type="submit" class="primary">保存学生档案</button>
+          </form>
+        </article>
+        <article class="panel">
+          <div class="panel-header"><h3>学生列表</h3><span id="students-total" class="count">0 人</span></div>
+          <div id="students-list" class="record-list"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="view" data-panel="contacts">
+      <div class="section-head"><h2>家长与联系人</h2><p>一位家长可以关联多个孩子，但每个孩子的销售资料仍然独立。</p></div>
+      <div class="two-col">
+        <article class="panel">
+          <h3>新增联系人</h3>
+          <form id="contact-form" class="field-stack">
+            <label>联系人称呼 <input name="display_name" maxlength="100" required placeholder="例如：模拟李家长"></label>
+            <label class="check"><input type="checkbox" name="do_not_contact"> 标记为不接受主动联系</label>
+            <div class="form-hint">本演示版不采集手机号码或微信号，避免未经批准保存敏感资料。</div>
+            <button class="primary" type="submit">保存联系人</button>
+          </form>
+        </article>
+        <article class="panel">
+          <h3>将联系人关联至学生</h3>
+          <form id="contact-link-form" class="field-stack">
+            <label>选择学生 <select name="student_id" data-options="students" required></select></label>
+            <label>选择联系人 <select name="contact_id" data-options="contacts" required></select></label>
+            <label>与学生的关系 <select name="relation_type"><option value="父亲">父亲</option><option value="母亲">母亲</option><option value="其他监护人">其他监护人</option><option value="其他联系人">其他联系人</option></select></label>
+            <div class="form-hint">关系先记录为“待核实”，不会据此自动认定兄弟姐妹。</div>
+            <button class="primary" type="submit">关联至该学生</button>
+          </form>
+        </article>
+      </div>
+      <article class="panel space-top"><div class="panel-header"><h3>联系人列表</h3><span id="contacts-total" class="count">0 人</span></div><div id="contacts-list" class="record-list"></div></article>
+    </section>
+
+    <section class="view" data-panel="leads">
+      <div class="section-head"><h2>咨询与销售线索</h2><p>先记录一次真实咨询，再形成线索；还不知道学生是谁时也可以登记。</p></div>
+      <div class="two-col">
+        <article class="panel">
+          <h3>第一步 · 记录真实咨询</h3>
+          <form id="event-form" class="field-stack">
+            <label>关联联系人 <select name="contact_id" data-options="contacts" required></select></label>
+            <label>咨询方式 <select name="event_type"><option value="电话咨询">电话咨询</option><option value="到店咨询">到店咨询</option><option value="微信咨询">微信咨询</option><option value="线上咨询">线上咨询</option></select></label>
+            <label>实际发生时间 <input name="occurred_at" type="datetime-local" required></label>
+            <button class="primary" type="submit">保存本次咨询</button>
+          </form>
+        </article>
+        <article class="panel">
+          <h3>第二步 · 转为销售线索</h3>
+          <form id="lead-form" class="field-stack">
+            <label>选择已记录的咨询 <select name="source_event_ref" data-options="events" required></select></label>
+            <p class="form-hint">不要求立即确认学生，避免凭家长手机号创建虚假客户。</p>
+            <button class="primary" type="submit">创建销售线索</button>
+          </form>
+          <hr>
+          <h3>关联线索与具体学生</h3>
+          <form id="lead-link-form" class="field-stack">
+            <label>选择线索 <select name="lead_id" data-options="leads" required></select></label>
+            <label>选择已确认涉及的学生 <select name="student_id" data-options="students" required></select></label>
+            <label>确认依据说明 <input name="evidence_ref" maxlength="100" required placeholder="例如：家长口头确认记录"></label>
+            <button class="secondary" type="submit">关联学生（待核实）</button>
+          </form>
+        </article>
+      </div>
+      <article class="panel space-top"><div class="panel-header"><h3>销售线索</h3><span id="leads-total" class="count">0 条</span></div><div id="leads-list" class="record-list"></div></article>
+    </section>
+
+    <section class="view" data-panel="opportunities">
+      <div class="section-head"><h2>销售商机</h2><p>每条商机必须对应一名学生，并保留各自的销售负责人。</p></div>
+      <div class="two-col">
+        <article class="panel">
+          <h3>新建销售商机</h3>
+          <form id="opportunity-form" class="field-stack">
+            <label>关联学生 <select name="student_id" data-options="students" required></select></label>
+            <label>预计金额（元） <input name="predicted_yuan" type="text" inputmode="decimal" placeholder="例如：6000.00"></label>
+            <p class="form-hint">预计金额仅用于销售预测，不代表实际收款或成交。</p>
+            <button class="primary" type="submit">创建销售商机</button>
+          </form>
+        </article>
+        <article class="panel"><div class="panel-header"><h3>商机列表</h3><span id="opportunities-total" class="count">0 条</span></div><div id="opportunities-list" class="record-list"></div></article>
+      </div>
+    </section>
+
+    <section class="view" data-panel="interactions">
+      <div class="section-head"><h2>销售跟进记录</h2><p>一通电话只登记一次；如涉及两个学生，可同时关联而不重复计算沟通次数。</p></div>
+      <article class="panel form-wide">
+        <h3>登记一次真实跟进</h3>
+        <form id="interaction-form" class="field-stack">
+          <div class="form-grid">
+            <label>涉及学生 <select name="student_id" data-options="students" required></select></label>
+            <label>可选：另一名学生 <select name="other_student_id" data-options="students" data-empty="不关联第二名学生"></select></label>
+            <label>沟通方式 <select name="contact_method"><option value="电话">电话</option><option value="微信">微信</option><option value="面谈">面谈</option><option value="其他">其他</option></select></label>
+            <label>沟通时间 <input name="occurred_at" type="datetime-local" required></label>
+          </div>
+          <label>沟通摘要 <textarea name="summary" maxlength="2000" rows="4" required placeholder="用业务语言记录客户需求和下一步安排"></textarea></label>
+          <button class="primary" type="submit">保存一次跟进记录</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="view" data-panel="families">
+      <div class="section-head"><h2>家庭关系核实</h2><p>至少两名学生、明确核实依据。演示版只提交待核实申请，不自动确认亲属关系。</p></div>
+      <div class="two-col">
+        <article class="panel">
+          <h3>提交家庭关联申请</h3>
+          <form id="family-form" class="field-stack">
+            <label>家庭显示名称 <input name="display_name" maxlength="120" required placeholder="例如：模拟王家"></label>
+            <label>第一名学生 <select name="student_a" data-options="students" required></select></label>
+            <label>第二名学生 <select name="student_b" data-options="students" required></select></label>
+            <label>核实依据说明 <input name="verification_evidence_ref" maxlength="200" required placeholder="例如：待核验的亲属关系说明"></label>
+            <p class="form-hint">只有销售主管可提交；审批与最终确认功能尚未启用。</p>
+            <button class="primary" type="submit">提交核实申请</button>
+          </form>
+        </article>
+        <article class="panel"><div class="panel-header"><h3>待核实家庭关联</h3><span id="families-total" class="count">0 条</span></div><div id="families-list" class="record-list"></div></article>
+      </div>
+    </section>
+
+    <section class="view" data-panel="audit">
+      <div class="section-head"><h2>业务变更记录</h2><p>用具体中文说明发生了什么、涉及谁和什么内容，不直接展示程序代码。</p></div>
+      <article class="panel form-wide">
+        <form id="audit-form" class="inline-form">
+          <label>业务对象类型 <select name="object_type" id="audit-type"><option value="student">学生客户</option><option value="lead">销售线索</option><option value="opportunity">销售商机</option></select></label>
+          <label>具体对象 <select name="object_id" id="audit-object" required></select></label>
+          <button class="primary" type="submit">查看记录</button>
+        </form>
+        <div id="audit-list" class="audit-list"></div>
+      </article>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
