@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],preferredEventId:null,preferredLeadId:null};
+const state={token:null,user:null,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -15,7 +15,7 @@ function toast(message,error=false){
 function labelStatus(value) {
   return ({
     unidentified:'未识别具体学生',new:'新建',working:'跟进中',converted:'已转化',
-    pending:'待核实',verified:'已核实',active:'有效',
+    pending:'待核实',verified:'已核实',rejected:'已驳回',active:'有效',
     unverified:'待核实',draft:'草稿',closed:'已关闭',lost:'已失单',
     paused:'暂停',won:'已成交',open:'跟进中'
   })[value]||'待处理';
@@ -77,6 +77,9 @@ function fillOptions(){
     if([...select.options].some(o=>o.value===state.preferredLeadId))select.value=state.preferredLeadId;
     state.preferredLeadId=null;
   }
+  setSelect($('family-review-select'),
+    state.families.filter(v=>v.verification_state==='pending'), 
+    'family_group_id',v=>v.display_name+'（申请人：'+(v.requested_by_name||'待核实')+'）');
   fillAuditSelect();
 }
 function fillAuditSelect(){
@@ -84,7 +87,8 @@ function fillAuditSelect(){
   const map={
     student:[state.students,'student_id',v=>v.display_name],
     lead:[state.leads,'lead_id',v=>'咨询线索 · '+(v.contact_display_name||'未指定联系人')],
-    opportunity:[state.opportunities,'opportunity_id',v=>v.student_display_name+'的销售商机']
+    opportunity:[state.opportunities,'opportunity_id',v=>v.student_display_name+'的销售商机'],
+    family:[state.families,'family_group_id',v=>v.display_name+' · '+labelStatus(v.verification_state)]
   };
   const [arr,key,label]=map[ty];
   setSelect($('audit-object'),arr,key,label);
@@ -127,8 +131,22 @@ function render(){
     '负责人：'+(x.owner_display_name||'待确认')+' · 预计金额：'+yuan(x.predicted_amount_cents),
     labelStatus(x.lifecycle_state),'商'));
   paint('families-list',state.families,x=>record(
-    x.display_name,'关联学生：'+x.student_count+' 名 · 尚未完成亲属核验',
+    x.display_name,'关联学生：'+x.student_count+' 名 · 申请人：'+
+      (x.requested_by_name||'原申请待查')+
+      (x.verified_by_name?' · 审核人：'+x.verified_by_name:''),
     labelStatus(x.verification_state),'家'));
+  const familyCanReview=state.capabilities.decide_other_person_family_review===true;
+  const form=$('family-decision-form');
+  form.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=!familyCanReview);
+  const familyForm=$('family-form');
+  familyForm.querySelectorAll('input,select,button').forEach(el=>
+    el.disabled!==!(state.capabilities.propose_family_review===true));
+  // The submitter is never allowed to review their own request.
+  const pending=state.families.filter(v=>v.verification_state==='pending');
+  const selected=pending.find(v=>v.family_group_id===$('family-review-select').value);
+  if(selected&&selected.requested_by===state.user?.staff_id){
+    form.querySelector('button[type="submit"]').disabled=true;
+  }
   fillOptions();
 }
 async function api(path,{method='GET',body=null,token=state.token}={}){
@@ -155,7 +173,7 @@ async function refresh(){
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     state[key]=r.status==='fulfilled'?r.value.items||[]:[];
-    if(r.status==='rejected'&&!((key==='families')&&state.user.account_code!=='supervisor')){
+    if(r.status==='rejected'&&!((key==='families')&&!state.capabilities.review_family_audit)){
       toast('部分业务列表未能读取，请检查账号权限或数据库状态',true);
     }
   }
@@ -171,7 +189,7 @@ function setView(view){
   if(view==='audit')$('audit-list').replaceChildren();
 }
 function logout(notice=true){
-  state.token=null;state.user=null;
+  state.token=null;state.user=null;state.capabilities={};
   for(const key of ['students','contacts','events','leads','opportunities','families'])state[key]=[];
   $('workspace').hidden=true;$('login-screen').hidden=false;
   $('login-form').reset();$('audit-list').replaceChildren();
@@ -200,7 +218,10 @@ register('login-form',async data=>{
   });
   const payload=await res.json();
   if(!res.ok||payload.code!=='OK')throw Error(payload.message||'演示登录失败');
-  state.token=payload.data.token;state.user=payload.data;
+  state.token=payload.data.token;
+  const profile=await api('/api/v1/me');
+  state.user={...payload.data,...profile};
+  state.capabilities=profile.capabilities||{};
   $('staff-name').textContent=payload.data.display_name;
   $('staff-role').textContent=payload.data.role_label;
   $('avatar').textContent=payload.data.display_name.slice(0,1);
@@ -267,6 +288,19 @@ register('family-form',async d=>{
     verification_evidence_ref:d.verification_evidence_ref
   }});
   return r.verification_state==='pending'?'已提交家庭关系核实申请，尚未认定为已核实家庭':'申请状态待核实';
+});
+register('family-decision-form',async d=>{
+  if(!state.capabilities.decide_other_person_family_review)
+    throw Error('当前账号没有家庭关系审核权限');
+  const item=state.families.find(x=>x.family_group_id===d.family_group_id);
+  if(!item)throw Error('请选择待核实的家庭申请');
+  if(item.requested_by===state.user.staff_id)throw Error('申请人不能审批自己的家庭关系申请');
+  const result=await api('/api/v1/family-groups/'+encodeURIComponent(d.family_group_id)+'/decision',{
+    method:'POST',body:{
+      decision:d.decision,review_evidence_ref:d.review_evidence_ref,reason_zh:d.reason_zh
+    }
+  });
+  return '独立审核已保存：'+labelStatus(result.verification_state)+'；审核记录可在业务变更记录中查看';
 });
 register('audit-form',async d=>{
   const r=await api('/api/v1/audit?object_type='+encodeURIComponent(d.object_type)+
