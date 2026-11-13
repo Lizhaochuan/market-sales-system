@@ -44,7 +44,8 @@ export async function assertScopedReadPool(pool){
   const x=r.rows[0];
   if(!x||x.login!==x.original_login||x.rolsuper||x.rolbypassrls||
     x.rolcreatedb||x.rolcreaterole||x.raw_students||x.raw_contacts||
-    x.raw_identity||x.finance||!x.contacts_view||!x.check_identity)
+    x.raw_identity||x.finance||!x.contacts_view||!x.check_identity||
+    !x.scoped_staff_id||!x.scoped_organization_id)
     throw new Error('Employee scoped read API refuses elevated or unscoped DB LOGIN');
   return {employee_db_login:x.login,restricted:true};
 }
