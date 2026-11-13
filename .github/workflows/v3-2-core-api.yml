@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance]
   workflow_dispatch:
 
 permissions:
@@ -33,6 +33,8 @@ jobs:
       AUTH_ISSUER: market-sales-test-issuer
       DEV_LOGIN_SECRET: fictional-strong-ui-demo-passphrase-0001
       PGPASSWORD: isolated_test_only_password
+      RUNTIME_TEST_PASSWORD: fictional_ci_runtime_2026_9f36a672
+      DATABASE_URL_RESTRICTED: postgresql://ms_isolated_api:fictional_ci_runtime_2026_9f36a672@127.0.0.1:5432/ms_test
       PGHOST: localhost
       PGPORT: '5432'
       PGDATABASE: ms_test
@@ -56,9 +58,17 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/006_identity_family_review.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/007_identity_change_governance.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/008_lowrisk_runtime_permissions.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/009_isolated_tenant_rls.sql
           psql -X -v ON_ERROR_STOP=1 -f tests/fixtures/fictional_ui_demo_seed.sql
+      - name: Create isolated nonowner PostgreSQL application LOGIN
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -v "app_password=$RUNTIME_TEST_PASSWORD" -f tests/sql/create_isolated_runtime_login.sql
       - name: Restricted runtime role and forbidden finance operations
         run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/lowrisk_runtime_permissions.smoke.sql
+      - name: Restricted actual LOGIN and tenant row-level security E2E
+        run: |
+          node --test tests/security/isolated-login-tenant-rls.test.mjs
+          MS_REQUIRE_RESTRICTED_DB=1 DATABASE_URL="$DATABASE_URL_RESTRICTED" node --input-type=module -e "import pg from 'pg'; import {assertRestrictedRuntime} from './src/runtime-preflight.mjs'; const p=new pg.Pool({connectionString:process.env.DATABASE_URL}); await assertRestrictedRuntime(p); await p.end();"
       - name: Check frontend JavaScript syntax
         run: |
           node --check web/app.js
