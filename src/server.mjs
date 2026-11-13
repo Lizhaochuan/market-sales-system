@@ -1,6 +1,7 @@
 // V3.2-01: isolated-test-only process. NEVER expose on the public Internet.
 import pg from 'pg';
 import { createApp } from './app.mjs';
+import { assertRestrictedRuntime } from './runtime-preflight.mjs';
 
 if(process.env.MS_STAGE!=='isolated-test'){
   throw new Error('This backend is test-only. Production identity provider and tenant authorization are not ready.');
@@ -9,6 +10,10 @@ const secret=process.env.AUTH_HMAC_SECRET;
 if(!secret||secret.length<32)throw new Error('Set a strong isolated-test-only AUTH_HMAC_SECRET');
 if(!process.env.DATABASE_URL)throw new Error('DATABASE_URL required');
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:8});
+// A strict opt-in for isolated role rehearsals: reject owner, BYPASSRLS,
+// finance-capable and schema-owner credentials BEFORE starting HTTP service.
+if(process.env.MS_REQUIRE_RESTRICTED_DB==='1')
+  await assertRestrictedRuntime(pool);
 // This adapter verifies external OIDC access-token signatures, but is not a
 // production identity deployment. Configuration must be supplied as one unit.
 const oidcVars=['OIDC_ISSUER','OIDC_AUDIENCE','OIDC_JWKS_JSON'];
