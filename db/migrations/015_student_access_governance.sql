@@ -364,6 +364,30 @@ REVOKE ALL ON FUNCTION ms.list_student_access_requests() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION ms.list_student_access_requests()
   TO ms_student_access_operator;
 
+-- Grant identifiers are disclosed only to the student owner or grantee so
+-- those staff can revoke one specific share. No sibling/family proof exposed.
+CREATE FUNCTION ms.list_student_share_grants()
+RETURNS TABLE(
+ grant_id uuid,student_name text,grantee_name text,status_zh text,
+ expires_at timestamptz,granted_at timestamptz)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,ms
+AS $grants$
+ SELECT g.id,s.display_name,u.display_name,
+   CASE WHEN g.revoked_at IS NOT NULL THEN '已撤销'
+     WHEN g.expires_at IS NOT NULL AND g.expires_at<=now() THEN '已到期'
+     ELSE '有效' END, g.expires_at,r.created_at
+ FROM ms.data_scope_grants g
+ JOIN ms.students s ON s.id=g.scope_ref AND s.archived_at IS NULL
+ JOIN ms.staff_users u ON u.id=g.user_id
+ JOIN ms.student_access_requests r ON r.id=g.access_request_id
+ JOIN ms.access_actor() a ON a.org_id=s.organization_id
+ WHERE g.resource_type='student' AND g.scope_type='specific'
+   AND (s.owner_user_id=a.staff_id OR g.user_id=a.staff_id)
+ ORDER BY r.created_at DESC,g.id LIMIT 100
+$grants$;
+REVOKE ALL ON FUNCTION ms.list_student_share_grants() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION ms.list_student_share_grants() TO ms_student_access_operator;
+
 -- Alter existing view in-place without dropping dependent views. Expiry is
 -- independently checked in the DB for every student read.
 CREATE OR REPLACE VIEW ms.student_directory_assigned
