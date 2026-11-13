@@ -133,13 +133,13 @@ export async function identityOperation(c,ctx,op,pathArgs,body) {
       if(body.decision==='approved') {
         if(x.action==='bind'){
           await c.query(
-            "INSERT INTO ms.staff_identity_bindings(staff_user_id,issuer,subject,bound_by)"+
-            " VALUES($1,$2,$3,$4)",[x.target_staff_id,x.issuer,x.subject,actor]);
+            "INSERT INTO ms.staff_identity_bindings(staff_user_id,issuer,subject,bound_by,approval_request_id)"+
+            " VALUES($1,$2,$3,$4,$5)",[x.target_staff_id,x.issuer,x.subject,actor,requestId]);
         }else{
           const changed=await c.query(
-            "UPDATE ms.staff_identity_bindings SET revoked_at=now() "+
+            "UPDATE ms.staff_identity_bindings SET revoked_at=now(),revocation_request_id=$3 "+
             "WHERE id=$1 AND staff_user_id=$2 AND revoked_at IS NULL RETURNING id",
-            [x.existing_binding_id,x.target_staff_id]);
+            [x.existing_binding_id,x.target_staff_id,requestId]);
           if(!changed.rowCount)
             fail(409,'BINDING_CHANGED','原外部身份关联已经变化，无法执行旧撤销');
         }
