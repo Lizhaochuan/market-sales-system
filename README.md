@@ -103,6 +103,18 @@ PR #7 基于 V3.2-02 PR #6，且依赖 #5 和 #4；在依赖审核和基线明�
 
 服务仍强制 `MS_STAGE=isolated-test` 与本机回环地址，收款、自动成交、退款和 CRM 实际课时操作继续关闭。PR #9 依赖 #8，且原有 CRM 数据、代码及技术文档均未修改。
 
+## V3.2-06 可信数据库机构身份与 24 张表行级隔离（草稿 PR #10）
+
+此前以普通 `ms.tenant_org` 会话参数选择机构的设计存在被 SQL 修改的风险。本阶段将隔离依据改为**受迁移管理员保护的数据库原始登录身份 `session_user` 与机构一对一绑定**。当前低权限角色能够访问的 24 张业务表均加入机构行级政策；两个虚构机构分别使用自己的非管理员数据库 LOGIN 和本机 HTTP 实例接受测试。
+
+- [V3.2-06 核心安全方案、完整 24 表覆盖和上线阻断](docs/V3.2-06_DATABASE_PRINCIPAL_TENANT_BOUNDARY.md)
+- [010 可信机构映射与 RLS 迁移](db/migrations/010_database_principal_tenant_boundary.sql)
+- [第二机构与独立数据库账号的 CI 测试数据](tests/sql/create_second_tenant_principal.sql)
+- [真实双数据库 LOGIN 的跨机构、关联表、伪造会话参数测试](tests/security/isolated-login-tenant-rls.test.mjs)
+- [更新后的受限账号启动安全检查](src/runtime-preflight.mjs)
+
+**生产仍未允许：** 正式 OIDC 身份、受控连接池动态路由、机构内部按员工权限进一步限制字段和记录、完整运维部署、付款与 CRM 发课均未完成。PR #10 基于 #9，仍为 Draft，且不修改现有 CRM 项目或技术文档。完成实际跨系统集成和联合验收后才融合两套说明。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
