@@ -182,7 +182,8 @@ test('V3.2-09: five actual scoped HTTP read endpoints isolate staff, fields and 
       const bOpp=await get(apps[1],paths.opportunities,tokenB);
       assert.ok(bStudents.some(x=>x.student_id===studentA));
       assert.ok(bContacts.some(x=>x.contact_id===contactA));
-      assert.ok(bEvents.some(x=>x.event_id===eventA));
+      assert.ok(!bEvents.some(x=>x.event_id===eventA),
+        'A consultation may concern another child using the same parent');
       assert.ok(!bLeads.some(x=>x.lead_id===leadA));
       assert.ok(!bOpp.some(x=>x.opportunity_id===oppA));
     });
