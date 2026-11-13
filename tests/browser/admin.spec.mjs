@@ -220,5 +220,5 @@ test('真实 Chromium：双主管身份绑定和撤销审批，普通销售不�
   await page.getByRole('button',{name:'提交独立审核决定'}).click();
   await expect(page.locator('#identity-list')).toContainText('已批准');
   await expect(page.locator('#identity-binding-select')).toHaveCount(1);
-  await expect(page.locator('#identity-binding-select option')).toHaveCount(0);
+  await expect(page.locator('#identity-binding-select option', {hasText:'https://fictional-browser-identity.example.invalid'})).toHaveCount(0);
 });

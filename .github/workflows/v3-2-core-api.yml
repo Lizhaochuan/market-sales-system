@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing]
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,9 @@ jobs:
       PGPASSWORD: isolated_test_only_password
       RUNTIME_TEST_PASSWORD: fictional_ci_runtime_2026_9f36a672
       RUNTIME_TEST_PASSWORD_B: fictional_ci_runtime_b_2026_3b81cf20
+      DATABASE_URL_ROUTE_DIRECTORY: postgresql://ms_approved_route_login:fictional_approved_route_2026_8136bc@127.0.0.1:5432/ms_test
+      DATABASE_URL_ASSIGNEE_A: postgresql://ms_assignee_reader_a:fictional_assignee_a_2026_74e5a9@127.0.0.1:5432/ms_test
+      DATABASE_URL_ASSIGNEE_B: postgresql://ms_assignee_reader_b:fictional_assignee_b_2026_129b6e@127.0.0.1:5432/ms_test
       DATABASE_URL_DIRECTORY_A: postgresql://ms_directory_reader_a:fictional_viewonly_a_2026_d2ea45@127.0.0.1:5432/ms_test
       DATABASE_URL_DIRECTORY_B: postgresql://ms_directory_reader_b:fictional_viewonly_b_2026_c72180@127.0.0.1:5432/ms_test
       DATABASE_URL_RESTRICTED: postgresql://ms_isolated_api:fictional_ci_runtime_2026_9f36a672@127.0.0.1:5432/ms_test
@@ -72,6 +75,8 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/010_database_principal_tenant_boundary.sql
           psql -X -v ON_ERROR_STOP=1 -v "app_password_b=$RUNTIME_TEST_PASSWORD_B" -f tests/sql/create_second_tenant_principal.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/011_student_directory_read_projection.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/012_approved_identity_directory_staff_projection.sql
+          psql -X -v ON_ERROR_STOP=1             -v "route_password=fictional_approved_route_2026_8136bc"             -v "assignee_password_a=fictional_assignee_a_2026_74e5a9"             -v "assignee_password_b=fictional_assignee_b_2026_129b6e"             -f tests/sql/create_v3_2_08_readonly_principals.sql
           psql -X -v ON_ERROR_STOP=1             -v "reader_password_a=fictional_viewonly_a_2026_d2ea45"             -v "reader_password_b=fictional_viewonly_b_2026_c72180"             -f tests/sql/create_directory_projection_readers.sql
       - name: Restricted runtime role and forbidden finance operations
         run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/lowrisk_runtime_permissions.smoke.sql
@@ -84,7 +89,7 @@ jobs:
           node --check web/app.js
           node --check web/identity.js
       - name: Core API, authorization, idempotency and Chinese audit E2E
-        run: node --test tests/core/*.test.mjs tests/ui/*.test.mjs tests/security/*.test.mjs
+        run: node --test --test-concurrency=1 tests/core/*.test.mjs tests/ui/*.test.mjs tests/security/*.test.mjs
       - name: Real headless Chromium workflow and responsive UI
         run: npx playwright test
       - name: Upload isolated browser evidence

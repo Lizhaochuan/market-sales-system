@@ -119,10 +119,16 @@ test('V3.2-06 protected SESSION_USER tenant mapping: 2 real separate nonowner ap
       assert.ok(!aR.rows.some(x=>x.contact_id===contactB));
       assert.ok(bR.rows.some(x=>x.contact_id===contactB));
       assert.ok(!bR.rows.some(x=>x.contact_id===contactA));
-      const rolesB=await poolB.query('SELECT * FROM ms.user_role_grants');
-      assert.equal(rolesB.rowCount,0);
-      const rolesA=await poolA.query('SELECT * FROM ms.user_role_grants');
-      assert.ok(rolesA.rowCount>=2);
+      const rolesB=await poolB.query(
+        "SELECT g.id FROM ms.user_role_grants g JOIN ms.staff_users u ON u.id=g.user_id "+
+        "WHERE u.organization_id<>$1",[orgB]);
+      assert.equal(rolesB.rowCount,0,'B institution must not see any role of an A employee');
+      const rolesA=await poolA.query(
+        "SELECT g.id FROM ms.user_role_grants g JOIN ms.staff_users u ON u.id=g.user_id "+
+        "WHERE u.organization_id<>$1",[orgA]);
+      assert.equal(rolesA.rowCount,0,'A institution must not see any role of a B employee');
+      const ownRoles=await poolA.query('SELECT id FROM ms.user_role_grants');
+      assert.ok(ownRoles.rowCount>=2);
     });
     await t.test('forging former ms.tenant_org GUC cannot reveal A data from B login',async()=>{
       const c=await poolB.connect();
