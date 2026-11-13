@@ -18,6 +18,23 @@ REVOKE ALL ON FUNCTION ms.current_scoped_staff_id() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION ms.current_scoped_staff_id()
   TO ms_student_assignee_reader;
 
+-- A staff-scoped LOGIN is NOT automatically enrolled in the previous
+-- organization runtime LOGIN mapping. Resolve its organization through the
+-- separate protected employee mapping, never through current_database_tenant.
+CREATE FUNCTION ms.current_scoped_organization_id() RETURNS uuid
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, ms
+AS $employee_org$
+ SELECT p.organization_id FROM ms.database_principal_staff p
+ JOIN ms.staff_users s ON s.id=p.staff_user_id
+ JOIN ms.organizations o ON o.id=p.organization_id
+ WHERE p.principal_name=session_user::name AND p.organization_id=s.organization_id
+   AND s.status='active' AND o.status='active' LIMIT 1
+$employee_org$;
+REVOKE ALL ON FUNCTION ms.current_scoped_organization_id() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION ms.current_scoped_organization_id()
+  TO ms_student_assignee_reader;
+
 -- Every HTTP read validates the actual signed external identity AGAINST
 -- this exact fixed database principal, NOT org_id, role or staff_id claims.
 CREATE FUNCTION ms.scoped_employee_identity_valid(p_issuer text,p_subject text)
@@ -51,7 +68,7 @@ CREATE VIEW ms.scoped_contacts_directory
 WITH (security_barrier=true) AS
 SELECT c.id AS contact_id,c.display_name,c.do_not_contact
 FROM ms.contacts c
-WHERE c.organization_id=ms.current_database_tenant() AND c.archived_at IS NULL
+WHERE c.organization_id=ms.current_scoped_organization_id() AND c.archived_at IS NULL
   AND ms.current_scoped_staff_id() IS NOT NULL
   AND (
     c.created_by=ms.current_scoped_staff_id()
@@ -70,7 +87,7 @@ CREATE VIEW ms.scoped_contact_events_directory
 WITH (security_barrier=true) AS
 SELECT e.id AS event_id,e.event_type,e.occurred_at
 FROM ms.contact_events e
-WHERE e.organization_id=ms.current_database_tenant()
+WHERE e.organization_id=ms.current_scoped_organization_id()
   AND ms.current_scoped_staff_id() IS NOT NULL
   AND e.recorded_by=ms.current_scoped_staff_id();
 -- A shared contact may represent several different students. Contact-level
@@ -80,7 +97,7 @@ CREATE VIEW ms.scoped_leads_directory
 WITH (security_barrier=true) AS
 SELECT l.id AS lead_id,l.lead_state,l.created_at
 FROM ms.leads l
-WHERE l.organization_id=ms.current_database_tenant()
+WHERE l.organization_id=ms.current_scoped_organization_id()
   AND ms.current_scoped_staff_id() IS NOT NULL
   AND l.owner_user_id=ms.current_scoped_staff_id();
 
@@ -89,7 +106,7 @@ WITH (security_barrier=true) AS
 SELECT o.id AS opportunity_id,o.student_id,o.stage,o.lifecycle_state
 FROM ms.opportunities o
 JOIN ms.student_directory_assigned s ON s.student_id=o.student_id
-WHERE s.organization_id=ms.current_database_tenant()
+WHERE s.organization_id=ms.current_scoped_organization_id()
   AND ms.current_scoped_staff_id() IS NOT NULL
   AND o.owner_user_id=ms.current_scoped_staff_id();
 
