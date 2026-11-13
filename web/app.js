@@ -140,7 +140,7 @@ function render(){
   form.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=!familyCanReview);
   const familyForm=$('family-form');
   familyForm.querySelectorAll('input,select,button').forEach(el=>
-    el.disabled!==!(state.capabilities.propose_family_review===true));
+    el.disabled=!(state.capabilities.propose_family_review===true));
   // The submitter is never allowed to review their own request.
   const pending=state.families.filter(v=>v.verification_state==='pending');
   const selected=pending.find(v=>v.family_group_id===$('family-review-select').value);
@@ -317,6 +317,12 @@ register('audit-form',async d=>{
   return '已展示当前业务对象的变更历史';
 });
 document.querySelectorAll('button[data-view]').forEach(x=>x.addEventListener('click',()=>setView(x.dataset.view)));
+$('family-review-select').addEventListener('change',()=>{
+  const chosen=state.families.find(x=>x.family_group_id===$('family-review-select').value);
+  $('family-decision-form').querySelector('button[type="submit"]').disabled=
+    !state.capabilities.decide_other_person_family_review||
+    !chosen||chosen.verification_state!=='pending'||chosen.requested_by===state.user?.staff_id;
+});
 $('audit-type').addEventListener('change',fillAuditSelect);
 $('refresh-button').addEventListener('click',()=>refresh().then(()=>toast('当前权限范围内的数据已刷新')).catch(e=>toast(e.message,true)));
 $('logout-button').addEventListener('click',()=>logout());
