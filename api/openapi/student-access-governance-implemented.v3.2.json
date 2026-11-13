@@ -1,0 +1,281 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "V3.2-11 Student Access Governance (Isolated Only)",
+    "version": "3.2.11-isolated",
+    "description": "Student-centered low-risk permission changes: temporary share and owner transfer require independent manager approval; limited share revocation may execute automatically. No real finance or CRM writes."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3300",
+      "description": "仅供本机虚构数据测试"
+    }
+  ],
+  "paths": {
+    "/api/v1/student-access/requests": {
+      "get": {
+        "operationId": "listStudentAccessRequestsIsolated",
+        "summary": "查询本人申请及主管可审核的学生授权",
+        "responses": {
+          "200": {
+            "description": "中文业务状态、学生姓名、接收员工及到期日；不返回原始证据"
+          }
+        },
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "x-isolated-test-only": true
+      },
+      "post": {
+        "operationId": "requestStudentAccessIsolated",
+        "summary": "申请临时共享学生或转交学生负责人（申请时不生效）",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "student_id",
+                  "target_staff_id",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "share",
+                      "transfer"
+                    ]
+                  },
+                  "student_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "target_staff_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "仅临时共享必填，最多30天"
+                  },
+                  "evidence_ref": {
+                    "type": "string"
+                  },
+                  "reason_zh": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已登记待独立审核；不代表实际生效"
+          },
+          "403": {
+            "description": "当前员工不是学生负责人"
+          },
+          "409": {
+            "description": "防重编号冲突或已有待审申请"
+          }
+        },
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "x-isolated-test-only": true
+      }
+    },
+    "/api/v1/student-access/requests/{requestId}/decision": {
+      "post": {
+        "operationId": "decideStudentAccessIsolated",
+        "summary": "另一位有效主管独立批准或驳回共享/转交",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "decision",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "rejected"
+                    ]
+                  },
+                  "evidence_ref": {
+                    "type": "string"
+                  },
+                  "reason_zh": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "审核完成，批准后单学生授权或负责人变更才生效"
+          },
+          "403": {
+            "description": "审核人不是有效独立主管或存在自批"
+          },
+          "409": {
+            "description": "重复审核或防重编号冲突"
+          }
+        },
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "x-isolated-test-only": true
+      }
+    },
+    "/api/v1/student-access/grants": {
+      "get": {
+        "operationId": "listStudentAccessGrantsIsolated",
+        "summary": "查询本人负责或获授权学生的共享状态与到期时间",
+        "responses": {
+          "200": {
+            "description": "显示学生、被授权员工、有效/到期/撤销状态及授权编号"
+          }
+        },
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "x-isolated-test-only": true
+      }
+    },
+    "/api/v1/student-access/grants/{grantId}/revoke": {
+      "post": {
+        "operationId": "revokeStudentAccessIsolated",
+        "summary": "学生负责人或被授权员工即时撤销单项查看共享",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "grantId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "reason_zh"
+                ],
+                "properties": {
+                  "reason_zh": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已撤销并永久留存不可变审核事实"
+          },
+          "403": {
+            "description": "不是该学生当前负责人或被授权人"
+          },
+          "409": {
+            "description": "重复撤销或防重编号冲突"
+          }
+        },
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "x-isolated-test-only": true
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "signedStaffBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Only service-trusted RS256 employee identity; database staff binding independently checked."
+      }
+    }
+  },
+  "x-production-ready": false,
+  "x-trusted-idp-connected": false,
+  "x-payment-writes-enabled": false,
+  "x-real-crm-entitlement-enabled": false
+}

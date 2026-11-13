@@ -112,7 +112,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
         "($2::boolean OR s.owner_user_id=$3 OR EXISTS ("+
         "SELECT 1 FROM ms.data_scope_grants g WHERE g.user_id=$3 "+
         "AND g.resource_type='student' AND g.scope_type='specific' "+
-        "AND g.scope_ref=s.id AND g.revoked_at IS NULL)) "+
+        "AND g.scope_ref=s.id AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now()))) "+
         "ORDER BY s.created_at DESC,s.id LIMIT 100",
         [org,ctx.manager,actor]);
       return {items:r.rows};
@@ -130,7 +130,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
         "AND (s.owner_user_id=$3 OR EXISTS ("+
         "SELECT 1 FROM ms.data_scope_grants g WHERE g.user_id=$3 "+
         "AND g.resource_type='student' AND g.scope_type='specific' "+
-        "AND g.scope_ref=s.id AND g.revoked_at IS NULL)))) "+
+        "AND g.scope_ref=s.id AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now()))))) "+
         "ORDER BY c.created_at DESC,c.id LIMIT 100",
         [org,ctx.manager,actor]);
       return {items:r.rows};
