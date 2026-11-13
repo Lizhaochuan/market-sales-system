@@ -1,12 +1,12 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
   opportunities:['销售管理','销售商机'],interactions:['客户沟通','跟进记录'],
-  families:['客户管理','家庭关系核实'],audit:['操作历史','业务变更记录']
+  families:['客户管理','家庭关系核实'],audit:['操作历史','业务变更记录'],identity:['访问安全','员工身份审批']
 };
 function toast(message,error=false){
   const el=$('toast');el.textContent=message;el.classList.toggle('error',error);el.hidden=false;
@@ -88,7 +88,8 @@ function fillAuditSelect(){
     student:[state.students,'student_id',v=>v.display_name],
     lead:[state.leads,'lead_id',v=>'咨询线索 · '+(v.contact_display_name||'未指定联系人')],
     opportunity:[state.opportunities,'opportunity_id',v=>v.student_display_name+'的销售商机'],
-    family:[state.families,'family_group_id',v=>v.display_name+' · '+labelStatus(v.verification_state)]
+    family:[state.families,'family_group_id',v=>v.display_name+' · '+labelStatus(v.verification_state)],
+    identity_change:[state.identityRequests,'request_id',v=>(v.action==='bind'?'绑定':'撤销')+' · '+v.target_staff_name+' · '+labelStatus(v.status)]
   };
   const [arr,key,label]=map[ty];
   setSelect($('audit-object'),arr,key,label);
@@ -178,6 +179,7 @@ async function refresh(){
     }
   }
   render();
+  await refreshIdentity();
 }
 function setView(view){
   state.view=view;
@@ -190,7 +192,8 @@ function setView(view){
 }
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};
-  for(const key of ['students','contacts','events','leads','opportunities','families'])state[key]=[];
+  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings'])state[key]=[];
+  document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
   $('workspace').hidden=true;$('login-screen').hidden=false;
   $('login-form').reset();$('audit-list').replaceChildren();
   if(notice)toast('已退出演示账号');
