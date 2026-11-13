@@ -44,7 +44,7 @@ test('V3.2-06 protected SESSION_USER tenant mapping: 2 real separate nonowner ap
   const a='http://127.0.0.1:'+appA.address().port;
   const b='http://127.0.0.1:'+appB.address().port;
   const tokenB=signedTestToken(bStaff,orgB);
-  let studentA,studentB,contactA,contactB;
+  let studentA,studentB,contactA,contactB,tokenA;
   try{
     await t.test('distinct nonowner logins have fixed, non-spoofable tenant mappings',async()=>{
       const x=await assertRestrictedRuntime(poolA),y=await assertRestrictedRuntime(poolB);
@@ -68,33 +68,32 @@ test('V3.2-06 protected SESSION_USER tenant mapping: 2 real separate nonowner ap
       const signed=await request(a,'POST','/api/v1/dev/login',null,
         {account_code:'sales-a',passphrase:demoPass});
       assert.equal(signed.status,200);
-      const tokenA=signed.data.token;
-      t.tokenA=tokenA;
+      tokenA=signed.data.token;
       assert.equal((await request(b,'GET','/api/v1/me',tokenA)).status,403);
       assert.equal((await request(a,'GET','/api/v1/me',tokenB)).status,403);
       assert.equal((await request(b,'GET','/api/v1/me',tokenB)).data.organization_id,orgB);
     });
     await t.test('A and B separately create students and contacts through their own HTTP services',async()=>{
-      const stA=await request(a,'POST','/api/v1/students',t.tokenA,
+      const stA=await request(a,'POST','/api/v1/students',tokenA,
         {display_name:'虚构A机构学生',grade_label:'三年级'});
       const stB=await request(b,'POST','/api/v1/students',tokenB,
         {display_name:'虚构B机构学生',grade_label:'六年级'});
       assert.equal(stA.status,200);assert.equal(stB.status,200);
       studentA=stA.data.student_id;studentB=stB.data.student_id;
-      const coA=await request(a,'POST','/api/v1/contacts',t.tokenA,
+      const coA=await request(a,'POST','/api/v1/contacts',tokenA,
         {display_name:'虚构A机构联系人'});
       const coB=await request(b,'POST','/api/v1/contacts',tokenB,
         {display_name:'虚构B机构联系人'});
       assert.equal(coA.status,200);assert.equal(coB.status,200);
       contactA=coA.data.contact_id;contactB=coB.data.contact_id;
-      const lA=await request(a,'POST','/api/v1/students/'+studentA+'/contacts',t.tokenA,
+      const lA=await request(a,'POST','/api/v1/students/'+studentA+'/contacts',tokenA,
         {contact_id:contactA,relation_type:'母亲'});
       const lB=await request(b,'POST','/api/v1/students/'+studentB+'/contacts',tokenB,
         {contact_id:contactB,relation_type:'父亲'});
       assert.equal(lA.status,200);assert.equal(lB.status,200);
     });
     await t.test('separate login cannot read other tenant through core HTTP lists or staff tables',async()=>{
-      const aRows=(await request(a,'GET','/api/v1/students',t.tokenA)).data.items;
+      const aRows=(await request(a,'GET','/api/v1/students',tokenA)).data.items;
       const bRows=(await request(b,'GET','/api/v1/students',tokenB)).data.items;
       assert.ok(aRows.some(x=>x.student_id===studentA));
       assert.ok(!aRows.some(x=>x.student_id===studentB));
