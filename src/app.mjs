@@ -1,0 +1,341 @@
+import { createServer } from 'node:http';
+import { randomUUID, createHash } from 'node:crypto';
+import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
+
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const KEY=/^[a-zA-Z0-9_-]{16,128}$/;
+function needId(x,name) { if(typeof x!=='string'||!UUID.test(x))fail(422,'VALIDATION_ERROR',name+'格式不正确');return x; }
+function needText(x,name,max=300) {
+  if(typeof x!=='string'||!x.trim()||x.trim().length>max)fail(422,'VALIDATION_ERROR',name+'不能为空或长度超限');
+  return x.trim();
+}
+function object(x,fields) {
+  if(!x||typeof x!=='object'||Array.isArray(x))fail(422,'VALIDATION_ERROR','请求内容格式不正确');
+  for(const key of Object.keys(x))if(!fields.includes(key))fail(422,'VALIDATION_ERROR','包含不支持的业务字段');
+  return x;
+}
+function asIdOrNull(x,name){return x==null?null:needId(x,name);}
+function sourceName(x){return typeof x==='string'&&x.length<=100?x:'';}
+function normalized(x){
+  if(Array.isArray(x))return x.map(normalized);
+  if(x&&typeof x==='object')return Object.fromEntries(Object.keys(x).sort().map(k=>[k,normalized(x[k])]));
+  return x;
+}
+function digest(method,path,body){return createHash('sha256').update(JSON.stringify(normalized({method,path,body}))).digest('hex');}
+function audit(c,ctx,targetType,targetId,event,reason,before={},after={}){
+  return c.query(
+    'INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,before_business_json,after_business_json,reason_zh)'+
+    ' VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+    [ctx.user.organization_id,ctx.user.id,targetType,targetId,event,JSON.stringify(before),JSON.stringify(after),reason]);
+}
+async function orgEntity(c,table,id,org,name) {
+  const allowed={contacts:'contacts',contact_events:'contact_events',marketing_channels:'marketing_channels'};
+  if(!allowed[table])throw Error('Disallowed table lookup');
+  const r=await c.query('SELECT id'+(table==='contact_events'?',contact_id,recorded_by':'')+' FROM ms.'+allowed[table]+
+    ' WHERE id=$1 AND organization_id=$2'+(table==='contacts'?' AND archived_at IS NULL':''),
+    [needId(id,name),org]);
+  if(!r.rowCount)fail(422,'VALIDATION_ERROR',name+'不存在于当前机构');
+  return r.rows[0];
+}
+async function getContact(c,ctx,id) {
+  const x=await orgEntity(c,'contacts',id,ctx.user.organization_id,'联系人');
+  if(ctx.manager)return x;
+  const scope=await c.query(
+    "SELECT 1 FROM ms.contacts c WHERE c.id=$1 AND c.organization_id=$2 AND c.created_by=$3"+
+    " UNION SELECT 1 FROM ms.leads l WHERE l.contact_id=$1 AND l.organization_id=$2 AND l.owner_user_id=$3"+
+    " UNION SELECT 1 FROM ms.student_contacts sc JOIN ms.students s ON s.id=sc.student_id"+
+    " WHERE sc.contact_id=$1 AND sc.valid_to IS NULL AND s.organization_id=$2 AND s.owner_user_id=$3 LIMIT 1",
+    [id,ctx.user.organization_id,ctx.user.id]);
+  if(!scope.rowCount)fail(403,'FORBIDDEN','当前账号无权查看该联系人');
+  return x;
+}
+const routeDefs=[
+  ['POST',/^\/api\/v1\/students$/,'createStudent'],
+  ['GET',/^\/api\/v1\/students\/([0-9a-f-]+)$/,'getStudent'],
+  ['POST',/^\/api\/v1\/contacts$/,'createContact'],
+  ['POST',/^\/api\/v1\/contact-events$/,'createEvent'],
+  ['POST',/^\/api\/v1\/students\/([0-9a-f-]+)\/contacts$/,'linkContact'],
+  ['POST',/^\/api\/v1\/leads$/,'createLead'],
+  ['GET',/^\/api\/v1\/leads\/([0-9a-f-]+)$/,'getLead'],
+  ['POST',/^\/api\/v1\/leads\/([0-9a-f-]+)\/students$/,'linkLead'],
+  ['POST',/^\/api\/v1\/opportunities$/,'createOpportunity'],
+  ['GET',/^\/api\/v1\/opportunities\/([0-9a-f-]+)$/,'getOpportunity'],
+  ['POST',/^\/api\/v1\/interactions$/,'createInteraction'],
+  ['POST',/^\/api\/v1\/family-groups$/,'createFamilyReview'],
+  ['GET',/^\/api\/v1\/audit$/,'getAudit']
+];
+async function handle(c,ctx,op,p,body,requestUrl) {
+  const org=ctx.user.organization_id,actor=ctx.user.id;
+  switch(op){
+    case 'createStudent': {
+      object(body,['display_name','grade_label','school_name','owner_user_id']);
+      const display_name=needText(body.display_name,'学生姓名',100);
+      const owner=body.owner_user_id?needId(body.owner_user_id,'负责人'):actor;
+      if(owner!==actor&&!ctx.manager)fail(403,'FORBIDDEN','只有主管可以为其他销售分配学生');
+      await sameOrgStaff(c,ctx,owner);
+      const r=await c.query('INSERT INTO ms.students(organization_id,display_name,grade_label,school_name,owner_user_id,created_by)'+
+        ' VALUES($1,$2,$3,$4,$5,$6) RETURNING id,display_name,owner_user_id,version',
+        [org,display_name,sourceName(body.grade_label)||null,sourceName(body.school_name)||null,owner,actor]);
+      const x=r.rows[0];
+      await audit(c,ctx,'student',x.id,'STUDENT_CREATED','新建学生客户：'+x.display_name,{}, {'学生':x.display_name,'负责人':owner});
+      return {student_id:x.id,display_name:x.display_name,owner_user_id:owner,version:x.version};
+    }
+    case 'getStudent': {
+      const s=await ownsStudent(c,ctx,needId(p[0],'学生编号'));
+      return {student_id:s.id,display_name:s.display_name,owner_user_id:s.owner_user_id};
+    }
+    case 'createContact': {
+      object(body,['display_name','do_not_contact']);
+      const name=needText(body.display_name,'联系人姓名',100);
+      if(body.do_not_contact!==undefined&&typeof body.do_not_contact!=='boolean')
+        fail(422,'VALIDATION_ERROR','拒绝联系设置不正确');
+      const r=await c.query('INSERT INTO ms.contacts(organization_id,display_name,do_not_contact,created_by)'+
+        ' VALUES($1,$2,$3,$4) RETURNING id,display_name,do_not_contact',
+        [org,name,body.do_not_contact===true,actor]);
+      // Important: no phone or WeChat PII is accepted in this isolated MVP.
+      const x=r.rows[0];
+      await audit(c,ctx,'contact',x.id,'CONTACT_CREATED','新建联系人：'+name,{}, {'联系人':name});
+      return {contact_id:x.id,display_name:name,do_not_contact:x.do_not_contact};
+    }
+    case 'createEvent': {
+      object(body,['contact_id','channel_id','event_type','occurred_at','source_evidence_ref']);
+      const contact=body.contact_id?await getContact(c,ctx,body.contact_id):null;
+      if(body.channel_id)await orgEntity(c,'marketing_channels',body.channel_id,org,'渠道');
+      const when=Date.parse(body.occurred_at);
+      if(!Number.isFinite(when))fail(422,'VALIDATION_ERROR','咨询发生时间格式不正确');
+      const type=needText(body.event_type,'咨询类型',50);
+      const r=await c.query('INSERT INTO ms.contact_events(organization_id,contact_id,channel_id,event_type,occurred_at,source_evidence_ref,recorded_by)'+
+        ' VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+        [org,contact?.id||null,body.channel_id||null,type,new Date(when),sourceName(body.source_evidence_ref)||null,actor]);
+      await audit(c,ctx,'contact_event',r.rows[0].id,'CONTACT_EVENT_CREATED','登记了一次真实客户咨询');
+      return {event_id:r.rows[0].id};
+    }
+    case 'linkContact': {
+      object(body,['contact_id','relation_type','verification_state','is_primary','permission_basis_ref']);
+      const student=await ownsStudent(c,ctx,needId(p[0],'学生编号'));
+      const contact=await orgEntity(c,'contacts',body.contact_id,org,'联系人');
+      const relation=needText(body.relation_type,'联系人与学生的关系',50);
+      const state=body.verification_state||'unverified';
+      if(!['unverified','verified','disputed'].includes(state))
+        fail(422,'VALIDATION_ERROR','核实状态不正确');
+      if(state==='verified'&&!ctx.manager)fail(403,'FORBIDDEN','只有授权主管能确认监护关系');
+      const primary=body.is_primary===true;
+      const r=await c.query(
+        'INSERT INTO ms.student_contacts(student_id,contact_id,relation_type,is_primary,verification_state,permission_basis_ref,verified_at)'+
+        ' VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+        [student.id,contact.id,relation,primary,state,sourceName(body.permission_basis_ref)||null,state==='verified'?new Date():null]);
+      await audit(c,ctx,'student',student.id,'STUDENT_CONTACT_LINKED',
+        '为学生'+student.display_name+'关联了'+relation+'联系人',{}, {'联系人关系':relation,'核实情况':state==='verified'?'已核实':'待核实'});
+      return {relationship_id:r.rows[0].id,student_id:student.id,contact_id:contact.id,verification_state:state};
+    }
+    case 'createLead': {
+      object(body,['source_event_ref','contact_id','source_channel_id','notes']);
+      const event=await orgEntity(c,'contact_events',body.source_event_ref,org,'咨询事件');
+      if(!ctx.manager&&event.recorded_by!==actor)
+        fail(403,'FORBIDDEN','当前账号无权将其他员工的咨询转为线索');
+      if(body.contact_id){
+        await getContact(c,ctx,body.contact_id);
+        if(event.contact_id&&event.contact_id!==body.contact_id)
+          fail(422,'VALIDATION_ERROR','线索联系人与原咨询不一致');
+      }
+      if(body.source_channel_id)await orgEntity(c,'marketing_channels',body.source_channel_id,org,'渠道');
+      const r=await c.query('INSERT INTO ms.leads(organization_id,contact_id,source_event_id,owner_user_id,lead_state)'+
+        " VALUES($1,$2,$3,$4,'unidentified') RETURNING id,lead_state",
+        [org,body.contact_id||event.contact_id||null,event.id,actor]);
+      await audit(c,ctx,'lead',r.rows[0].id,'LEAD_CREATED','登记了尚未确认具体学生的咨询线索');
+      return {lead_id:r.rows[0].id,lead_state:r.rows[0].lead_state,student_ids:[]};
+    }
+    case 'getLead': {
+      const l=await ownsLead(c,ctx,needId(p[0],'线索编号'));
+      const r=await c.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1 ORDER BY student_id',[l.id]);
+      return {lead_id:l.id,contact_id:l.contact_id,student_ids:r.rows.map(x=>x.student_id)};
+    }
+    case 'linkLead': {
+      object(body,['student_ids','evidence_ref','confirmation_state']);
+      const lead=await ownsLead(c,ctx,needId(p[0],'线索编号'));
+      if(!Array.isArray(body.student_ids)||body.student_ids.length===0||body.student_ids.length>20)
+        fail(422,'VALIDATION_ERROR','学生关联数量不正确');
+      const ids=[...new Set(body.student_ids.map(x=>needId(x,'学生编号')))];
+      if(ids.length!==body.student_ids.length)fail(422,'VALIDATION_ERROR','关联中存在重复学生');
+      const evidence=needText(body.evidence_ref,'核实依据',100);
+      const state=body.confirmation_state||'pending_review';
+      if(!['pending_review','verified'].includes(state))
+        fail(422,'VALIDATION_ERROR','核实状态不正确');
+      if(state==='verified'&&!ctx.manager)fail(403,'FORBIDDEN','仅主管可确认学生识别');
+      for(const id of ids){
+        await ownsStudent(c,ctx,id);
+        await c.query('INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state,confirmed_by)'+
+          ' VALUES($1,$2,$3,$4)',[lead.id,id,state,state==='verified'?actor:null]);
+      }
+      await audit(c,ctx,'lead',lead.id,'LEAD_STUDENTS_LINKED',
+        '线索已关联'+ids.length+'名具体学生，原始咨询次数不增加',{}, {'关联学生人数':ids.length,'关联情况':state==='verified'?'已核实':'待核实','依据编号':evidence});
+      return {lead_id:lead.id,student_ids:ids,confirmation_state:state};
+    }
+    case 'createOpportunity': {
+      object(body,['student_id','source_channel_id','owner_user_id','predicted_amount_cents']);
+      const student=await ownsStudent(c,ctx,needId(body.student_id,'学生编号'));
+      if(body.source_channel_id)await orgEntity(c,'marketing_channels',body.source_channel_id,org,'渠道');
+      const owner=body.owner_user_id||student.owner_user_id||actor;
+      if(owner!==student.owner_user_id&&!ctx.manager)
+        fail(403,'FORBIDDEN','只有主管能更改商机负责人');
+      await sameOrgStaff(c,ctx,owner);
+      const predicted=body.predicted_amount_cents;
+      if(predicted!==undefined&&(!Number.isSafeInteger(predicted)||predicted<0))
+        fail(422,'VALIDATION_ERROR','预计金额必须是非负整数分');
+      const r=await c.query('INSERT INTO ms.opportunities(student_id,owner_user_id,source_channel_id,predicted_amount_cents)'+
+        ' VALUES($1,$2,$3,$4) RETURNING id,stage,version',
+        [student.id,owner,body.source_channel_id||null,predicted??null]);
+      await audit(c,ctx,'opportunity',r.rows[0].id,'OPPORTUNITY_CREATED',
+        '为学生'+student.display_name+'建立销售商机',{}, {'学生':student.display_name,'商机阶段':'新建'});
+      return {opportunity_id:r.rows[0].id,student_id:student.id,owner_user_id:owner,stage:r.rows[0].stage};
+    }
+    case 'getOpportunity': {
+      const o=await ownsOpportunity(c,ctx,needId(p[0],'商机编号'));
+      return {opportunity_id:o.id,student_id:o.student_id,owner_user_id:o.owner_user_id,stage:o.stage,lifecycle_state:o.lifecycle_state};
+    }
+    case 'createInteraction': {
+      object(body,['occurred_at','contact_method','summary','subjects']);
+      const when=Date.parse(body.occurred_at);
+      if(!Number.isFinite(when))fail(422,'VALIDATION_ERROR','跟进时间不正确');
+      const summary=needText(body.summary,'沟通内容',2000);
+      const method=needText(body.contact_method,'沟通方式',50);
+      if(!Array.isArray(body.subjects)||body.subjects.length===0||body.subjects.length>20)
+        fail(422,'VALIDATION_ERROR','关联对象数量不正确');
+      const subjects=[];
+      for(const subject of body.subjects){
+        object(subject,['student_id','lead_id','opportunity_id']);
+        if(!subject.student_id&&!subject.lead_id&&!subject.opportunity_id)
+          fail(422,'VALIDATION_ERROR','跟进记录必须关联业务对象');
+        if(subject.student_id)await ownsStudent(c,ctx,needId(subject.student_id,'学生编号'));
+        if(subject.lead_id)await ownsLead(c,ctx,needId(subject.lead_id,'线索编号'));
+        if(subject.opportunity_id)await ownsOpportunity(c,ctx,needId(subject.opportunity_id,'商机编号'));
+        subjects.push(subject);
+      }
+      const r=await c.query('INSERT INTO ms.interactions(organization_id,recorded_by,occurred_at,contact_method,summary)'+
+        ' VALUES($1,$2,$3,$4,$5) RETURNING id',[org,actor,new Date(when),method,summary]);
+      for(const x of subjects)await c.query(
+        'INSERT INTO ms.interaction_subjects(interaction_id,student_id,lead_id,opportunity_id) VALUES($1,$2,$3,$4)',
+        [r.rows[0].id,x.student_id||null,x.lead_id||null,x.opportunity_id||null]);
+      await audit(c,ctx,'interaction',r.rows[0].id,'INTERACTION_CREATED',
+        '记录了一次真实跟进，涉及'+subjects.length+'个业务对象');
+      return {interaction_id:r.rows[0].id,linked_subjects:subjects.length,actual_interactions:1};
+    }
+    case 'createFamilyReview': {
+      object(body,['display_name','student_ids','verification_evidence_ref']);
+      if(!ctx.manager)fail(403,'FORBIDDEN','家庭关系核实必须由主管处理');
+      const name=needText(body.display_name,'家庭关联名称',120);
+      const evidence=needText(body.verification_evidence_ref,'家庭关系核实依据',200);
+      if(!Array.isArray(body.student_ids)||body.student_ids.length<2||body.student_ids.length>20)
+        fail(422,'VALIDATION_ERROR','家庭关联至少需要两名学生');
+      const ids=[...new Set(body.student_ids.map(id=>needId(id,'学生编号')))];
+      if(ids.length!==body.student_ids.length)fail(422,'VALIDATION_ERROR','家庭关联不能包含重复学生');
+      for(const id of ids)await ownsStudent(c,ctx,id);
+      // A reference supplied by a manager is NOT independently verified evidence.
+      // Remain pending until approved verification workflow exists.
+      const r=await c.query(
+        "INSERT INTO ms.family_groups(organization_id,display_name,verification_state) VALUES($1,$2,'pending') RETURNING id,verification_state",
+        [org,name]);
+      for(const id of ids)await c.query(
+        'INSERT INTO ms.family_memberships(family_group_id,student_id,relationship_basis) VALUES($1,$2,$3)',
+        [r.rows[0].id,id,evidence]);
+      await audit(c,ctx,'family',r.rows[0].id,'FAMILY_REVIEW_REQUESTED',
+        '已提交'+ids.length+'名学生的家庭关系核实，审核前不视为已确认家庭',{}, {'待核实学生人数':ids.length,'家庭关系状态':'待核实'});
+      return {family_group_id:r.rows[0].id,verification_state:'pending',student_ids:ids};
+    }
+    case 'getAudit': {
+      const ty=requestUrl.searchParams.get('object_type'),id=requestUrl.searchParams.get('object_id');
+      if(!ty||!id)fail(422,'VALIDATION_ERROR','请指定要查看的业务对象');
+      needId(id,'业务对象');
+      if(ty==='student')await ownsStudent(c,ctx,id);
+      else if(ty==='lead')await ownsLead(c,ctx,id);
+      else if(ty==='opportunity')await ownsOpportunity(c,ctx,id);
+      else fail(403,'FORBIDDEN','该业务记录暂无开放的审计查询权限');
+      const r=await c.query(
+        'SELECT id,reason_zh,happened_at,before_business_json,after_business_json FROM ms.audit_events'+
+        ' WHERE organization_id=$1 AND target_type=$2 AND target_id=$3 ORDER BY happened_at DESC LIMIT 100',
+        [org,ty,id]);
+      const fmt=x=>Object.entries(x||{}).map(([k,v])=>k+'：'+String(v)).join('；');
+      return {items:r.rows.map(x=>({
+        event_id:x.id,summary_zh:x.reason_zh,
+        before_business_summary_zh:fmt(x.before_business_json),
+        after_business_summary_zh:fmt(x.after_business_json),
+        happened_at:x.happened_at
+      }))};
+    }
+    default: fail(404,'NOT_FOUND','没有找到该业务接口');
+  }
+}
+async function readJson(req){
+  const chunks=[];let size=0;
+  for await(const chunk of req) {
+    size+=chunk.length;if(size>32768)fail(413,'PAYLOAD_TOO_LARGE','请求内容超过允许大小');
+    chunks.push(chunk);
+  }
+  if(!size)fail(400,'VALIDATION_ERROR','请填写业务内容');
+  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}
+  catch{fail(400,'VALIDATION_ERROR','请求内容不是有效格式');}
+}
+const send=(res,status,json,requestId)=>{
+  const data=JSON.stringify({...json,request_id:requestId});
+  res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+  res.end(data);
+};
+export function createApp(pool,{secret,issuer='market-sales-test-issuer'}={}) {
+  if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
+    throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
+  return createServer(async(req,res)=>{
+    const requestId=randomUUID();
+    let c;
+    try {
+      const url=new URL(req.url,'http://localhost');
+      if(url.pathname==='/api/v1/health'&&req.method==='GET'){
+        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test'}},requestId);return;
+      }
+      const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
+        .find(x=>x.method===req.method&&x.match);
+      if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
+      const token=(req.headers.authorization||'').match(/^Bearer (\S+)$/i)?.[1];
+      const identity=verifyToken(token,secret,issuer);
+      const body=req.method==='POST'?await readJson(req):null;
+      const key=req.headers['idempotency-key'];
+      if(req.method==='POST'&&(!KEY.test(key||'')))
+        fail(422,'VALIDATION_ERROR','写入请求必须提供16至128位有效防重复编号');
+      c=await pool.connect();
+      await c.query('BEGIN');
+      const ctx=await staffContext(c,identity);
+      let result;
+      if(req.method==='POST'){
+        const hash=digest(req.method,url.pathname,body);
+        const reserved=await c.query(
+          "INSERT INTO ms.api_write_receipts(organization_id,actor_user_id,request_key,operation_name,request_digest,response_json)"+
+          " VALUES($1,$2,$3,$4,$5,'{}'::jsonb) ON CONFLICT DO NOTHING RETURNING id",
+          [ctx.user.organization_id,ctx.user.id,key,route.op,hash]);
+        if(reserved.rowCount){
+          result=await handle(c,ctx,route.op,route.match.slice(1),body,url);
+          await c.query('UPDATE ms.api_write_receipts SET response_json=$2 WHERE id=$1',
+            [reserved.rows[0].id,JSON.stringify(result)]);
+        } else {
+          const existing=await c.query('SELECT operation_name,request_digest,response_json FROM ms.api_write_receipts'+
+            ' WHERE organization_id=$1 AND actor_user_id=$2 AND request_key=$3',
+            [ctx.user.organization_id,ctx.user.id,key]);
+          if(!existing.rowCount||existing.rows[0].request_digest!==hash||
+            existing.rows[0].operation_name!==route.op)
+            fail(409,'IDEMPOTENCY_CONFLICT','同一防重复编号已用于另一项操作，请核实原请求');
+          result=existing.rows[0].response_json;
+        }
+      } else result=await handle(c,ctx,route.op,route.match.slice(1),null,url);
+      await c.query('COMMIT');
+      send(res,200,{code:'OK',message:'操作成功',data:result},requestId);
+    } catch(e){
+      if(c)try{await c.query('ROLLBACK');}catch{}
+      const pgCode=String(e?.code||'');
+      const status=e instanceof AppError?e.status:
+        pgCode==='23505'?409:pgCode==='23503'||pgCode==='23514'?422:500;
+      const code=e instanceof AppError?e.code:pgCode==='23505'?'DUPLICATE_RELATION':
+        pgCode==='23503'||pgCode==='23514'?'BUSINESS_CONSTRAINT':'INTERNAL_ERROR';
+      const message=e instanceof AppError?e.message:pgCode==='23505'?'该关系已经存在':
+        pgCode==='23503'||pgCode==='23514'?'业务数据不满足保存条件':'操作失败，请核实原请求结果';
+      send(res,status,{code,message},requestId);
+    } finally{if(c)c.release();}
+  });
+}
