@@ -34,20 +34,35 @@ async function readBody(req){
   }
   return Buffer.concat(chunks);
 }
-export function createIsolatedIdentityGateway({externalIdentity,registrations}={}){
+export function createIsolatedIdentityGateway({externalIdentity,registrations,tenantUpstreams,resolveTenant}={}){
   if(process.env.MS_STAGE!=='isolated-test')
     throw new Error('Trusted identity routing is not production enabled');
   const verify=createExternalTokenVerifier(externalIdentity);
-  if(!Array.isArray(registrations)||!registrations.length)
-    throw new Error('Administrator-supplied identity registrations required');
+  const approvedDirectoryMode=resolveTenant!==undefined||tenantUpstreams!==undefined;
   const routes=new Map();
-  for(const r of registrations){
-    if(!r||r.issuer!==externalIdentity.issuer||
-      typeof r.subject!=='string'||!r.subject.trim()||r.subject.length>255)
-      throw new Error('Invalid trusted identity registration');
-    const id=identityKey(r.issuer,r.subject);
-    if(routes.has(id))throw new Error('Duplicate issuer/subject registration');
-    routes.set(id,assertLoopback(r.upstream));
+  if(approvedDirectoryMode){
+    if(typeof resolveTenant!=='function'||!Array.isArray(tenantUpstreams)||
+      !tenantUpstreams.length||registrations!==undefined)
+      throw new Error('Approved directory mode requires resolver and fixed tenant upstreams only');
+    const tenantId=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    for(const entry of tenantUpstreams){
+      if(!entry||typeof entry.tenantId!=='string'||!tenantId.test(entry.tenantId))
+        throw new Error('Invalid configured tenant ID');
+      const id=entry.tenantId.toLowerCase();
+      if(routes.has(id))throw new Error('Duplicate tenant upstream');
+      routes.set(id,assertLoopback(entry.upstream));
+    }
+  }else{
+    if(!Array.isArray(registrations)||!registrations.length)
+      throw new Error('Administrator-supplied identity registrations required');
+    for(const r of registrations){
+      if(!r||r.issuer!==externalIdentity.issuer||
+        typeof r.subject!=='string'||!r.subject.trim()||r.subject.length>255)
+        throw new Error('Invalid trusted identity registration');
+      const id=identityKey(r.issuer,r.subject);
+      if(routes.has(id))throw new Error('Duplicate issuer/subject registration');
+      routes.set(id,assertLoopback(r.upstream));
+    }
   }
   return createServer(async(req,res)=>{
     try{
@@ -66,7 +81,11 @@ export function createIsolatedIdentityGateway({externalIdentity,registrations}={
         failResponse(res,401,'AUTH_REQUIRED','需要已核验的员工身份令牌');return;
       }
       const claims=verify(token);
-      const upstream=routes.get(identityKey(claims.issuer,claims.subject));
+      const routeKey=approvedDirectoryMode
+        ? await resolveTenant(claims.issuer,claims.subject)
+        : identityKey(claims.issuer,claims.subject);
+      const upstream=routes.get(approvedDirectoryMode&&typeof routeKey==='string'
+        ? routeKey.toLowerCase() : routeKey);
       if(!upstream){
         failResponse(res,403,'FORBIDDEN','身份未获可信机构路由授权');return;
       }
