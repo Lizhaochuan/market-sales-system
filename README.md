@@ -115,6 +115,19 @@ PR #7 基于 V3.2-02 PR #6，且依赖 #5 和 #4；在依赖审核和基线明�
 
 **生产仍未允许：** 正式 OIDC 身份、受控连接池动态路由、机构内部按员工权限进一步限制字段和记录、完整运维部署、付款与 CRM 发课均未完成。PR #10 基于 #9，仍为 Draft，且不修改现有 CRM 项目或技术文档。完成实际跨系统集成和联合验收后才融合两套说明。
 
+## V3.2-07 签名身份可信路由与学生目录字段最小授权（草稿 PR #11）
+
+本阶段新增**只在本机隔离测试运行**的可信身份路由入口：先验 RS256 外部令牌，再依据由管理员预先配置的精确 `issuer + subject` 映射路由到机构数据库服务；机构后端必须重复验证身份绑定和数据库权限。机构由可信映射决定，不能由前端提交的机构编号、角色声明或 Host 决定。
+
+- [完整独立技术文档：路由、数据库只读视图与上线阻断](docs/V3.2-07_TRUSTED_ROUTING_AND_FIELD_PROJECTION.md)
+- [可信身份路由网关](src/isolated-identity-gateway.mjs)
+- [真实双机构 RSA 签名与可信路由的 HTTP 测试](tests/security/trusted-identity-routing.test.mjs)
+- [011 号学生目录数据库字段投影](db/migrations/011_student_directory_read_projection.sql)
+- [两个独立只读机构 LOGIN](tests/sql/create_directory_projection_readers.sql)
+- [只读投影、隐藏年级和跨机构阻断测试](tests/security/directory-field-projection.test.mjs)
+
+**上线阻断未解除：** 路由映射仍为演示管理员静态配置，没有正式 IdP 或受控身份目录同步；大部分业务 API 尚未改为只读字段最小授权角色；仍不允许真实收款、课程/CRM 权益、自动成交或生产员工登录。现有教培 CRM 不修改，技术说明独立维护。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
