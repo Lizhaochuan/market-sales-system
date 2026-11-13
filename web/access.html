@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学生客户授权审批 · 隔离测试工作台</title>
+<link rel="stylesheet" href="/app/access.css">
+<script src="/app/access.js" defer></script>
+</head><body>
+<div class="page">
+  <header class="top"><div><span class="eyebrow">MARKET · SALES · ISOLATED TEST</span>
+    <h1>学生客户权限管理</h1><p>临时共享、独立审批、负责人转交和共享撤销</p></div>
+    <div class="environment"><b>仅虚构数据</b><span>未接入正式登录、付款或教培 CRM</span></div>
+  </header>
+  <section class="card connect" id="connect-panel">
+    <div class="section-title"><h2>验证隔离演示员工</h2><small>独立 RSA 员工令牌 · 仅内存保存</small></div>
+    <p class="note">本页不是正式登录。由本地测试管理员发放的签名测试凭据，仅用于演示账号所在机构。粘贴后输入框立即清空，刷新页面即失效。</p>
+    <form id="connect-form"><label>临时测试身份凭据<input type="password" id="signed-token" autocomplete="off" spellcheck="false" required placeholder="粘贴由独立测试环境签发的员工凭据"></label>
+    <button type="submit" class="primary">连接本机隔离数据</button></form>
+    <p class="errorline" id="connect-error" role="alert"></p>
+  </section>
+  <div id="workspace" hidden>
+    <div class="toolbar"><span class="connected">● 已通过当前员工身份验证</span>
+      <button type="button" id="refresh" class="secondary">刷新当前权限</button>
+      <button type="button" id="disconnect" class="secondary">清除本次凭据</button></div>
+    <nav class="tabs" aria-label="学生权限操作"><button type="button" data-tab="apply" aria-current="page">提出授权申请</button><button type="button" data-tab="approve">独立审核</button><button type="button" data-tab="grants">当前共享与撤销</button></nav>
+    <section class="card" data-panel="apply">
+      <div class="section-title"><h2>申请共享或转交一名学生</h2><small>提交后不会立即生效</small></div>
+      <p class="note">只能为本人负责的学生提出申请。共享某名学生，不代表共享其兄弟姐妹、所有家长咨询或其他销售商机。</p>
+      <form id="request-form" class="fields">
+        <label>操作类型<select name="action" id="action-type"><option value="share">临时共享查看</option><option value="transfer">正式转交学生负责人</option></select></label>
+        <label>学生客户<select name="student_id" id="student-choice" required></select></label>
+        <label>接收员工<select name="target_staff_id" id="staff-choice" required></select></label>
+        <label id="duration-label">允许查看多久<select name="duration" id="duration"><option value="1">1 天</option><option value="7" selected>7 天</option><option value="30">30 天（最长）</option></select></label>
+        <label>申请理由<textarea name="reason_zh" maxlength="400" required placeholder="说明为什么需要共享或转交该名学生"></textarea></label>
+        <label>核实材料说明<input name="evidence_ref" maxlength="200" required placeholder="填写虚构测试材料的说明，不输入真实儿童身份信息"></label>
+        <button type="submit" class="primary">提交给独立主管审核</button>
+      </form>
+    </section>
+    <section class="card" data-panel="approve" hidden>
+      <div class="section-title"><h2>学生共享与转交审核</h2><small>申请人、接收人不得自批</small></div>
+      <p class="note">系统将再次验证当前员工是否拥有有效的主管审批权限；未批准的变更不会自动生效。</p>
+      <div id="requests-list" class="records" aria-live="polite"></div>
+      <form id="decision-form" class="fields">
+        <label>选择待审核申请<select name="request_id" id="review-choice" required></select></label>
+        <label>审核意见<select name="decision"><option value="approved">批准</option><option value="rejected">驳回</option></select></label>
+        <label>独立审核理由<textarea name="reason_zh" maxlength="400" required placeholder="填写审核依据和理由"></textarea></label>
+        <label>复核材料说明<input name="evidence_ref" maxlength="200" required placeholder="虚构独立复核资料编号"></label>
+        <button type="submit" class="primary">保存独立审核结果</button>
+      </form>
+    </section>
+    <section class="card" data-panel="grants" hidden>
+      <div class="section-title"><h2>我的学生共享权限</h2><small>已到期自动失效，无需人工处理</small></div>
+      <p class="note">本人负责或获授权的单项学生共享可以在这里查看。撤销后下一次查看立即生效；不会改动学生销售业绩或课程权益。</p>
+      <div id="grants-list" class="records" aria-live="polite"></div>
+      <form id="revoke-form" class="fields">
+        <label>选择要撤销的共享<select name="grant_id" id="revoke-choice" required></select></label>
+        <label>撤销理由<textarea name="reason_zh" maxlength="400" required placeholder="说明取消该名学生查看权限的原因"></textarea></label>
+        <button type="submit" class="danger">立即撤销这项查看权限</button>
+      </form>
+    </section>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <footer>员工客户授权是独立隔离测试功能。正式身份服务、家长资料核验、支付、退款、CRM 课时均未启用。</footer>
+  </div>
+</div></body></html>
