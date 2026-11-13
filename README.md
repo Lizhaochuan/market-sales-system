@@ -201,6 +201,21 @@ V3.2-09 的员工专属接口是新的只读服务；V3.2-10 开始**真正改�
 
 客户仍以学生为主要单位；只有确实有两个或更多经核实同家庭学生，家庭才按需关联。共享一名学生不等于共享其兄弟姐妹或其他销售商机。正式收款、退款、成交和 CRM 课时操作继续关闭；原教培 CRM 代码、数据与技术说明均未修改，真实集成联合验收后才考虑融合。
 
+## V3.2-13 原有学生/联系人创建入口严格员工数据库权限（草稿 PR #17）
+
+本阶段**直接改造原有** `POST /api/v1/students` 和 `POST /api/v1/contacts`：服务器启用受控的 `MS_STRICT_STAFF_MODE=1` 后，必须通过已批准的 RSA 外部测试员工身份，并以该员工专用、不能直接读写原始学生/联系人/财务表的 PostgreSQL LOGIN 调用 016 号迁移的防重写入函数。员工账号缺失、错配、权限不足或身份撤销时绝不回退到旧机构级业务 SQL。
+
+同一模式下，**原中文工作台**增加员工 RSA 签名身份的本机测试登录选项，原“保存学生档案”“保存联系人”按钮实际走严格路径；只显示已迁移的学生、联系人查询和创建，其余未迁移的业务 GET/POST 在服务器端拒绝。原虚构演示登录仍可供非严格模式回归，不属于生产登录。
+
+- [V3.2-13 独立完整中文技术/业务/安全说明](docs/V3.2-13_LEGACY_STAFF_WRITE_AND_TRUSTED_UI.md)
+- [原两条 POST 低权限写入适配器](src/scoped-legacy-write-adapter.mjs)
+- [严格员工数据库读写池配对及安全启动预检](src/strict-staff-pools.mjs)
+- [真实 PostgreSQL/HTTP/并发/越权/禁回退测试](tests/security/legacy-scoped-writes.test.mjs)
+- [原中文工作台 RSA 测试签名登录与旧按钮实际操作 Chromium 测试](tests/browser/strict-employee.spec.mjs)
+- [两条原销售写入接口的严格模式 OpenAPI](api/openapi/legacy-scoped-lowrisk-implemented.v3.2.json)
+
+**严格模式仍是本机虚构数据测试**：正式企业登录 / OIDC Code+PKCE / MFA、全量旧写入迁移及真实财务/教培 CRM 集成均未完成。原 `edu-management-system` 及其技术文档保持独立不修改，全部草稿 PR 不合并，真实跨系统集成与联合验收后才考虑融合技术资料。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
