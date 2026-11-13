@@ -1,0 +1,504 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "V3.2-09 Employee Scoped Sales Read API - Isolated Only",
+    "version": "3.2.09-isolated",
+    "description": "Five implemented read-only isolated HTTP routes: student, parent/contact, consultation event, lead, opportunity. Do NOT confuse with main sales CRUD or CRM financial integrations."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3200",
+      "description": "仅虚构数据本机员工只读服务"
+    }
+  ],
+  "paths": {
+    "/api/v1/scoped/students": {
+      "get": {
+        "operationId": "listScopedStudents",
+        "summary": "学生列表（仅本人负责或具体授权）",
+        "description": "隔离环境只读示范。真实 JWT RS256 验签后，还要在员工专用的、非所有者数据库 LOGIN 里验证当前批准身份绑定；该角色无权读基础表或写任何财务记录。",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前登录员工获允许查看的业务记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "maxItems": 100,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "student_id",
+                              "display_name",
+                              "organization_id"
+                            ],
+                            "properties": {
+                              "student_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "organization_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份令牌缺失、错误、签名或权限校验失败"
+          },
+          "403": {
+            "description": "员工未绑定、未批准、已离职或该数据库 LOGIN 与员工不匹配"
+          },
+          "404": {
+            "description": "未开放接口或方法"
+          },
+          "500": {
+            "description": "隔离环境数据库查询失败，不向客户端泄露 SQL 细节"
+          }
+        },
+        "x-runtime-status": "isolated-local-readonly",
+        "x-real-crm-write-enabled": false,
+        "x-uses-employee-db-login": true
+      }
+    },
+    "/api/v1/scoped/contacts": {
+      "get": {
+        "operationId": "listScopedContacts",
+        "summary": "联系人（本人创建、本人线索或授权学生关联）",
+        "description": "隔离环境只读示范。真实 JWT RS256 验签后，还要在员工专用的、非所有者数据库 LOGIN 里验证当前批准身份绑定；该角色无权读基础表或写任何财务记录。",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前登录员工获允许查看的业务记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "maxItems": 100,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "contact_id",
+                              "do_not_contact"
+                            ],
+                            "properties": {
+                              "contact_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "display_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "do_not_contact": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份令牌缺失、错误、签名或权限校验失败"
+          },
+          "403": {
+            "description": "员工未绑定、未批准、已离职或该数据库 LOGIN 与员工不匹配"
+          },
+          "404": {
+            "description": "未开放接口或方法"
+          },
+          "500": {
+            "description": "隔离环境数据库查询失败，不向客户端泄露 SQL 细节"
+          }
+        },
+        "x-runtime-status": "isolated-local-readonly",
+        "x-real-crm-write-enabled": false,
+        "x-uses-employee-db-login": true
+      }
+    },
+    "/api/v1/scoped/contact-events": {
+      "get": {
+        "operationId": "listScopedContactEvents",
+        "summary": "咨询记录（仅本人登记，不因共享家长而开放其他咨询）",
+        "description": "隔离环境只读示范。真实 JWT RS256 验签后，还要在员工专用的、非所有者数据库 LOGIN 里验证当前批准身份绑定；该角色无权读基础表或写任何财务记录。",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前登录员工获允许查看的业务记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "maxItems": 100,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "event_id",
+                              "event_type",
+                              "occurred_at"
+                            ],
+                            "properties": {
+                              "event_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "event_type": {
+                                "type": "string"
+                              },
+                              "occurred_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份令牌缺失、错误、签名或权限校验失败"
+          },
+          "403": {
+            "description": "员工未绑定、未批准、已离职或该数据库 LOGIN 与员工不匹配"
+          },
+          "404": {
+            "description": "未开放接口或方法"
+          },
+          "500": {
+            "description": "隔离环境数据库查询失败，不向客户端泄露 SQL 细节"
+          }
+        },
+        "x-runtime-status": "isolated-local-readonly",
+        "x-real-crm-write-enabled": false,
+        "x-uses-employee-db-login": true
+      }
+    },
+    "/api/v1/scoped/leads": {
+      "get": {
+        "operationId": "listScopedLeads",
+        "summary": "仅本人负责的销售线索",
+        "description": "隔离环境只读示范。真实 JWT RS256 验签后，还要在员工专用的、非所有者数据库 LOGIN 里验证当前批准身份绑定；该角色无权读基础表或写任何财务记录。",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前登录员工获允许查看的业务记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "maxItems": 100,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "lead_id",
+                              "lead_state",
+                              "created_at"
+                            ],
+                            "properties": {
+                              "lead_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "lead_state": {
+                                "type": "string"
+                              },
+                              "created_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份令牌缺失、错误、签名或权限校验失败"
+          },
+          "403": {
+            "description": "员工未绑定、未批准、已离职或该数据库 LOGIN 与员工不匹配"
+          },
+          "404": {
+            "description": "未开放接口或方法"
+          },
+          "500": {
+            "description": "隔离环境数据库查询失败，不向客户端泄露 SQL 细节"
+          }
+        },
+        "x-runtime-status": "isolated-local-readonly",
+        "x-real-crm-write-enabled": false,
+        "x-uses-employee-db-login": true
+      }
+    },
+    "/api/v1/scoped/opportunities": {
+      "get": {
+        "operationId": "listScopedOpportunities",
+        "summary": "仅本人负责且学生可见的商机",
+        "description": "隔离环境只读示范。真实 JWT RS256 验签后，还要在员工专用的、非所有者数据库 LOGIN 里验证当前批准身份绑定；该角色无权读基础表或写任何财务记录。",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前登录员工获允许查看的业务记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "maxItems": 100,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "opportunity_id",
+                              "student_id",
+                              "stage",
+                              "lifecycle_state"
+                            ],
+                            "properties": {
+                              "opportunity_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "student_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "stage": {
+                                "type": "string"
+                              },
+                              "lifecycle_state": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份令牌缺失、错误、签名或权限校验失败"
+          },
+          "403": {
+            "description": "员工未绑定、未批准、已离职或该数据库 LOGIN 与员工不匹配"
+          },
+          "404": {
+            "description": "未开放接口或方法"
+          },
+          "500": {
+            "description": "隔离环境数据库查询失败，不向客户端泄露 SQL 细节"
+          }
+        },
+        "x-runtime-status": "isolated-local-readonly",
+        "x-real-crm-write-enabled": false,
+        "x-uses-employee-db-login": true
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "externalEmployeeBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Trusted RS256 external identity verification only; NOT production OIDC login."
+      }
+    }
+  },
+  "x-production-ready": false,
+  "x-employee-access-partial": true,
+  "x-financial-write-enabled": false
+}

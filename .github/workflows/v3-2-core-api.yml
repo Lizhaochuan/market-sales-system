@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope]
   workflow_dispatch:
 
 permissions:
@@ -76,6 +76,7 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -v "app_password_b=$RUNTIME_TEST_PASSWORD_B" -f tests/sql/create_second_tenant_principal.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/011_student_directory_read_projection.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/012_approved_identity_directory_staff_projection.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/013_employee_scoped_read_business_views.sql
           psql -X -v ON_ERROR_STOP=1             -v "route_password=fictional_approved_route_2026_8136bc"             -v "assignee_password_a=fictional_assignee_a_2026_74e5a9"             -v "assignee_password_b=fictional_assignee_b_2026_129b6e"             -f tests/sql/create_v3_2_08_readonly_principals.sql
           psql -X -v ON_ERROR_STOP=1             -v "reader_password_a=fictional_viewonly_a_2026_d2ea45"             -v "reader_password_b=fictional_viewonly_b_2026_c72180"             -f tests/sql/create_directory_projection_readers.sql
       - name: Restricted runtime role and forbidden finance operations
@@ -88,6 +89,7 @@ jobs:
         run: |
           node --check web/app.js
           node --check web/identity.js
+          node --check src/scoped-employee-read-api.mjs
       - name: Core API, authorization, idempotency and Chinese audit E2E
         run: node --test --test-concurrency=1 tests/core/*.test.mjs tests/ui/*.test.mjs tests/security/*.test.mjs
       - name: Real headless Chromium workflow and responsive UI
