@@ -74,7 +74,7 @@ test('V3.2-08: two employees in one org have distinct SQL-level scoped student d
       assert.ok(ownerRows.some(x=>x.student_id===studentA));
     });
     await t.test('old role and org GUC spoofing cannot switch employee identity',async()=>{
-      await assert.rejects(b.query('SET ROLE ms_student_assignee_reader'),e=>e.code==='42501');
+      await assert.rejects(b.query('SET ROLE ms_assignee_reader_a'),e=>e.code==='42501');
       await assert.rejects(a.query('SELECT grade_label FROM ms.students'),e=>e.code==='42501');
       await assert.rejects(a.query('SELECT * FROM ms.database_principal_staff'),e=>e.code==='42501');
       const c=await b.connect();
