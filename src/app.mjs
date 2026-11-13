@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { randomUUID, createHash } from 'node:crypto';
 import { demoLogin } from './dev-login.mjs';
 import { serveUi } from './ui-assets.mjs';
+import { identityOperation } from './identity-governance.mjs';
 import { createExternalTokenVerifier, resolveExternalStaff } from './external-identity.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
 
@@ -62,6 +63,11 @@ const routeDefs=[
   ['GET',/^\/api\/v1\/family-groups$/,'listFamilyGroups'],
   ['POST',/^\/api\/v1\/family-groups\/([0-9a-f-]+)\/decision$/,'decideFamily'],
   ['GET',/^\/api\/v1\/me$/,'getMe'],
+  ['GET',/^\/api\/v1\/identity\/staff$/,'identityListStaff'],
+  ['GET',/^\/api\/v1\/identity\/bindings$/,'identityListBindings'],
+  ['GET',/^\/api\/v1\/identity\/change-requests$/,'identityListRequests'],
+  ['POST',/^\/api\/v1\/identity\/change-requests$/,'identityCreateRequest'],
+  ['POST',/^\/api\/v1\/identity\/change-requests\/([0-9a-f-]+)\/decision$/,'identityDecideRequest'],
   ['GET',/^\/api\/v1\/students\/([0-9a-f-]+)$/,'getStudent'],
   ['POST',/^\/api\/v1\/contacts$/,'createContact'],
   ['POST',/^\/api\/v1\/contact-events$/,'createEvent'],
@@ -77,6 +83,7 @@ const routeDefs=[
 ];
 async function handle(c,ctx,op,p,body,requestUrl) {
   const org=ctx.user.organization_id,actor=ctx.user.id;
+  if(op.startsWith('identity'))return identityOperation(c,ctx,op,p,body);
   switch(op){
     case 'getMe': {
       return {
@@ -87,7 +94,8 @@ async function handle(c,ctx,op,p,body,requestUrl) {
           manage_own_leads:true,
           propose_family_review:ctx.manager,
           decide_other_person_family_review:ctx.manager,
-          review_family_audit:ctx.manager
+          review_family_audit:ctx.manager,
+          manage_identity_requests:ctx.manager
         },
         environment:'isolated-test'
       };
@@ -406,6 +414,12 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       if(ty==='student')await ownsStudent(c,ctx,id);
       else if(ty==='lead')await ownsLead(c,ctx,id);
       else if(ty==='opportunity')await ownsOpportunity(c,ctx,id);
+      else if(ty==='identity_change'){
+        if(!ctx.manager)fail(403,'FORBIDDEN','只有主管可查看员工身份审批记录');
+        const q=await c.query(
+          'SELECT 1 FROM ms.identity_change_requests WHERE id=$1 AND organization_id=$2',[id,org]);
+        if(!q.rowCount)fail(404,'NOT_FOUND','该身份审批申请不存在');
+      }
       else if(ty==='family'){
         if(!ctx.manager)fail(403,'FORBIDDEN','只有本机构主管可查看家庭关系审批历史');
         const family=await c.query('SELECT 1 FROM ms.family_groups WHERE id=$1 AND organization_id=$2',[id,org]);
