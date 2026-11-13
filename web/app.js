@@ -15,7 +15,7 @@ function toast(message,error=false){
 function labelStatus(value) {
   return ({
     unidentified:'未识别具体学生',new:'新建',working:'跟进中',converted:'已转化',
-    pending:'待核实',verified:'已核实',rejected:'已驳回',active:'有效',
+    pending:'待核实',approved:'已批准',verified:'已核实',rejected:'已驳回',active:'有效',
     unverified:'待核实',draft:'草稿',closed:'已关闭',lost:'已失单',
     paused:'暂停',won:'已成交',open:'跟进中'
   })[value]||'待处理';
