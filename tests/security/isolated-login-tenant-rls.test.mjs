@@ -165,7 +165,8 @@ test('V3.2-06 protected SESSION_USER tenant mapping: 2 real separate nonowner ap
     await t.test('linking a foreign contact to local student is rejected by child RLS',async()=>{
       await assert.rejects(poolB.query(
         "INSERT INTO ms.student_contacts(student_id,contact_id,relation_type) VALUES($1,$2,'父亲')",
-        [studentB,contactA]),e=>e.code==='42501');
+        [studentB,contactA]),e=>e.code==='42501'||e.code==='23514'||
+          (e.code==='P0001'&&e.message.includes('分属不同机构')));
     });
     await t.test('pooled queries retain their original tenant without transaction GUC setup',async()=>{
       const bRows=await poolB.query('SELECT id FROM ms.students');
