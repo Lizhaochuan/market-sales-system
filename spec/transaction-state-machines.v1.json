@@ -1,0 +1,549 @@
+{
+  "schema_version": "1.0.0-draft",
+  "version": "V3.1-03",
+  "document": "docs/TRANSACTION_STATE_MACHINE_V3.1-03.md",
+  "status": "design-only-unimplemented",
+  "owner": "market-sales-system",
+  "warnings": [
+    "V3.1-01 database PR #1 and V3.1-02 API PR #2 are still unmerged design drafts",
+    "Business decisions BP-01/02/04/05 and finance authority TP-03 are unresolved",
+    "This file is not executable code, cannot prove financial conservation or CRM fulfillment"
+  ],
+  "core_invariants": [
+    {
+      "code": "TX-I01",
+      "statement_zh": "一笔权威确认收款的全部有效分配不得超过可用金额"
+    },
+    {
+      "code": "TX-I02",
+      "statement_zh": "每订单的有效净收款必须扣除真实退款、撤销和拒付，不重复冲减同一经济事件"
+    },
+    {
+      "code": "TX-I03",
+      "statement_zh": "已确认订单合计严格等于订单课程明细金额之和，绑定有效报价版本"
+    },
+    {
+      "code": "TX-I04",
+      "statement_zh": "只有经核实的全额付款才能为一个订单创建唯一首次成交事件"
+    },
+    {
+      "code": "TX-I05",
+      "statement_zh": "一笔成交已批准销售业绩比例为100%且分金额合计精确相等，不重复机构总额"
+    },
+    {
+      "code": "TX-I06",
+      "statement_zh": "同一订单课程明细最多创建一份真实 CRM 课程权益，超时先查询原请求"
+    }
+  ],
+  "machines": [
+    {
+      "name": "sales_order",
+      "authority": "market-sales",
+      "states": [
+        "draft",
+        "submitted",
+        "accepted",
+        "cancelled",
+        "closed"
+      ],
+      "initial": "draft",
+      "transitions": [
+        {
+          "from": "draft",
+          "to": "submitted",
+          "event": "ORDER_SUBMITTED",
+          "guards": [
+            "quote_version_valid",
+            "order_item_sum_matches",
+            "same_student_and_tenant"
+          ]
+        },
+        {
+          "from": "draft",
+          "to": "cancelled",
+          "event": "ORDER_CANCELLED",
+          "guards": [
+            "authorized"
+          ]
+        },
+        {
+          "from": "submitted",
+          "to": "accepted",
+          "event": "ORDER_ACCEPTED",
+          "guards": [
+            "authorized",
+            "quote_version_valid",
+            "frozen_amount"
+          ]
+        },
+        {
+          "from": "submitted",
+          "to": "cancelled",
+          "event": "ORDER_CANCELLED",
+          "guards": [
+            "authorized",
+            "no_unresolved_funds_or_obligations"
+          ]
+        },
+        {
+          "from": "accepted",
+          "to": "closed",
+          "event": "ORDER_CLOSED",
+          "guards": [
+            "authorized",
+            "refund_or_fulfillment_obligations_resolved"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "payment_receipt_verification",
+      "authority": "finance-authority",
+      "states": [
+        "unverified",
+        "confirmed",
+        "disputed",
+        "revoked"
+      ],
+      "initial": "unverified",
+      "transitions": [
+        {
+          "from": "unverified",
+          "to": "confirmed",
+          "event": "FINANCE_RECEIPT_CONFIRMED",
+          "guards": [
+            "authenticated_source",
+            "unique_external_payment",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "unverified",
+          "to": "revoked",
+          "event": "FINANCE_RECEIPT_REVOKED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "confirmed",
+          "to": "disputed",
+          "event": "FINANCE_RECEIPT_DISPUTED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "disputed",
+          "to": "confirmed",
+          "event": "FINANCE_RECEIPT_RECONFIRMED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer",
+            "new_valid_evidence"
+          ]
+        },
+        {
+          "from": "confirmed",
+          "to": "revoked",
+          "event": "FINANCE_RECEIPT_REVOKED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "disputed",
+          "to": "revoked",
+          "event": "FINANCE_RECEIPT_REVOKED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "payment_allocation",
+      "authority": "market-sales-with-finance-approval",
+      "states": [
+        "proposed",
+        "confirmed",
+        "reversed"
+      ],
+      "initial": "proposed",
+      "transitions": [
+        {
+          "from": "proposed",
+          "to": "confirmed",
+          "event": "ALLOCATION_APPROVED",
+          "guards": [
+            "authorized_finance_approval",
+            "receipt_is_confirmed",
+            "same_currency",
+            "purpose_evidence",
+            "no_overallocation",
+            "invoice_amount_version_valid"
+          ]
+        },
+        {
+          "from": "proposed",
+          "to": "reversed",
+          "event": "ALLOCATION_PROPOSAL_REJECTED",
+          "guards": [
+            "authorized",
+            "audit_reason"
+          ]
+        },
+        {
+          "from": "confirmed",
+          "to": "reversed",
+          "event": "ALLOCATION_REVERSED",
+          "guards": [
+            "authorized_compensation",
+            "reconcile_impacted_orders",
+            "immutable_history"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "refund_projection",
+      "authority": "finance-authority",
+      "states": [
+        "unverified",
+        "confirmed",
+        "disputed",
+        "revoked"
+      ],
+      "initial": "unverified",
+      "transitions": [
+        {
+          "from": "unverified",
+          "to": "confirmed",
+          "event": "FINANCE_REFUND_CONFIRMED",
+          "guards": [
+            "authenticated_source",
+            "unique_external_refund",
+            "original_receipt_linked",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "unverified",
+          "to": "disputed",
+          "event": "FINANCE_REFUND_DISPUTED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "unverified",
+          "to": "revoked",
+          "event": "FINANCE_REFUND_REVOKED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "confirmed",
+          "to": "disputed",
+          "event": "FINANCE_REFUND_DISPUTED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "disputed",
+          "to": "confirmed",
+          "event": "FINANCE_REFUND_RECONFIRMED",
+          "guards": [
+            "authenticated_source",
+            "new_valid_evidence",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "confirmed",
+          "to": "revoked",
+          "event": "FINANCE_REFUND_REVOKED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        },
+        {
+          "from": "disputed",
+          "to": "revoked",
+          "event": "FINANCE_REFUND_REVOKED",
+          "guards": [
+            "authenticated_source",
+            "source_version_newer"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "refund_allocation",
+      "authority": "market-sales-with-finance-approval",
+      "states": [
+        "proposed",
+        "confirmed",
+        "reversed"
+      ],
+      "initial": "proposed",
+      "transitions": [
+        {
+          "from": "proposed",
+          "to": "confirmed",
+          "event": "REFUND_ALLOCATION_APPROVED",
+          "guards": [
+            "refund_source_confirmed",
+            "linked_to_original_payment_and_order",
+            "refund_amount_conserved",
+            "no_double_debit"
+          ]
+        },
+        {
+          "from": "proposed",
+          "to": "reversed",
+          "event": "REFUND_ALLOCATION_REJECTED",
+          "guards": [
+            "authorized",
+            "audit_reason"
+          ]
+        },
+        {
+          "from": "confirmed",
+          "to": "reversed",
+          "event": "REFUND_ALLOCATION_REVERSED",
+          "guards": [
+            "authorized_compensation",
+            "audit_reason",
+            "no_double_debit"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sale_recognition",
+      "authority": "market-sales-calculated",
+      "states": [
+        "not_recognized",
+        "recognized",
+        "adjusted_after_sale"
+      ],
+      "initial": "not_recognized",
+      "transitions": [
+        {
+          "from": "not_recognized",
+          "to": "recognized",
+          "event": "SALE_RECOGNIZED_ONCE",
+          "guards": [
+            "order_accepted",
+            "order_amount_positive",
+            "verified_net_paid_ge_amount_due",
+            "no_unresolved_dispute",
+            "unique_sale_event_order_id",
+            "student_owner_attribution_snapshotted",
+            "transactional_outbox"
+          ]
+        },
+        {
+          "from": "recognized",
+          "to": "adjusted_after_sale",
+          "event": "POST_SALE_ADJUSTMENT",
+          "guards": [
+            "authenticated_finance_adjustment",
+            "keep_original_sale_event",
+            "append_adjustment",
+            "reconcile_credit_and_entitlement"
+          ]
+        },
+        {
+          "from": "adjusted_after_sale",
+          "to": "adjusted_after_sale",
+          "event": "FURTHER_POST_SALE_ADJUSTMENT",
+          "guards": [
+            "authenticated_finance_adjustment",
+            "dedupe_economic_event",
+            "append_adjustment"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "crm_entitlement_fulfillment",
+      "authority": "crm",
+      "states": [
+        "not_requested",
+        "pending",
+        "unknown",
+        "completed",
+        "manual_review",
+        "cancelled"
+      ],
+      "initial": "not_requested",
+      "transitions": [
+        {
+          "from": "not_requested",
+          "to": "pending",
+          "event": "ENTITLEMENT_REQUESTED",
+          "guards": [
+            "approved_entitlement_policy",
+            "crm_identity_verified",
+            "unique_order_item_request_key",
+            "valid_finance_evidence"
+          ]
+        },
+        {
+          "from": "pending",
+          "to": "completed",
+          "event": "CRM_ENTITLEMENT_CONFIRMED",
+          "guards": [
+            "authoritative_crm_package_id",
+            "crm_student_course_match"
+          ]
+        },
+        {
+          "from": "pending",
+          "to": "unknown",
+          "event": "CRM_WRITE_OUTCOME_UNKNOWN",
+          "guards": [
+            "connection_or_response_uncertain",
+            "do_not_change_idempotency_key"
+          ]
+        },
+        {
+          "from": "pending",
+          "to": "manual_review",
+          "event": "CRM_ENTITLEMENT_NEEDS_REVIEW",
+          "guards": [
+            "documented_blocker"
+          ]
+        },
+        {
+          "from": "unknown",
+          "to": "completed",
+          "event": "CRM_QUERY_CONFIRMED",
+          "guards": [
+            "crm_request_result_verified",
+            "authoritative_crm_package_id"
+          ]
+        },
+        {
+          "from": "unknown",
+          "to": "manual_review",
+          "event": "CRM_QUERY_INCONCLUSIVE",
+          "guards": [
+            "cannot_prove_no_write"
+          ]
+        },
+        {
+          "from": "manual_review",
+          "to": "completed",
+          "event": "HUMAN_VERIFIED_EXISTING_ENTITLEMENT",
+          "guards": [
+            "crm_evidence_verified",
+            "approval_audit"
+          ]
+        },
+        {
+          "from": "not_requested",
+          "to": "cancelled",
+          "event": "ENTITLEMENT_REQUEST_CANCELLED",
+          "guards": [
+            "not_sent_to_crm",
+            "authorized"
+          ]
+        },
+        {
+          "from": "pending",
+          "to": "cancelled",
+          "event": "CRM_CONFIRMED_NOT_PROVISIONED",
+          "guards": [
+            "crm_authoritative_no_write",
+            "authorized"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sales_credit_revision",
+      "authority": "market-sales-approval",
+      "states": [
+        "proposed",
+        "approved",
+        "superseded"
+      ],
+      "initial": "proposed",
+      "transitions": [
+        {
+          "from": "proposed",
+          "to": "approved",
+          "event": "CREDIT_SPLIT_APPROVED",
+          "guards": [
+            "authorized_not_self",
+            "same_sale_event",
+            "share_bps_sum_10000",
+            "amount_cents_sum_exact",
+            "one_active_approved_version"
+          ]
+        },
+        {
+          "from": "proposed",
+          "to": "superseded",
+          "event": "CREDIT_PROPOSAL_CANCELLED",
+          "guards": [
+            "authorized",
+            "audit_reason"
+          ]
+        },
+        {
+          "from": "approved",
+          "to": "superseded",
+          "event": "NEW_VERSION_APPROVED",
+          "guards": [
+            "new_version_valid",
+            "same_transaction",
+            "immutable_old_version"
+          ]
+        }
+      ]
+    }
+  ],
+  "derived_views": [
+    {
+      "name": "order_payment_state",
+      "source": [
+        "verified_payment_receipts",
+        "confirmed_payment_allocations",
+        "verified_refunds",
+        "confirmed_refund_allocations",
+        "chargebacks",
+        "sales_orders"
+      ],
+      "values": [
+        "unpaid",
+        "partially_paid",
+        "fully_paid",
+        "disputed",
+        "adjusted"
+      ],
+      "manual_write_forbidden": true
+    },
+    {
+      "name": "crm_entitlement_state",
+      "source": [
+        "crm_entitlement_links",
+        "crm_request_results"
+      ],
+      "manual_write_forbidden": true
+    }
+  ]
+}
