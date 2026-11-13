@@ -1,0 +1,626 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Market Sales V3.2-04 Isolated Identity Governance API",
+    "version": "3.2.04-isolated",
+    "description": "Five additional implemented low-risk manager-only endpoints. Real staff identity provider, production role security, finance and CRM entitlements are NOT enabled."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3100",
+      "description": "仅本机虚构测试"
+    }
+  ],
+  "security": [
+    {
+      "staffBearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/identity/staff": {
+      "get": {
+        "operationId": "listIdentityStaff",
+        "summary": "本机构主管可见员工候选名单",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功（仍仅适用于隔离测试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [],
+                            "properties": {
+                              "staff_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "403": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "404": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "409": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "422": {
+            "description": "身份、权限或业务审核拒绝"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/identity/bindings": {
+      "get": {
+        "operationId": "listActiveIdentityBindings",
+        "summary": "本机构主管查看已有有效外部身份绑定；绝不返回 subject",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功（仍仅适用于隔离测试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [],
+                            "properties": {
+                              "binding_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "staff_user_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "staff_name": {
+                                "type": "string"
+                              },
+                              "issuer": {
+                                "type": "string"
+                              },
+                              "created_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "403": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "404": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "409": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "422": {
+            "description": "身份、权限或业务审核拒绝"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/identity/change-requests": {
+      "get": {
+        "operationId": "listIdentityChangeRequests",
+        "summary": "本机构主管可见身份申请审核状态；不会回传 subject",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "操作成功（仍仅适用于隔离测试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [],
+                            "properties": {
+                              "request_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "action": {
+                                "type": "string",
+                                "enum": [
+                                  "bind",
+                                  "revoke"
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "approved",
+                                  "rejected"
+                                ]
+                              },
+                              "issuer": {
+                                "type": "string"
+                              },
+                              "requested_by": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "target_staff_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "target_staff_name": {
+                                "type": "string"
+                              },
+                              "requested_by_name": {
+                                "type": "string"
+                              },
+                              "decided_by_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "created_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "403": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "404": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "409": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "422": {
+            "description": "身份、权限或业务审核拒绝"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      },
+      "post": {
+        "operationId": "createIdentityChangeRequest",
+        "summary": "首位主管提交员工身份绑定或撤销申请（尚不执行）",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "request_evidence_ref",
+                  "request_reason_zh"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "bind",
+                      "revoke"
+                    ]
+                  },
+                  "target_staff_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "issuer": {
+                    "type": "string",
+                    "pattern": "^https://"
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "existing_binding_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "request_evidence_ref": {
+                    "type": "string"
+                  },
+                  "request_reason_zh": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功（仍仅适用于隔离测试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "request_id",
+                        "status",
+                        "target_staff_name"
+                      ],
+                      "properties": {
+                        "request_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string",
+                          "const": "pending"
+                        },
+                        "target_staff_name": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "403": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "404": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "409": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "422": {
+            "description": "身份、权限或业务审核拒绝"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/identity/change-requests/{requestId}/decision": {
+      "post": {
+        "operationId": "decideIdentityChangeRequest",
+        "summary": "另一位主管批准/驳回，批准才产生绑定或撤销的实际副作用",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "decision",
+                  "review_evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "rejected"
+                    ]
+                  },
+                  "review_evidence_ref": {
+                    "type": "string"
+                  },
+                  "reason_zh": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "操作成功（仍仅适用于隔离测试）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "request_id",
+                        "status",
+                        "action",
+                        "target_staff_name",
+                        "reviewer_name"
+                      ],
+                      "properties": {
+                        "request_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "approved",
+                            "rejected"
+                          ]
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "bind",
+                            "revoke"
+                          ]
+                        },
+                        "target_staff_name": {
+                          "type": "string"
+                        },
+                        "reviewer_name": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "403": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "404": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "409": {
+            "description": "身份、权限或业务审核拒绝"
+          },
+          "422": {
+            "description": "身份、权限或业务审核拒绝"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "staffBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Isolated demo token or explicitly mapped external RS256 token. Not a production login."
+      }
+    }
+  },
+  "x-production-ready": false,
+  "x-real-identity-provider-connected": false,
+  "x-identity-subject-returned-to-ui": false
+}
