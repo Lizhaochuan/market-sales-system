@@ -62,8 +62,7 @@ function strictBody(op,body,routeParams){
   const allowed=op==='createStudent'?
     ['display_name','grade_label','school_name']:
     ['display_name','do_not_contact'];
-  if(Object.keys(body).some(k=>!allowed.includes(k)))
-    fail(422,'VALIDATION_ERROR','当前员工不能指定其他负责人或填写未开放的个人信息');
+  only(body,allowed);
   const name=cleanName(body.display_name,op==='createStudent'?'学生姓名':'联系人称呼');
   if(op==='createStudent')return {
     operation:'createStudent',
