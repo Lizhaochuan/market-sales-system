@@ -17,6 +17,7 @@ const close=s=>new Promise(ok=>s.close(ok));
 test('真实 Chromium：原中文工作台签名员工测试身份登录，原学生/联系人按钮经受限数据库写入',async({browser},testInfo)=>{
   process.env.MS_STAGE='isolated-test';
   const owner=new pg.Pool({connectionString:process.env.DATABASE_URL,max:5});
+  const identityDirectory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:3});
   const aRead=new pg.Pool({connectionString:process.env.DATABASE_URL_ASSIGNEE_A,max:3});
   const bRead=new pg.Pool({connectionString:process.env.DATABASE_URL_ASSIGNEE_B,max:3});
   const aWrite=new pg.Pool({connectionString:process.env.DATABASE_URL_WRITE_A,max:3});
@@ -40,6 +41,7 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
   const app=createApp(owner,{
     secret,issuer:'market-sales-test-issuer',externalIdentity,
     strictStaffMode:true,
+    identityDirectoryPool:identityDirectory,
     scopedReadPools:new Map([[A,aRead],[B,bRead]]),
     scopedWritePools:new Map([[A,aWrite],[B,bWrite]])
   });
@@ -165,6 +167,6 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
   }finally{
     await Promise.allSettled(Object.values(pages).map(x=>x.close()));
     await Promise.allSettled([app].filter(s=>s.listening).map(close));
-    await Promise.all([owner.end(),aRead.end(),bRead.end(),aWrite.end(),bWrite.end()]);
+    await Promise.all([owner.end(),identityDirectory.end(),aRead.end(),bRead.end(),aWrite.end(),bWrite.end()]);
   }
 });
