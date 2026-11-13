@@ -57,6 +57,21 @@
 
 PR #6 从 V3.2-01 PR #5 叠加开发，而后者依赖 V3.1-04 PR #4。以上均待审核、未合并主分支；旧 PR #1/#2/#3 不应与整合 PR 重复合并。既有教培 CRM 代码与技术文档不受影响。
 
+## V3.2-03 员工身份核验与家庭双人审批（草稿 PR #7）
+
+本阶段在 V3.2-02 中文工作台上增加受控员工身份适配和两名主管的家庭关系审批；继续仅在虚构数据和本机隔离 PostgreSQL 环境运行。
+
+- [员工令牌核验、审批规则与操作说明](docs/V3.2-03_IDENTITY_FAMILY_APPROVAL.md)
+- [外部 RS256 令牌验证与预绑定员工检查](src/external-identity.mjs)：**技术适配，不代表已有正式身份供应商**。
+- [家庭审批及外部员工身份迁移](db/migrations/006_identity_family_review.sql)：两人分权、审批不可直接修改、角色及机构保护。
+- [新增的 2 条实际低风险接口](api/openapi/security-approvals-implemented.v3.2.json)：当前员工权限、自他分离家庭审核；此前14+7条接口保持独立规范。
+- [真实 PostgreSQL 授权和身份安全测试](tests/security/identity-family.test.mjs)
+- [真实 Chromium 双主管申请/批准操作测试](tests/browser/admin.spec.mjs)
+
+**实际隔离验证：** [GitHub Actions Run #43465641326](https://github.com/Lizhaochuan/market-sales-system/actions/runs/43465641326) 通过了31项后端/安全测试、3项 Chromium 自动浏览器测试以及8项原有技术合同回归。通过这些自动化测试仍**不能**代替正式员工登录、真实亲属材料核验、人工 GUI/真机验收或生产安全上线。
+
+PR #7 基于 V3.2-02 PR #6，且依赖 #5 和 #4；在依赖审核和基线明确前不得直接合并 main。现有 CRM 和技术文档不修改，真正完成双系统集成与联合验收后才融合文档。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
