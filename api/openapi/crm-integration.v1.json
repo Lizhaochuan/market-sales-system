@@ -172,13 +172,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "students:lookup"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "students:lookup"
+        ]
       }
     },
     "/integration/v1/students/ensure": {
@@ -323,13 +324,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "students:ensure"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "students:ensure"
+        ]
       }
     },
     "/integration/v1/courses": {
@@ -481,13 +483,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "courses:read"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "courses:read"
+        ]
       }
     },
     "/integration/v1/availability/search": {
@@ -637,13 +640,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "availability:read"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "availability:read"
+        ]
       }
     },
     "/integration/v1/trials": {
@@ -813,13 +817,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "trials:write"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "trials:write"
+        ]
       }
     },
     "/integration/v1/trials/{trialId}/reschedule": {
@@ -979,13 +984,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "trials:write"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "trials:write"
+        ]
       }
     },
     "/integration/v1/trials/{trialId}/cancel": {
@@ -1136,13 +1142,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "trials:write"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "trials:write"
+        ]
       }
     },
     "/integration/v1/requests/{requestKey}": {
@@ -1258,13 +1265,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "requests:read"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "requests:read"
+        ]
       }
     },
     "/integration/v1/entitlements": {
@@ -1436,13 +1444,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "entitlements:write"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "entitlements:write"
+        ]
       }
     },
     "/integration/v1/entitlements/{entitlementId}": {
@@ -1556,13 +1565,14 @@
         },
         "security": [
           {
-            "serviceBearer": [
-              "entitlements:read"
-            ]
+            "serviceBearer": []
           }
         ],
         "x-contract-status": "proposed",
-        "x-authority": "edu-crm"
+        "x-authority": "edu-crm",
+        "x-required-scopes": [
+          "entitlements:read"
+        ]
       }
     }
   },
