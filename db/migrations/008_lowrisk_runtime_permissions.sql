@@ -41,20 +41,20 @@ GRANT UPDATE(revoked_at,revocation_request_id)
 
 CREATE FUNCTION ms.guard_identity_binding_change() RETURNS trigger
 LANGUAGE plpgsql AS $binding_gate$
-DECLARE request_id UUID;
+DECLARE v_request_id UUID;
 BEGIN
   -- Privileged migration owner retains legacy test-fixture import, but
   -- a dedicated runtime role cannot create or revoke without a decision.
   IF TG_OP='INSERT' THEN
-    request_id:=NEW.approval_request_id;
-    IF current_user='ms_lowrisk_runtime' AND request_id IS NULL THEN
+    v_request_id:=NEW.approval_request_id;
+    IF current_user='ms_lowrisk_runtime' AND v_request_id IS NULL THEN
       RAISE EXCEPTION '业务账户不得绕过身份绑定审批'
         USING ERRCODE='23514';
     END IF;
-    IF request_id IS NOT NULL AND NOT EXISTS (
+    IF v_request_id IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM ms.identity_change_requests q
       JOIN ms.identity_change_decisions d ON d.request_id=q.id
-      WHERE q.id=request_id AND q.action='bind'
+      WHERE q.id=v_request_id AND q.action='bind'
         AND d.decision='approved'
         AND q.target_staff_id=NEW.staff_user_id
         AND q.issuer=NEW.issuer AND q.subject=NEW.subject
@@ -74,15 +74,15 @@ BEGIN
         USING ERRCODE='23514';
     END IF;
     IF OLD.revoked_at IS DISTINCT FROM NEW.revoked_at THEN
-      request_id:=NEW.revocation_request_id;
-      IF current_user='ms_lowrisk_runtime' AND request_id IS NULL THEN
+      v_request_id:=NEW.revocation_request_id;
+      IF current_user='ms_lowrisk_runtime' AND v_request_id IS NULL THEN
         RAISE EXCEPTION '业务账户不得跳过身份撤销审批'
           USING ERRCODE='23514';
       END IF;
-      IF request_id IS NOT NULL AND NOT EXISTS (
+      IF v_request_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM ms.identity_change_requests q
         JOIN ms.identity_change_decisions d ON d.request_id=q.id
-        WHERE q.id=request_id AND q.action='revoke'
+        WHERE q.id=v_request_id AND q.action='revoke'
           AND q.existing_binding_id=OLD.id AND q.target_staff_id=OLD.staff_user_id
           AND q.issuer=OLD.issuer AND q.subject=OLD.subject
           AND d.decision='approved'
