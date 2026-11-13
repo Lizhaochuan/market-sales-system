@@ -4,6 +4,7 @@ import { demoLogin } from './dev-login.mjs';
 import { serveUi } from './ui-assets.mjs';
 import { identityOperation } from './identity-governance.mjs';
 import { createExternalTokenVerifier, resolveExternalStaff } from './external-identity.mjs';
+import { resolveStrictDirectoryContext } from './strict-auth-directory.mjs';
 import { migratedLegacyReads, readLegacyViaStaffPool } from './scoped-legacy-read-adapter.mjs';
 import { migratedLegacyWrites, writeLegacyViaStaffPool } from './scoped-legacy-write-adapter.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
@@ -460,7 +461,7 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,strictStaffMode=false}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
   // Explicit opt-in migration: legacy demo behavior is unchanged unless
@@ -473,8 +474,8 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
   if((scopedWritePools!==undefined||scopedReadPools!==undefined)&&!externalIdentity)
     throw new Error('Employee scoped mode requires the trusted RS256 issuer/audience/JWKS configuration');
   if(strictStaffMode&&(!externalIdentity||!(scopedReadPools instanceof Map)||
-      !(scopedWritePools instanceof Map)))
-    throw new Error('Strict employee mode requires trusted external verification and both staff DB pool registries');
+      !(scopedWritePools instanceof Map)||!identityDirectoryPool?.connect))
+    throw new Error('Strict employee mode requires trusted RS256, read/write pools and function-only identity directory');
   const externalVerifier=externalIdentity?createExternalTokenVerifier(externalIdentity):null;
   return createServer(async(req,res)=>{
     const requestId=randomUUID();
@@ -522,10 +523,18 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       const key=req.headers['idempotency-key'];
       if(req.method==='POST'&&(!KEY.test(key||'')))
         fail(422,'VALIDATION_ERROR','写入请求必须提供16至128位有效防重复编号');
-      c=await pool.connect();
-      await c.query('BEGIN');
-      if(externalClaims)identity=await resolveExternalStaff(c,externalClaims);
-      const ctx=await staffContext(c,identity);
+      // Strict requests NEVER open the legacy tenant/business DB pool.
+      // A separately validated function-only directory resolves current staff,
+      // organization and roles only from the verified, approved RSA identity.
+      let ctx;
+      if(strictStaffMode){
+        ctx=await resolveStrictDirectoryContext(identityDirectoryPool,externalClaims);
+      }else{
+        c=await pool.connect();
+        await c.query('BEGIN');
+        if(externalClaims)identity=await resolveExternalStaff(c,externalClaims);
+        ctx=await staffContext(c,identity);
+      }
       // RLS tenant is bound to PostgreSQL SESSION_USER by a migration-owner
       // protected mapping; no request/session GUC can select another tenant.
       // A service must use the correct dedicated tenant database login.
@@ -578,7 +587,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
           environment:'isolated-trusted-employee-test'
         };
       }
-      await c.query('COMMIT');
+      if(c)await c.query('COMMIT');
       send(res,200,{code:'OK',message:'操作成功',data:result},requestId);
     } catch(e){
       if(c)try{await c.query('ROLLBACK');}catch{}
