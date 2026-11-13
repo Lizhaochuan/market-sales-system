@@ -1,0 +1,698 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Market Sales V3.2-02 Chinese Admin Isolated UI Extensions",
+    "version": "3.2.02-isolated",
+    "description": "7 V3.2-02 demo-login/list operations. Complements 14 V3.2-01 core operations; no financial/CRM write endpoints, not production."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3100",
+      "description": "本机虚构演示，仅供隔离测试"
+    }
+  ],
+  "security": [
+    {
+      "staffBearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/dev/login": {
+      "post": {
+        "operationId": "isolatedDemoLogin",
+        "summary": "仅本机虚构员工演示登录",
+        "description": "只允许 MS_STAGE=isolated-test，127.0.0.1，本机随机演示访问口令。正式系统禁止使用。",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "account_code",
+                  "passphrase"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "account_code": {
+                    "type": "string",
+                    "enum": [
+                      "sales-a",
+                      "sales-b",
+                      "supervisor"
+                    ]
+                  },
+                  "passphrase": {
+                    "type": "string",
+                    "minLength": 32
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已授权范围内的列表或演示登录结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "token",
+                        "display_name",
+                        "role_label",
+                        "account_code",
+                        "expires_in_seconds",
+                        "stage"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "token": {
+                          "type": "string"
+                        },
+                        "display_name": {
+                          "type": "string"
+                        },
+                        "role_label": {
+                          "type": "string"
+                        },
+                        "account_code": {
+                          "type": "string"
+                        },
+                        "expires_in_seconds": {
+                          "type": "integer"
+                        },
+                        "stage": {
+                          "type": "string",
+                          "const": "isolated-test"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "演示访问口令错误"
+          },
+          "404": {
+            "description": "未在隔离环境启用"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/students": {
+      "get": {
+        "operationId": "listAuthorizedStudents",
+        "summary": "列出当前员工有权查看的学生",
+        "description": "仅已授权机构、员工及学生范围内数据；不返回敏感联系人电话和跨机构信息。",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已授权范围内的列表或演示登录结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "student_id",
+                              "display_name"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "student_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "grade_label": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "owner_user_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "owner_display_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证"
+          },
+          "403": {
+            "description": "无权访问"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/contacts": {
+      "get": {
+        "operationId": "listAuthorizedContacts",
+        "summary": "列出当前员工可管理的联系人",
+        "description": "仅已授权机构、员工及学生范围内数据；不返回敏感联系人电话和跨机构信息。",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已授权范围内的列表或演示登录结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "contact_id",
+                              "display_name",
+                              "do_not_contact"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "contact_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "do_not_contact": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证"
+          },
+          "403": {
+            "description": "无权访问"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/contact-events": {
+      "get": {
+        "operationId": "listOwnContactEvents",
+        "summary": "列出本人记录的真实咨询（主管可查本机构）",
+        "description": "仅已授权机构、员工及学生范围内数据；不返回敏感联系人电话和跨机构信息。",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已授权范围内的列表或演示登录结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "event_id",
+                              "event_type",
+                              "occurred_at"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "event_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "event_type": {
+                                "type": "string"
+                              },
+                              "occurred_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "contact_display_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证"
+          },
+          "403": {
+            "description": "无权访问"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/leads": {
+      "get": {
+        "operationId": "listOwnLeads",
+        "summary": "列出本人负责的线索（主管可查本机构）",
+        "description": "仅已授权机构、员工及学生范围内数据；不返回敏感联系人电话和跨机构信息。",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已授权范围内的列表或演示登录结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "lead_id",
+                              "lead_state",
+                              "created_at"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "lead_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "lead_state": {
+                                "type": "string"
+                              },
+                              "created_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "contact_display_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证"
+          },
+          "403": {
+            "description": "无权访问"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/opportunities": {
+      "get": {
+        "operationId": "listOwnOpportunities",
+        "summary": "列出本人负责商机及学生名称",
+        "description": "仅已授权机构、员工及学生范围内数据；不返回敏感联系人电话和跨机构信息。",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已授权范围内的列表或演示登录结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "opportunity_id",
+                              "student_id",
+                              "owner_user_id",
+                              "lifecycle_state"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "opportunity_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "student_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "owner_user_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "student_display_name": {
+                                "type": "string"
+                              },
+                              "owner_display_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "predicted_amount_cents": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "lifecycle_state": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证"
+          },
+          "403": {
+            "description": "无权访问"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    },
+    "/api/v1/family-groups": {
+      "get": {
+        "operationId": "listPendingFamilyReviews",
+        "summary": "仅主管查询待核实家庭申请",
+        "description": "仅已授权机构、员工及学生范围内数据；不返回敏感联系人电话和跨机构信息。",
+        "security": [
+          {
+            "staffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已授权范围内的列表或演示登录结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "request_id",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "OK"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "family_group_id",
+                              "display_name",
+                              "verification_state",
+                              "student_count"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "family_group_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "display_name": {
+                                "type": "string"
+                              },
+                              "verification_state": {
+                                "type": "string"
+                              },
+                              "student_count": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未认证"
+          },
+          "403": {
+            "description": "无权访问"
+          }
+        },
+        "x-implementation-status": "isolated-test-only"
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "staffBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "test-only-HS256-JWT"
+      }
+    }
+  },
+  "x-stage": "isolated-test-only",
+  "x-production-ready": false
+}
