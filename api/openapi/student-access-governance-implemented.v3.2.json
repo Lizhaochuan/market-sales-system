@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "V3.2-11 Student Access Governance (Isolated Only)",
-    "version": "3.2.11-isolated",
-    "description": "Student-centered low-risk permission changes: temporary share and owner transfer require independent manager approval; limited share revocation may execute automatically. No real finance or CRM writes."
+    "version": "3.2.12-isolated",
+    "description": "Student-centered low-risk permission changes: temporary share and owner transfer require independent manager approval; limited share revocation may execute automatically. No real finance or CRM writes. V3.2-12 adds read-only student/employee dropdowns for Chinese isolated operator console; does not add access to family proof or personal contact details."
   },
   "servers": [
     {
@@ -260,6 +260,54 @@
             "signedStaffBearer": []
           }
         ],
+        "x-isolated-test-only": true
+      }
+    },
+    "/api/v1/student-access/students": {
+      "get": {
+        "operationId": "listAccessCandidateStudents",
+        "summary": "本人负责的学生选项",
+        "description": "仅姓名和学生编号，不包含年级、家长资料和兄弟姐妹",
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "只读中文表单选项"
+          },
+          "401": {
+            "description": "未提供合法签名员工凭据"
+          },
+          "403": {
+            "description": "员工绑定未获批准、已撤销或账号失效"
+          }
+        },
+        "x-isolated-test-only": true
+      }
+    },
+    "/api/v1/student-access/staff": {
+      "get": {
+        "operationId": "listAccessTargetStaff",
+        "summary": "本机构其他有效员工选项",
+        "description": "仅姓名和员工编号，不包含外部身份主题和原始员工资料",
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "只读中文表单选项"
+          },
+          "401": {
+            "description": "未提供合法签名员工凭据"
+          },
+          "403": {
+            "description": "员工绑定未获批准、已撤销或账号失效"
+          }
+        },
         "x-isolated-test-only": true
       }
     }

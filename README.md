@@ -185,6 +185,22 @@ V3.2-09 的员工专属接口是新的只读服务；V3.2-10 开始**真正改�
 
 只在 `MS_STAGE=isolated-test` 的本机运行；旧教培 CRM 及其技术文档未修改。正式 IdP、真实财务、自动成交和 CRM 课时操作全部继续关闭；完成双系统真实集成和联合验收后才统一技术资料。
 
+## V3.2-12 中文客户授权操作界面及员工专属低风险写入（草稿 PR #16）
+
+本阶段把学生客户共享、另一位主管独立审核、负责人转交和即时撤销做成**真实可在本机浏览器使用的中文页面**，同时新建两个只接受员工本人数据的低权限 API：学生独立档案和无电话/微信的联系人登记。
+
+- [完整独立中文技术/业务/上线阻断说明](docs/V3.2-12_CHINESE_ACCESS_UI_AND_SCOPED_LOWRISK_WRITES.md)
+- [中文授权工作台](web/access.html)、[响应式样式](web/access.css)、[安全事件交互](web/access.js)；权限服务本机地址 `http://127.0.0.1:3300/app`。
+- [016 数据库迁移：安全表单选项与两种防重的员工专属低风险写入函数](db/migrations/016_access_ui_choices_and_scoped_lowrisk_writes.sql)
+- [隔离学生/联系人登记 HTTP 服务](src/scoped-lowrisk-write-api.mjs)、[低权限启动入口](src/scoped-lowrisk-write-server.mjs)，默认本机 3400 端口。
+- [中文权限页面 Chromium 实际完整操作测试](tests/browser/access.spec.mjs)
+- [真实 PostgreSQL/HTTP/RSA 低风险写入、重复提交和越权拒绝测试](tests/security/scoped-lowrisk-writes.test.mjs)
+- [授权页面 7 条已实现接口规范](api/openapi/student-access-governance-implemented.v3.2.json)及[低风险写入 2 条接口规范](api/openapi/scoped-lowrisk-write-implemented.v3.2.json)。
+
+**清晰区分安全边界：** 此中文页面是独立、本机、虚构数据的员工授权控制台，旧演示工作台只提供安全的独立入口，**没有正式统一身份登录**。旧工作台学生/联系人创建按钮尚未切换到新的员工专属低权限 API，不能称旧 POST 路径全部完成数据库最小权限迁移。新控制台的测试签名凭据仅保存于当前页面内存，刷新即清除，禁止用于生产。
+
+客户仍以学生为主要单位；只有确实有两个或更多经核实同家庭学生，家庭才按需关联。共享一名学生不等于共享其兄弟姐妹或其他销售商机。正式收款、退款、成交和 CRM 课时操作继续关闭；原教培 CRM 代码、数据与技术说明均未修改，真实集成联合验收后才考虑融合。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。

@@ -1,0 +1,164 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "V3.2-12 Function-Only Student / Contact Writes (Isolated Only)",
+    "version": "3.2.12-isolated",
+    "description": "Two actually implemented isolated POST routes, no production CRM/financial flows. Only employee-owned student and limited contact registration."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3400",
+      "description": "仅本机虚构数据"
+    }
+  ],
+  "paths": {
+    "/api/v1/lowrisk/students": {
+      "post": {
+        "operationId": "createEmployeeOwnedStudentIsolated",
+        "summary": "新建本人负责的学生档案（隔离低权限）",
+        "description": "仅由当前员工专用 PostgreSQL LOGIN 在受保护函数中创建本人负责的学生。不会自动创建家庭、销售商机、付款或课时。",
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "display_name"
+                ],
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "grade_label": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "school_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已建立或按相同防重编号返回原有学生"
+          },
+          "401": {
+            "description": "缺少或无效员工签名凭据"
+          },
+          "403": {
+            "description": "员工身份未经批准、已撤销或与数据库登录不一致"
+          },
+          "409": {
+            "description": "相同防重复编号对应其他操作或内容"
+          },
+          "422": {
+            "description": "出现未允许的字段或输入无效"
+          }
+        }
+      }
+    },
+    "/api/v1/lowrisk/contacts": {
+      "post": {
+        "operationId": "createEmployeeOwnedContactIsolated",
+        "summary": "登记当前员工的联系人（不采集电话/微信）",
+        "description": "只接受联系人称呼和拒绝主动联系标记。不能写入手机号、微信、身份材料或自动创建家庭关联。",
+        "security": [
+          {
+            "signedStaffBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "display_name"
+                ],
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "do_not_contact": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已登记或同一防重编号返回原联系人"
+          },
+          "401": {
+            "description": "缺少或无效员工签名凭据"
+          },
+          "403": {
+            "description": "员工身份无效或与数据库登录不一致"
+          },
+          "409": {
+            "description": "同一编号的其他操作或不同请求体"
+          },
+          "422": {
+            "description": "试图采集未允许的字段或输入无效"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "signedStaffBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Trusted RS256 external identity with live approved staff binding in database."
+      }
+    }
+  },
+  "x-production-ready": false,
+  "x-financial-write-enabled": false,
+  "x-real-crm-entitlement-enabled": false
+}
