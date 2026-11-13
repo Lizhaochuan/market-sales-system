@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -33,7 +33,31 @@ function cleanOptional(v,label){
     fail(422,'VALIDATION_ERROR',label+'长度超限');
   return v.trim()||null;
 }
+function approvalText(v,label,max){
+  if(typeof v!=='string'||v.trim().length<2||v.trim().length>max)
+    fail(422,'VALIDATION_ERROR',label+'不能为空或长度超限');
+  return v.trim();
+}
 function strictBody(op,body,routeParams){
+  if(op==='requestContactCustody'){
+    only(body,['contact_id','target_staff_id','evidence_ref','reason_zh']);
+    return {params:[
+      uuid(body.contact_id,'联系人'),
+      uuid(body.target_staff_id,'接收员工'),
+      approvalText(body.evidence_ref,'核实材料说明',200),
+      approvalText(body.reason_zh,'交接理由',400)
+    ]};
+  }
+  if(op==='decideContactCustody'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['approved','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择批准或驳回');
+    return {params:[
+      uuid(routeParams?.[0],'交接申请'),body.decision,
+      approvalText(body.evidence_ref,'独立复核材料',200),
+      approvalText(body.reason_zh,'审核理由',400)
+    ]};
+  }
   if(op==='linkContact'){
     only(body,['contact_id','relation_type','verification_state','is_primary']);
     if(body.verification_state!==undefined&&body.verification_state!=='unverified')
@@ -124,6 +148,14 @@ export async function writeLegacyViaStaffPool({
       case 'createEvent':
         result=await client.query(
           'SELECT ms.create_scoped_contact_consultation($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'requestContactCustody':
+        result=await client.query(
+          'SELECT ms.request_scoped_contact_custody($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideContactCustody':
+        result=await client.query(
+          'SELECT ms.decide_scoped_contact_custody($1,$2,$3,$4,$5) AS result',
           [...parsed.params,idempotencyKey]);break;
       default:throw Error('Unsupported restricted write');
     }
