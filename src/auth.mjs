@@ -41,7 +41,7 @@ export async function staffContext(client, identity) {
     "SELECT rt.role_code FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id "+
     "WHERE g.user_id=$1 AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.organization_id=$2",
     [u.id,u.organization_id]);
-  return {user:u,manager:roles.rows.some(x=>['sales_manager','super_admin'].includes(x.role_code))};
+  return {user:u,roles:roles.rows.map(x=>x.role_code),manager:roles.rows.some(x=>['sales_manager','super_admin'].includes(x.role_code))};
 }
 export async function ownsStudent(c,ctx,id) {
   const r=await c.query(
