@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls]
   workflow_dispatch:
 
 permissions:
@@ -34,7 +34,9 @@ jobs:
       DEV_LOGIN_SECRET: fictional-strong-ui-demo-passphrase-0001
       PGPASSWORD: isolated_test_only_password
       RUNTIME_TEST_PASSWORD: fictional_ci_runtime_2026_9f36a672
+      RUNTIME_TEST_PASSWORD_B: fictional_ci_runtime_b_2026_3b81cf20
       DATABASE_URL_RESTRICTED: postgresql://ms_isolated_api:fictional_ci_runtime_2026_9f36a672@127.0.0.1:5432/ms_test
+      DATABASE_URL_RESTRICTED_B: postgresql://ms_isolated_api_b:fictional_ci_runtime_b_2026_3b81cf20@127.0.0.1:5432/ms_test
       PGHOST: localhost
       PGPORT: '5432'
       PGDATABASE: ms_test
@@ -63,6 +65,10 @@ jobs:
       - name: Create isolated nonowner PostgreSQL application LOGIN
         run: |
           psql -X -v ON_ERROR_STOP=1 -v "app_password=$RUNTIME_TEST_PASSWORD" -f tests/sql/create_isolated_runtime_login.sql
+      - name: Replace GUC tenant scopes with trusted database principal mapping
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/010_database_principal_tenant_boundary.sql
+          psql -X -v ON_ERROR_STOP=1 -v "app_password_b=$RUNTIME_TEST_PASSWORD_B" -f tests/sql/create_second_tenant_principal.sql
       - name: Restricted runtime role and forbidden finance operations
         run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/lowrisk_runtime_permissions.smoke.sql
       - name: Restricted actual LOGIN and tenant row-level security E2E
