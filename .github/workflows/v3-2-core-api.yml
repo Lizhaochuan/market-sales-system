@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval]
   workflow_dispatch:
 
 permissions:
@@ -54,9 +54,15 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/004_contact_event_owner_scope.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/005_unique_consultation_lead.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/006_identity_family_review.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/007_identity_change_governance.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/008_lowrisk_runtime_permissions.sql
           psql -X -v ON_ERROR_STOP=1 -f tests/fixtures/fictional_ui_demo_seed.sql
+      - name: Restricted runtime role and forbidden finance operations
+        run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/lowrisk_runtime_permissions.smoke.sql
       - name: Check frontend JavaScript syntax
-        run: node --check web/app.js
+        run: |
+          node --check web/app.js
+          node --check web/identity.js
       - name: Core API, authorization, idempotency and Chinese audit E2E
         run: node --test tests/core/*.test.mjs tests/ui/*.test.mjs tests/security/*.test.mjs
       - name: Real headless Chromium workflow and responsive UI
