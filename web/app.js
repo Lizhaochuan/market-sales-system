@@ -135,6 +135,7 @@ function render(){
       (x.requested_by_name||'原申请待查')+
       (x.verified_by_name?' · 审核人：'+x.verified_by_name:''),
     labelStatus(x.verification_state),'家'));
+  fillOptions();
   const familyCanReview=state.capabilities.decide_other_person_family_review===true;
   const form=$('family-decision-form');
   form.querySelectorAll('input,textarea,select,button').forEach(el=>el.disabled=!familyCanReview);
@@ -147,7 +148,6 @@ function render(){
   if(selected&&selected.requested_by===state.user?.staff_id){
     form.querySelector('button[type="submit"]').disabled=true;
   }
-  fillOptions();
 }
 async function api(path,{method='GET',body=null,token=state.token}={}){
   const headers={...(token?{Authorization:'Bearer '+token}:{})};
