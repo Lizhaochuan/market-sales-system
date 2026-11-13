@@ -14,7 +14,8 @@ BEGIN
   -- a dedicated runtime role cannot create or revoke without a decision.
   IF TG_OP='INSERT' THEN
     v_request_id:=NEW.approval_request_id;
-    IF pg_has_role(current_user,'ms_lowrisk_runtime','member') AND v_request_id IS NULL THEN
+    IF (pg_has_role(current_user,'ms_lowrisk_runtime','member') AND
+        NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=current_user AND rolsuper)) AND v_request_id IS NULL THEN
       RAISE EXCEPTION '业务账户不得绕过身份绑定审批'
         USING ERRCODE='23514';
     END IF;
@@ -42,7 +43,8 @@ BEGIN
     END IF;
     IF OLD.revoked_at IS DISTINCT FROM NEW.revoked_at THEN
       v_request_id:=NEW.revocation_request_id;
-      IF pg_has_role(current_user,'ms_lowrisk_runtime','member') AND v_request_id IS NULL THEN
+      IF (pg_has_role(current_user,'ms_lowrisk_runtime','member') AND
+        NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=current_user AND rolsuper)) AND v_request_id IS NULL THEN
         RAISE EXCEPTION '业务账户不得跳过身份撤销审批'
           USING ERRCODE='23514';
       END IF;
