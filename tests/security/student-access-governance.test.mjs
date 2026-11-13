@@ -178,8 +178,12 @@ test('V3.2-11: student access approval, temporary grants, expiry, revocation, an
       const g=grants.data.items.find(x=>x.student_name&&x.status_zh==='有效');
       assert.ok(g?.grant_id);
       shareId=g.grant_id;
-      const noFamily=await owner.query('SELECT COUNT(*)::int AS n FROM ms.family_groups WHERE organization_id=$1',[org]);
-      assert.equal(noFamily.rows[0].n,0,'shared parent must never auto-create family');
+      const noFamily=await owner.query(
+        'SELECT COUNT(*)::int AS n FROM ms.family_memberships '+
+        'WHERE student_id=ANY($1::uuid[]) AND revoked_at IS NULL',
+        [[studentA,sibling]]);
+      assert.equal(noFamily.rows[0].n,0,
+        'sharing one of these children must not create a family membership for either');
     });
 
     await t.test('authorized owner or grantee can revoke one share, but not sibling/financial rights',async()=>{
