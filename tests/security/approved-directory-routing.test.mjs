@@ -83,6 +83,7 @@ test('V3.2-08: only independently approved LIVE identity bindings can route',asy
   try{
     const staffA=await createStaff(orgA,'动态路由A员工');
     const staffB=await createStaff(orgB,'动态路由B员工');
+    const legacyStaff=await createStaff(orgA,'未审批旧式绑定对照员工');
     const applicantA=await createStaff(orgA,'A申请主管');
     const reviewerA=await createStaff(orgA,'A独立主管');
     const applicantB=await createStaff(orgB,'B申请主管');
@@ -128,7 +129,7 @@ test('V3.2-08: only independently approved LIVE identity bindings can route',asy
     const pendingB=await requestIdentity(orgB,staffB,subjectB,applicantB);
     await owner.query(
       "INSERT INTO ms.staff_identity_bindings(staff_user_id,issuer,subject,bound_by) VALUES($1,$2,$3,$4)",
-      [staffA,issuer,unapproved,reviewerA]);
+      [legacyStaff,issuer,unapproved,reviewerA]);
 
     await t.test('unapproved/pending/legacy direct bindings do not route',async()=>{
       assert.equal(await resolveTenant(issuer,subjectA),null);
