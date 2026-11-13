@@ -25,3 +25,13 @@
 现有 CRM 仓库： [edu-management-system](https://github.com/Lizhaochuan/edu-management-system)。
 
 **仅在市场销售系统与现有 CRM 完成正式集成、联合测试和验收后，才执行跨项目技术文档融合。**在此之前，不修改既有 CRM 的技术说明作为本项目文档发布的前提。
+
+## V3.1-02 接口合同（待审核 PR）
+
+- [市场销售与 CRM API 详细技术设计](docs/API_CONTRACT_V3.1-02.md)
+- [CRM 侧拟建 API · OpenAPI 3.1 草案](api/openapi/crm-integration.v1.json)（10 个端点；**CRM 当前尚未提供**）
+- [市场销售 API · OpenAPI 3.1 草案](api/openapi/market-sales.v1.json)（18 个端点；**尚未开发**）
+- [合同与端到端验收矩阵](docs/API_ACCEPTANCE_V3.1-02.md)（26 项，均未运行）
+
+V3.1-01 数据库 PR #1 仍为草稿；本 API 草案独立评审，依赖的数据库/财务政策及 CRM 新接口须分别验证。以上均不改变现有 CRM 文档。
+
