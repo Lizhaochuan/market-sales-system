@@ -50,6 +50,6 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/003_low_risk_api_idempotency.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/004_contact_event_owner_scope.sql
       - name: Core API, authorization, idempotency and Chinese audit E2E
-        run: node --test tests/core/core-api.test.mjs
+        run: node --test tests/core/*.test.mjs
       - name: Existing design contract regression
         run: node --test tests/contracts/contracts.test.mjs
