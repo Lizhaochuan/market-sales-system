@@ -9,7 +9,7 @@ const secret=process.env.AUTH_HMAC_SECRET;
 if(!secret||secret.length<32)throw new Error('Set a strong isolated-test-only AUTH_HMAC_SECRET');
 if(!process.env.DATABASE_URL)throw new Error('DATABASE_URL required');
 const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:8});
-const server=createApp(pool,{secret,issuer:process.env.AUTH_ISSUER||'market-sales-test-issuer'});
+const server=createApp(pool,{secret,issuer:process.env.AUTH_ISSUER||'market-sales-test-issuer',devLoginSecret:process.env.DEV_LOGIN_SECRET});
 const port=Number(process.env.PORT||3100);
 server.listen(port,'127.0.0.1',()=>{console.log('Market-sales isolated backend listening on loopback '+port);});
 const shutdown=async()=>{server.close();await pool.end();};
