@@ -102,7 +102,9 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     }
     case 'listStudents': {
       const r=await c.query(
-        "SELECT s.id AS student_id,s.display_name,s.grade_label,s.owner_user_id,"+
+        "SELECT s.id AS student_id,s.display_name,"+
+        "CASE WHEN ($2::boolean OR s.owner_user_id=$3) "+
+        "THEN s.grade_label ELSE '已隐藏' END AS grade_label,s.owner_user_id,"+
         "u.display_name AS owner_display_name FROM ms.students s "+
         "LEFT JOIN ms.staff_users u ON u.id=s.owner_user_id "+
         "WHERE s.organization_id=$1 AND s.archived_at IS NULL AND "+
