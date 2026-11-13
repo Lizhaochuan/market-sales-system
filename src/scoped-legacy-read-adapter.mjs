@@ -1,0 +1,107 @@
+// V3.2-10 adapter for EXISTING GET sales routes.
+// When enabled, never fallback to broad tenant-level SQL for these routes.
+// DB SESSION_USER is admin-bound to a single employee, independent of JWT role.
+// Does NOT migrate any POST, family approvals, audit or identity-management API.
+import {fail} from './auth.mjs';
+
+export const migratedLegacyReads=new Set([
+  'listStudents','listContacts','listEvents','listLeads','listOpportunities',
+  'getStudent','getLead','getOpportunity'
+]);
+
+const listQueries={
+  listStudents:
+    'SELECT student_id,display_name,owner_user_id FROM ms.scoped_legacy_student_details ORDER BY student_id LIMIT 100',
+  listContacts:
+    'SELECT contact_id,display_name,do_not_contact FROM ms.scoped_contacts_directory ORDER BY contact_id LIMIT 100',
+  listEvents:
+    'SELECT event_id,event_type,occurred_at FROM ms.scoped_contact_events_directory ORDER BY event_id LIMIT 100',
+  listLeads:
+    'SELECT lead_id,lead_state,created_at FROM ms.scoped_leads_directory ORDER BY lead_id LIMIT 100',
+  listOpportunities:
+    'SELECT o.opportunity_id,o.student_id,o.owner_user_id,o.lifecycle_state,'+
+    's.display_name AS student_display_name FROM ms.scoped_legacy_opportunity_details o '+
+    'JOIN ms.scoped_legacy_student_details s ON s.student_id=o.student_id ORDER BY o.opportunity_id LIMIT 100'
+};
+
+function projectList(op,rows,employee){
+  if(op==='listStudents')return rows.map(r=>({
+    ...r,grade_label:'已隐藏',
+    owner_display_name:r.owner_user_id===employee.id?employee.display_name:'已隐藏'
+  }));
+  if(op==='listEvents')return rows.map(r=>({...r,contact_display_name:null}));
+  if(op==='listLeads')return rows.map(r=>({...r,contact_display_name:null}));
+  if(op==='listOpportunities')return rows.map(r=>({
+    ...r,predicted_amount_cents:null,owner_display_name:employee.display_name
+  }));
+  return rows;
+}
+const detailQueries={
+  getStudent:{
+    query:'SELECT student_id,display_name,owner_user_id FROM ms.scoped_legacy_student_details WHERE student_id=$1 LIMIT 1',
+    message:'没有找到有权查看的学生'
+  },
+  getLead:{
+    query:'SELECT lead_id,contact_id FROM ms.scoped_legacy_lead_details WHERE lead_id=$1 LIMIT 1',
+    message:'没有找到有权查看的线索'
+  },
+  getOpportunity:{
+    query:'SELECT opportunity_id,student_id,owner_user_id,stage,lifecycle_state '+
+      'FROM ms.scoped_legacy_opportunity_details WHERE opportunity_id=$1 LIMIT 1',
+    message:'没有找到有权查看的商机'
+  }
+};
+export async function readLegacyViaStaffPool({pools,context,claims,operation,params}){
+  if(process.env.MS_STAGE!=='isolated-test')
+    throw new Error('Restricted legacy read mode is isolated only');
+  if(!migratedLegacyReads.has(operation))throw new Error('Unsupported legacy read operation');
+  // Fail closed rather than fall back to a manager's previous organization-wide
+  // access or to the unscoped tenant DB pool.
+  if(!claims?.issuer||!claims?.subject)
+    fail(403,'STAFF_READ_RESTRICTED','此查询需要经过审核的外部员工身份');
+  if(!(pools instanceof Map))
+    throw new Error('Trusted staff DB pool map is required');
+  const pool=pools.get(context.user.id);
+  if(!pool||typeof pool.connect!=='function')
+    fail(403,'STAFF_READ_RESTRICTED','该员工没有经审核的专用只读数据库账号');
+  let client;
+  try{
+    client=await pool.connect();
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const check=await client.query(
+      'SELECT ms.current_scoped_staff_id() AS staff_id, '+
+      'ms.current_scoped_organization_id() AS org_id, '+
+      'ms.scoped_employee_identity_valid($1,$2) AS identity_ok',
+      [claims.issuer,claims.subject]
+    );
+    const x=check.rows[0];
+    if(!x||!x.identity_ok||x.staff_id!==context.user.id||
+      x.org_id!==context.user.organization_id)
+      fail(403,'STAFF_READ_RESTRICTED','员工账号与数据授权不一致，已拒绝读取');
+
+    let data;
+    if(listQueries[operation]){
+      const r=await client.query(listQueries[operation]);
+      data={items:projectList(operation,r.rows,context.user)};
+    }else{
+      const detail=detailQueries[operation];
+      const id=params?.[0];
+      if(typeof id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+        fail(422,'VALIDATION_ERROR','业务编号格式不正确');
+      const r=await client.query(detail.query,[id]);
+      if(!r.rowCount)fail(404,'NOT_FOUND',detail.message);
+      data=r.rows[0];
+      if(operation==='getLead'){
+        const links=await client.query(
+          'SELECT student_id FROM ms.scoped_legacy_lead_student_links '+
+          'WHERE lead_id=$1 ORDER BY student_id LIMIT 100',[id]);
+        data={...data,student_ids:links.rows.map(x=>x.student_id)};
+      }
+    }
+    await client.query('COMMIT');
+    return data;
+  }catch(error){
+    if(client)try{await client.query('ROLLBACK');}catch{}
+    throw error;
+  }finally{if(client)client.release();}
+}
