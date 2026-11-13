@@ -21,6 +21,7 @@ const close=app=>new Promise(ok=>app.close(ok));
 test('V3.2-13 original student/contact POST uses employee-only DB identity and cannot fallback',async t=>{
   process.env.MS_STAGE='isolated-test';
   const owner=new pg.Pool({connectionString:process.env.DATABASE_URL,max:8});
+  const identityDirectory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:3});
   const reads={
     A:new pg.Pool({connectionString:process.env.DATABASE_URL_ASSIGNEE_A,max:4}),
     B:new pg.Pool({connectionString:process.env.DATABASE_URL_ASSIGNEE_B,max:4})
@@ -55,7 +56,7 @@ test('V3.2-13 original student/contact POST uses employee-only DB identity and c
   const writePools=new Map([[staffA,writes.A],[staffB,writes.B]]);
   const app=createApp(owner,{
     secret,issuer:'market-sales-test-issuer',externalIdentity,
-    strictStaffMode:true,scopedReadPools:readPools,scopedWritePools:writePools
+    strictStaffMode:true,scopedReadPools:readPools,scopedWritePools:writePools,identityDirectoryPool:identityDirectory
   });
   async function grantExternal(target,subject){
     const r=await owner.query(
@@ -427,7 +428,7 @@ test('V3.2-13 original student/contact POST uses employee-only DB identity and c
     });
   }finally{
     await Promise.allSettled([app].filter(x=>x.listening).map(close));
-    await Promise.all([owner.end(),...Object.values(reads).map(x=>x.end()),
+    await Promise.all([owner.end(),identityDirectory.end(),...Object.values(reads).map(x=>x.end()),
       ...Object.values(writes).map(x=>x.end())]);
   }
 });
