@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business]
   workflow_dispatch:
 
 permissions:
@@ -49,7 +49,10 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/002_financial_integrity_draft.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/003_low_risk_api_idempotency.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/004_contact_event_owner_scope.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/fixtures/fictional_ui_demo_seed.sql
+      - name: Check frontend JavaScript syntax
+        run: node --check web/app.js
       - name: Core API, authorization, idempotency and Chinese audit E2E
-        run: node --test tests/core/*.test.mjs
+        run: node --test tests/core/*.test.mjs tests/ui/*.test.mjs
       - name: Existing design contract regression
         run: node --test tests/contracts/contracts.test.mjs
