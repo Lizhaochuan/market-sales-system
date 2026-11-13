@@ -101,7 +101,7 @@ CREATE TRIGGER trg_guard_family_review_approval
 -- A family must not be confirmed just by directly updating its status.
 -- The decision row must already exist in the SAME transaction.
 CREATE FUNCTION ms.guard_family_group_status() RETURNS trigger
-LANGUAGE plpgsql AS $
+LANGUAGE plpgsql AS $family_guard$
 BEGIN
   IF NEW.verification_state IS DISTINCT FROM OLD.verification_state THEN
     IF OLD.verification_state <> 'pending'
@@ -121,7 +121,7 @@ BEGIN
     END IF;
   END IF;
   RETURN NEW;
-END $;
+END $family_guard$;
 CREATE TRIGGER trg_guard_family_group_status
   BEFORE UPDATE OF verification_state ON ms.family_groups
   FOR EACH ROW EXECUTE FUNCTION ms.guard_family_group_status();
