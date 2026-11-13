@@ -98,6 +98,34 @@ CREATE TRIGGER trg_guard_family_review_approval
   BEFORE INSERT ON ms.family_review_decisions
   FOR EACH ROW EXECUTE FUNCTION ms.guard_family_review_approval();
 
+-- A family must not be confirmed just by directly updating its status.
+-- The decision row must already exist in the SAME transaction.
+CREATE FUNCTION ms.guard_family_group_status() RETURNS trigger
+LANGUAGE plpgsql AS $
+BEGIN
+  IF NEW.verification_state IS DISTINCT FROM OLD.verification_state THEN
+    IF OLD.verification_state <> 'pending'
+       OR NEW.verification_state NOT IN ('verified','rejected') THEN
+      RAISE EXCEPTION '家庭关系状态改变需要专门审核流程'
+        USING ERRCODE='23514';
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM ms.family_review_decisions d
+      WHERE d.family_group_id=NEW.id
+        AND d.reviewer_user_id=CASE WHEN NEW.verification_state='verified' THEN NEW.verified_by
+          ELSE d.reviewer_user_id END
+        AND d.decision=CASE WHEN NEW.verification_state='verified' THEN 'approved' ELSE 'rejected' END
+    ) THEN
+      RAISE EXCEPTION '家庭状态变化缺少同一事务内的授权审核'
+        USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $;
+CREATE TRIGGER trg_guard_family_group_status
+  BEFORE UPDATE OF verification_state ON ms.family_groups
+  FOR EACH ROW EXECUTE FUNCTION ms.guard_family_group_status();
+
 -- Reviews are append-only, with a one-review-per-application uniqueness key.
 CREATE FUNCTION ms.guard_family_review_immutable() RETURNS trigger
 LANGUAGE plpgsql AS $$
