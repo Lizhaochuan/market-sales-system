@@ -170,7 +170,7 @@ test('V3.2-09: five actual scoped HTTP read endpoints isolate staff, fields and 
       assert.equal((await request(apps[0],paths.students+'?select=grade_label',tokenA)).status,404);
     });
 
-    await t.test('sharing A student to B reveals student and related contact/consultation, not A lead or opportunity',async()=>{
+    await t.test('sharing A student to B reveals student and parent name, but not unscoped consultation or A sales ownership',async()=>{
       const g=await owner.query(
         "INSERT INTO ms.data_scope_grants(user_id,resource_type,scope_type,scope_ref,granted_by) "+
         "VALUES($1,'student','specific',$2,$3) RETURNING id",[B,studentA,manager]);
