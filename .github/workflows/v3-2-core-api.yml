@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope, chatgpt/v3-2-09-scoped-read-business-api, chatgpt/v3-2-10-legacy-read-hardening, chatgpt/v3-2-11-student-access-governance, chatgpt/v3-2-12-chinese-access-ui-lowrisk-writes]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope, chatgpt/v3-2-09-scoped-read-business-api, chatgpt/v3-2-10-legacy-read-hardening, chatgpt/v3-2-11-student-access-governance, chatgpt/v3-2-12-chinese-access-ui-lowrisk-writes, chatgpt/v3-2-13-legacy-lowrisk-writes-trusted-ui]
   workflow_dispatch:
 
 permissions:
@@ -86,6 +86,7 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/014_legacy_sales_scoped_read_details.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/015_student_access_governance.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/016_access_ui_choices_and_scoped_lowrisk_writes.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/017_scoped_contact_links_consultations.sql
           psql -X -v ON_ERROR_STOP=1             -v "route_password=fictional_approved_route_2026_8136bc"             -v "assignee_password_a=fictional_assignee_a_2026_74e5a9"             -v "assignee_password_b=fictional_assignee_b_2026_129b6e"             -f tests/sql/create_v3_2_08_readonly_principals.sql
           psql -X -v ON_ERROR_STOP=1 -v "manager_password=fictional_assignee_manager_2026_0bc5ea" -f tests/sql/create_v3_2_10_manager_readonly_login.sql
           psql -X -v ON_ERROR_STOP=1             -v "pass_a=fictional_access_a_2026_982a1e"             -v "pass_b=fictional_access_b_2026_819a0f"             -v "pass_m=fictional_access_manager_2026_15be2c"             -f tests/sql/create_v3_2_11_access_operator_logins.sql

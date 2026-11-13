@@ -536,7 +536,8 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         // and handler. It NEVER falls through to their broad SQL credentials.
         result=await writeLegacyViaStaffPool({
           pools:scopedWritePools,context:ctx,claims:externalClaims,
-          operation:route.op,body,idempotencyKey:key
+          operation:route.op,body,idempotencyKey:key,
+          routeParams:route.match.slice(1)
         });
       }else if(req.method==='POST'){
         const hash=digest(req.method,url.pathname,body);
@@ -568,6 +569,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
           ...result,
           capabilities:{
             view_own_students:true,create_students:true,create_contacts:true,
+            link_own_student_contact:true,record_own_contact_consultation:true,
             manage_own_leads:false,propose_family_review:false,
             decide_other_person_family_review:false,review_family_audit:false,
             manage_identity_requests:false,

@@ -125,6 +125,15 @@ function render(){
     x.display_name,'年级：'+(x.grade_label||'未填写')+' · 负责人：'+(x.owner_display_name||'待确认'),'独立档案','学'));
   paint('contacts-list',state.contacts,x=>record(
     x.display_name,x.do_not_contact?'已标记不接受主动联系':'可联系状态未核实','共享联系人','人'));
+  const consultationBox=$('strict-consultation-list');
+  if($('strict-consultation-card'))$('strict-consultation-card').hidden=!state.strict;
+  if(consultationBox){
+    consultationBox.hidden=!state.strict;
+    if(state.strict)paint('strict-consultation-list',state.events,x=>record(
+      x.event_type,
+      '本员工登记的实际咨询 · '+formatDate(x.occurred_at),
+      '已登记，不代表已形成销售线索','询'));
+  }
   paint('leads-list',state.leads,x=>record(
     x.contact_display_name||'未指定联系人','创建时间：'+formatDate(x.created_at),labelStatus(x.lead_state),'询'));
   paint('opportunities-list',state.opportunities,x=>record(
@@ -166,14 +175,15 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
 }
 async function refresh(){
   const endpoints=state.strict?[
-    ['students','/api/v1/students'],['contacts','/api/v1/contacts']
+    ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
+    ['events','/api/v1/contact-events']
   ]:[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],['leads','/api/v1/leads'],
     ['opportunities','/api/v1/opportunities'],['families','/api/v1/family-groups']
   ];
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
-  if(state.strict)for(const key of ['events','leads','opportunities','families'])state[key]=[];
+  if(state.strict)for(const key of ['leads','opportunities','families'])state[key]=[];
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     state[key]=r.status==='fulfilled'?r.value.items||[]:[];
@@ -203,12 +213,22 @@ function logout(notice=true){
   if(notice)toast('已退出演示账号');
 }
 function applyStrictLayout(){
-  const allowed=new Set(['overview','students','contacts']);
+  const allowed=new Set(['overview','students','contacts','leads']);
   for(const nav of document.querySelectorAll('button[data-view]')){
     nav.hidden=state.strict&&!allowed.has(nav.dataset.view);
   }
   const contactLink=$('contact-link-form');
-  if(contactLink)contactLink.closest('.panel').hidden=state.strict;
+  if(contactLink)contactLink.closest('.panel').hidden=false;
+  // Consultation is now migrated; generating leads and linking leads to
+  // children remain blocked server-side and hidden in the strict test UI.
+  const leadForm=$('lead-form');
+  if(leadForm)leadForm.closest('.panel').hidden=state.strict;
+  const leadList=$('leads-list');
+  if(leadList)leadList.closest('.panel').hidden=state.strict;
+  const head=document.querySelector('[data-panel="leads"] .section-head p');
+  if(head)head.textContent=state.strict?
+    '这里只允许登记本人联系人实际发生的一次咨询；线索与商机仍须后续独立审核。':
+    '先记录一次真实咨询，再形成线索；还不知道学生是谁时也可以登记。';
   $('strict-scope-note').hidden=!state.strict;
 }
 function register(id,action){

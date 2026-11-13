@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "V3.2-13 Existing Sales POST: Employee-only Strict Mode",
-    "version": "3.2.13-isolated",
-    "description": "Exactly 2 original low-risk sales POST endpoints are migrated, protected by employee-specific session_user DB LOGIN, require live approved RS256 external identity; other existing broad writes are DENIED in strict mode."
+    "title": "V3.2-14 Existing Sales POST: Four Employee-only Low-risk Operations",
+    "version": "3.2.14-isolated",
+    "description": "Exactly four old POST paths now migrate to staff-only DB SQL in isolated strict mode: own student, own contact, unverified student-contact link and one actual contact consultation. Financial/CRM and family verification remain disabled."
   },
   "servers": [
     {
@@ -156,6 +156,181 @@
         "x-function-only-employee-db": true,
         "x-production-ready": false
       }
+    },
+    "/api/v1/students/{studentId}/contacts": {
+      "post": {
+        "operationId": "linkOwnStudentContactPendingIsolated",
+        "summary": "为本人负责的指定学生关联本人登记的联系人",
+        "description": "Always unverified, not primary. A shared parent does NOT imply siblings or shared student leads. Cannot confirm guardianship or family here.",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "studentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "contact_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "relation_type": {
+                    "type": "string",
+                    "enum": [
+                      "父亲",
+                      "母亲",
+                      "其他监护人",
+                      "其他联系人"
+                    ]
+                  },
+                  "verification_state": {
+                    "type": "string",
+                    "enum": [
+                      "unverified"
+                    ]
+                  },
+                  "is_primary": {
+                    "type": "boolean",
+                    "enum": [
+                      false
+                    ]
+                  }
+                },
+                "required": [
+                  "contact_id",
+                  "relation_type"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "隔离员工数据库事务成功，幂等重试只返回同一实际记录"
+          },
+          "403": {
+            "description": "学生/联系人不属于本人，身份已失效或受限数据库账号不匹配"
+          },
+          "409": {
+            "description": "重复关联、操作编号已用于不同内容"
+          },
+          "422": {
+            "description": "字段不合法，或试图直接确认家庭/监护关系"
+          },
+          "500": {
+            "description": "失败且不回退旧机构级账号"
+          }
+        },
+        "x-isolated-mode-only": true,
+        "x-function-only-employee-db": true,
+        "x-production-ready": false
+      }
+    },
+    "/api/v1/contact-events": {
+      "post": {
+        "operationId": "recordOwnContactConsultationIsolated",
+        "summary": "仅登记本人联系人发生的一次真实咨询",
+        "description": "Exactly one contact event per actual action/idempotency key, not one event per related student. Never auto-creates leads, opportunities, payments, family or CRM entitlement.",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "contact_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "event_type": {
+                    "type": "string",
+                    "enum": [
+                      "电话咨询",
+                      "到店咨询",
+                      "微信咨询",
+                      "线上咨询"
+                    ]
+                  },
+                  "occurred_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "过去365天内至未来5分钟，必须为实际咨询发生时间"
+                  }
+                },
+                "required": [
+                  "contact_id",
+                  "event_type",
+                  "occurred_at"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "隔离员工数据库事务成功，幂等重试只返回同一实际记录"
+          },
+          "403": {
+            "description": "学生/联系人不属于本人，身份已失效或受限数据库账号不匹配"
+          },
+          "409": {
+            "description": "重复关联、操作编号已用于不同内容"
+          },
+          "422": {
+            "description": "字段不合法，或试图直接确认家庭/监护关系"
+          },
+          "500": {
+            "description": "失败且不回退旧机构级账号"
+          }
+        },
+        "x-isolated-mode-only": true,
+        "x-function-only-employee-db": true,
+        "x-production-ready": false
+      }
     }
   },
   "components": {
@@ -169,7 +344,9 @@
     }
   },
   "x-production-ready": false,
-  "x-migrated-post-routes": 2,
+  "x-migrated-post-routes": 4,
   "x-legacy-broad-fallback": false,
-  "x-financial-and-crm-writes-enabled": false
+  "x-financial-and-crm-writes-enabled": false,
+  "x-family-verification-enabled": false,
+  "x-sales-lead-write-enabled": false
 }

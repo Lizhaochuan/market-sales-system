@@ -6,8 +6,22 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent']);
 const MAX=100;
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
+const eventTypes=new Set(['电话咨询','到店咨询','微信咨询','线上咨询']);
+function uuid(v,name){
+  if(typeof v!=='string'||!UUID.test(v))
+    fail(422,'VALIDATION_ERROR',name+'编号格式不正确');
+  return v;
+}
+function only(body,allowed){
+  if(!body||typeof body!=='object'||Array.isArray(body))
+    fail(422,'VALIDATION_ERROR','请求内容不是有效业务对象');
+  if(Object.keys(body).some(k=>!allowed.includes(k)))
+    fail(422,'VALIDATION_ERROR','此操作包含未允许的字段或未经核实的身份材料');
+}
 function cleanName(v,label){
   if(typeof v!=='string'||!v.trim()||v.trim().length>MAX)
     fail(422,'VALIDATION_ERROR',label+'不能为空或长度超限');
@@ -19,14 +33,36 @@ function cleanOptional(v,label){
     fail(422,'VALIDATION_ERROR',label+'长度超限');
   return v.trim()||null;
 }
-function strictBody(op,body){
-  if(!body||typeof body!=='object'||Array.isArray(body))
-    fail(422,'VALIDATION_ERROR','请求内容不是有效业务对象');
+function strictBody(op,body,routeParams){
+  if(op==='linkContact'){
+    only(body,['contact_id','relation_type','verification_state','is_primary']);
+    if(body.verification_state!==undefined&&body.verification_state!=='unverified')
+      fail(422,'VALIDATION_ERROR','监护关系只能登记为待核实，不能直接确认');
+    if(body.is_primary!==undefined&&body.is_primary!==false)
+      fail(422,'VALIDATION_ERROR','未核实前不能设为主要监护人');
+    const relation=cleanName(body.relation_type,'联系人关系');
+    if(!relationTypes.has(relation))
+      fail(422,'VALIDATION_ERROR','联系人关系类型不正确');
+    return {params:[uuid(routeParams?.[0],'学生'),
+      uuid(body.contact_id,'联系人'),relation]};
+  }
+  if(op==='createEvent'){
+    only(body,['contact_id','event_type','occurred_at']);
+    const eventType=cleanName(body.event_type,'咨询方式');
+    if(!eventTypes.has(eventType))
+      fail(422,'VALIDATION_ERROR','咨询方式不正确');
+    if(typeof body.occurred_at!=='string'||
+      !/^\d{4}-\d\d-\d\dT/.test(body.occurred_at))
+      fail(422,'VALIDATION_ERROR','请填写实际发生的咨询时间');
+    const date=new Date(body.occurred_at);
+    if(!Number.isFinite(date.getTime()))
+      fail(422,'VALIDATION_ERROR','咨询时间格式不正确');
+    return {params:[uuid(body.contact_id,'联系人'),eventType,date]};
+  }
   const allowed=op==='createStudent'?
     ['display_name','grade_label','school_name']:
     ['display_name','do_not_contact'];
-  if(Object.keys(body).some(k=>!allowed.includes(k)))
-    fail(422,'VALIDATION_ERROR','当前员工不能指定其他负责人或填写未开放的个人信息');
+  only(body,allowed);
   const name=cleanName(body.display_name,op==='createStudent'?'学生姓名':'联系人称呼');
   if(op==='createStudent')return {
     operation:'createStudent',
@@ -38,7 +74,7 @@ function strictBody(op,body){
   return {operation:'createContact',params:[name,body.do_not_contact===true]};
 }
 export async function writeLegacyViaStaffPool({
-  pools,context,claims,operation,body,idempotencyKey
+  pools,context,claims,operation,body,idempotencyKey,routeParams
 }){
   if(process.env.MS_STAGE!=='isolated-test')
     throw Error('Migrated legacy writes must run only in isolated-test');
@@ -53,7 +89,7 @@ export async function writeLegacyViaStaffPool({
   const pool=pools.get(context.user.id);
   if(!pool||typeof pool.connect!=='function')
     fail(403,'STAFF_WRITE_RESTRICTED','该员工尚未配置经核准的低权限写入账号');
-  const parsed=strictBody(operation,body);
+  const parsed=strictBody(operation,body,routeParams);
   let client;
   try{
     client=await pool.connect();
@@ -71,13 +107,26 @@ export async function writeLegacyViaStaffPool({
     if(!x||x.staff_id!==context.user.id||
       x.org_id!==context.user.organization_id||x.identity_ok!==true)
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
-    const result=operation==='createStudent'?
-      await client.query(
-        'SELECT ms.create_scoped_student($1,$2,$3,$4) AS result',
-        [...parsed.params,idempotencyKey]):
-      await client.query(
-        'SELECT ms.create_scoped_contact($1,$2,$3) AS result',
-        [...parsed.params,idempotencyKey]);
+    let result;
+    switch(operation){
+      case 'createStudent':
+        result=await client.query(
+          'SELECT ms.create_scoped_student($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'createContact':
+        result=await client.query(
+          'SELECT ms.create_scoped_contact($1,$2,$3) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'linkContact':
+        result=await client.query(
+          'SELECT ms.link_scoped_student_contact($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'createEvent':
+        result=await client.query(
+          'SELECT ms.create_scoped_contact_consultation($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      default:throw Error('Unsupported restricted write');
+    }
     await client.query('COMMIT');
     return result.rows[0].result;
   }catch(e){
