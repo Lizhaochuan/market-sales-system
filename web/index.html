@@ -20,7 +20,8 @@
         <select name="account_code" required>
           <option value="sales-a">销售顾问 A</option>
           <option value="sales-b">销售顾问 B</option>
-          <option value="supervisor">销售主管</option>
+          <option value="supervisor">销售主管（申请人）</option>
+          <option value="supervisor-2">第二位主管（独立审核）</option>
         </select>
       </label>
       <label>隔离演示访问口令
@@ -188,7 +189,7 @@
     </section>
 
     <section class="view" data-panel="families">
-      <div class="section-head"><h2>家庭关系核实</h2><p>至少两名学生、明确核实依据。演示版只提交待核实申请，不自动确认亲属关系。</p></div>
+      <div class="section-head"><h2>家庭关系核实与独立审批</h2><p>申请和审批由不同主管完成；仅提交申请不代表关系已核实。</p></div>
       <div class="two-col">
         <article class="panel">
           <h3>提交家庭关联申请</h3>
@@ -197,19 +198,33 @@
             <label>第一名学生 <select name="student_a" data-options="students" required></select></label>
             <label>第二名学生 <select name="student_b" data-options="students" required></select></label>
             <label>核实依据说明 <input name="verification_evidence_ref" maxlength="200" required placeholder="例如：待核验的亲属关系说明"></label>
-            <p class="form-hint">只有销售主管可提交；审批与最终确认功能尚未启用。</p>
+            <p class="form-hint">提交后保持“待核实”。同一主管不能审核自己的申请，需由另一位主管复核独立凭据。</p>
             <button class="primary" type="submit">提交核实申请</button>
           </form>
         </article>
-        <article class="panel"><div class="panel-header"><h3>待核实家庭关联</h3><span id="families-total" class="count">0 条</span></div><div id="families-list" class="record-list"></div></article>
+        <article class="panel">
+          <h3>第二位主管审核申请</h3>
+          <form id="family-decision-form" class="field-stack">
+            <label>待审核家庭申请 <select name="family_group_id" id="family-review-select" required></select></label>
+            <label>审核决定 <select name="decision"><option value="approved">批准关联</option><option value="rejected">驳回申请</option></select></label>
+            <label>独立审核证据编号 <input name="review_evidence_ref" maxlength="200" required placeholder="填写经过人工查验的证据编号"></label>
+            <label>审核原因（中文） <textarea name="reason_zh" rows="3" maxlength="400" required placeholder="说明审核事实及理由"></textarea></label>
+            <p class="form-hint">同一人提交与审批会被服务端拒绝。审核决定、审批人、依据和前后状态会写入业务审计。</p>
+            <button class="primary" type="submit">提交独立审核决定</button>
+          </form>
+        </article>
       </div>
+      <article class="panel space-top">
+        <div class="panel-header"><h3>家庭关联申请及审核状态</h3><span id="families-total" class="count">0 条</span></div>
+        <div id="families-list" class="record-list"></div>
+      </article>
     </section>
 
     <section class="view" data-panel="audit">
       <div class="section-head"><h2>业务变更记录</h2><p>用具体中文说明发生了什么、涉及谁和什么内容，不直接展示程序代码。</p></div>
       <article class="panel form-wide">
         <form id="audit-form" class="inline-form">
-          <label>业务对象类型 <select name="object_type" id="audit-type"><option value="student">学生客户</option><option value="lead">销售线索</option><option value="opportunity">销售商机</option></select></label>
+          <label>业务对象类型 <select name="object_type" id="audit-type"><option value="student">学生客户</option><option value="lead">销售线索</option><option value="opportunity">销售商机</option><option value="family">家庭关系核实（仅主管）</option></select></label>
           <label>具体对象 <select name="object_id" id="audit-object" required></select></label>
           <button class="primary" type="submit">查看记录</button>
         </form>

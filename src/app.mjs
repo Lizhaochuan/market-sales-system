@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { randomUUID, createHash } from 'node:crypto';
 import { demoLogin } from './dev-login.mjs';
 import { serveUi } from './ui-assets.mjs';
+import { createExternalTokenVerifier, resolveExternalStaff } from './external-identity.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,6 +60,8 @@ const routeDefs=[
   ['GET',/^\/api\/v1\/leads$/,'listLeads'],
   ['GET',/^\/api\/v1\/opportunities$/,'listOpportunities'],
   ['GET',/^\/api\/v1\/family-groups$/,'listFamilyGroups'],
+  ['POST',/^\/api\/v1\/family-groups\/([0-9a-f-]+)\/decision$/,'decideFamily'],
+  ['GET',/^\/api\/v1\/me$/,'getMe'],
   ['GET',/^\/api\/v1\/students\/([0-9a-f-]+)$/,'getStudent'],
   ['POST',/^\/api\/v1\/contacts$/,'createContact'],
   ['POST',/^\/api\/v1\/contact-events$/,'createEvent'],
@@ -75,6 +78,20 @@ const routeDefs=[
 async function handle(c,ctx,op,p,body,requestUrl) {
   const org=ctx.user.organization_id,actor=ctx.user.id;
   switch(op){
+    case 'getMe': {
+      return {
+        staff_id:actor,display_name:ctx.user.display_name,
+        organization_id:org,role_codes:ctx.roles,
+        capabilities:{
+          view_own_students:true,
+          manage_own_leads:true,
+          propose_family_review:ctx.manager,
+          decide_other_person_family_review:ctx.manager,
+          review_family_audit:ctx.manager
+        },
+        environment:'isolated-test'
+      };
+    }
     case 'listStudents': {
       const r=await c.query(
         "SELECT s.id AS student_id,s.display_name,s.grade_label,s.owner_user_id,"+
@@ -142,10 +159,14 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       if(!ctx.manager)fail(403,'FORBIDDEN','仅主管可以查看待核实家庭关联');
       const r=await c.query(
         "SELECT f.id AS family_group_id,f.display_name,f.verification_state,"+
+        "f.requested_by,f.verified_by,req.display_name AS requested_by_name,"+
+        "reviewer.display_name AS verified_by_name,"+
         "COUNT(m.student_id)::integer AS student_count "+
         "FROM ms.family_groups f LEFT JOIN ms.family_memberships m "+
         "ON m.family_group_id=f.id AND m.revoked_at IS NULL "+
-        "WHERE f.organization_id=$1 GROUP BY f.id "+
+        "LEFT JOIN ms.staff_users req ON req.id=f.requested_by "+
+        "LEFT JOIN ms.staff_users reviewer ON reviewer.id=f.verified_by "+
+        "WHERE f.organization_id=$1 GROUP BY f.id,req.display_name,reviewer.display_name "+
         "ORDER BY f.created_at DESC,f.id LIMIT 100",[org]);
       return {items:r.rows};
     }
@@ -317,14 +338,66 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       // A reference supplied by a manager is NOT independently verified evidence.
       // Remain pending until approved verification workflow exists.
       const r=await c.query(
-        "INSERT INTO ms.family_groups(organization_id,display_name,verification_state) VALUES($1,$2,'pending') RETURNING id,verification_state",
-        [org,name]);
+        "INSERT INTO ms.family_groups(organization_id,display_name,verification_state,requested_by,submission_evidence_ref) "+
+        "VALUES($1,$2,'pending',$3,$4) RETURNING id,verification_state",
+        [org,name,actor,evidence]);
       for(const id of ids)await c.query(
         'INSERT INTO ms.family_memberships(family_group_id,student_id,relationship_basis) VALUES($1,$2,$3)',
         [r.rows[0].id,id,evidence]);
       await audit(c,ctx,'family',r.rows[0].id,'FAMILY_REVIEW_REQUESTED',
         '已提交'+ids.length+'名学生的家庭关系核实，审核前不视为已确认家庭',{}, {'待核实学生人数':ids.length,'家庭关系状态':'待核实'});
       return {family_group_id:r.rows[0].id,verification_state:'pending',student_ids:ids};
+    }
+    case 'decideFamily': {
+      object(body,['decision','review_evidence_ref','reason_zh']);
+      if(!ctx.manager)fail(403,'FORBIDDEN','只有本机构主管有权审核家庭关系');
+      const groupId=needId(p[0],'家庭申请编号');
+      const decision=body.decision;
+      if(!['approved','rejected'].includes(decision))
+        fail(422,'VALIDATION_ERROR','请选择批准或驳回');
+      const evidence=needText(body.review_evidence_ref,'独立核实凭据编号',200);
+      const reason=needText(body.reason_zh,'审核原因',400);
+      const before=await c.query(
+        "SELECT id,verification_state,requested_by,display_name "+
+        "FROM ms.family_groups WHERE id=$1 AND organization_id=$2 FOR UPDATE",
+        [groupId,org]);
+      if(!before.rowCount)fail(404,'NOT_FOUND','该家庭关联申请不存在');
+      const family=before.rows[0];
+      if(family.verification_state!=='pending')
+        fail(409,'ALREADY_REVIEWED','该家庭关联申请已经审核，不能重复审批');
+      if(!family.requested_by)
+        fail(409,'OLD_REQUEST_REQUIRES_REVIEW','旧申请缺少申请人信息，不能直接批准');
+      if(family.requested_by===actor)
+        fail(403,'SELF_APPROVAL_FORBIDDEN','申请人不能审批自己的家庭关联申请');
+      const members=await c.query(
+        "SELECT COUNT(DISTINCT m.student_id)::integer AS n,"+
+        "COUNT(*) FILTER (WHERE s.organization_id IS DISTINCT FROM $2)::integer AS invalid "+
+        "FROM ms.family_memberships m JOIN ms.students s ON s.id=m.student_id "+
+        "WHERE m.family_group_id=$1 AND m.revoked_at IS NULL",
+        [groupId,org]);
+      if(members.rows[0].n<2||members.rows[0].invalid!==0)
+        fail(422,'VALIDATION_ERROR','家庭核实至少需要两名本机构不同学生');
+      await c.query(
+        "INSERT INTO ms.family_review_decisions(family_group_id,reviewer_user_id,decision,review_evidence_ref,reason_zh)"+
+        " VALUES($1,$2,$3,$4,$5)",[groupId,actor,decision,evidence,reason]);
+      const status=decision==='approved'?'verified':'rejected';
+      if(decision==='approved'){
+        await c.query(
+          "UPDATE ms.family_groups SET verification_state='verified',verified_by=$2,verified_at=now()"+
+          " WHERE id=$1",[groupId,actor]);
+        await c.query(
+          "UPDATE ms.family_memberships SET verified_by=$2,verified_at=now() "+
+          "WHERE family_group_id=$1 AND revoked_at IS NULL",[groupId,actor]);
+      }else{
+        await c.query("UPDATE ms.family_groups SET verification_state='rejected' WHERE id=$1",[groupId]);
+      }
+      await audit(c,ctx,'family',groupId,
+        decision==='approved'?'FAMILY_APPROVED':'FAMILY_REJECTED',
+        '家庭关联“'+family.display_name+'”'+
+          (decision==='approved'?'经独立主管核实批准':'经独立主管核实驳回')+'；审核理由：'+reason,
+        {'关系状态':'待核实'},
+        {'关系状态':decision==='approved'?'已核实':'已驳回','审核人':ctx.user.display_name,'审核依据编号':evidence});
+      return {family_group_id:groupId,verification_state:status,reviewer_name:ctx.user.display_name};
     }
     case 'getAudit': {
       const ty=requestUrl.searchParams.get('object_type'),id=requestUrl.searchParams.get('object_id');
@@ -333,6 +406,11 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       if(ty==='student')await ownsStudent(c,ctx,id);
       else if(ty==='lead')await ownsLead(c,ctx,id);
       else if(ty==='opportunity')await ownsOpportunity(c,ctx,id);
+      else if(ty==='family'){
+        if(!ctx.manager)fail(403,'FORBIDDEN','只有本机构主管可查看家庭关系审批历史');
+        const family=await c.query('SELECT 1 FROM ms.family_groups WHERE id=$1 AND organization_id=$2',[id,org]);
+        if(!family.rowCount)fail(404,'NOT_FOUND','没有找到有权查看的家庭关系');
+      }
       else fail(403,'FORBIDDEN','该业务记录暂无开放的审计查询权限');
       const r=await c.query(
         'SELECT id,reason_zh,happened_at,before_business_json,after_business_json FROM ms.audit_events'+
@@ -364,9 +442,10 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
+  const externalVerifier=externalIdentity?createExternalTokenVerifier(externalIdentity):null;
   return createServer(async(req,res)=>{
     const requestId=randomUUID();
     let c;
@@ -389,13 +468,22 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         .find(x=>x.method===req.method&&x.match);
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
       const token=(req.headers.authorization||'').match(/^Bearer (\S+)$/i)?.[1];
-      const identity=verifyToken(token,secret,issuer);
+      let identity,externalClaims;
+      if(externalVerifier && typeof token==='string'){
+        // Dispatch only by header algorithm; all trust derives from signature verification.
+        let alg;
+        try{alg=JSON.parse(Buffer.from(token.split('.')[0],'base64url').toString('utf8')).alg;}
+        catch{fail(401,'AUTH_REQUIRED','身份凭据无效');}
+        if(alg==='RS256')externalClaims=externalVerifier(token);
+      }
+      if(!externalClaims)identity=verifyToken(token,secret,issuer);
       const body=req.method==='POST'?await readJson(req):null;
       const key=req.headers['idempotency-key'];
       if(req.method==='POST'&&(!KEY.test(key||'')))
         fail(422,'VALIDATION_ERROR','写入请求必须提供16至128位有效防重复编号');
       c=await pool.connect();
       await c.query('BEGIN');
+      if(externalClaims)identity=await resolveExternalStaff(c,externalClaims);
       const ctx=await staffContext(c,identity);
       let result;
       if(req.method==='POST'){
