@@ -460,7 +460,7 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,strictStaffMode=false}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
   // Explicit opt-in migration: legacy demo behavior is unchanged unless
@@ -472,6 +472,9 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
     throw new Error('Scoped legacy write mode requires a trusted staff-to-DB-pool Map');
   if((scopedWritePools!==undefined||scopedReadPools!==undefined)&&!externalIdentity)
     throw new Error('Employee scoped mode requires the trusted RS256 issuer/audience/JWKS configuration');
+  if(strictStaffMode&&(!externalIdentity||!(scopedReadPools instanceof Map)||
+      !(scopedWritePools instanceof Map)))
+    throw new Error('Strict employee mode requires trusted external verification and both staff DB pool registries');
   const externalVerifier=externalIdentity?createExternalTokenVerifier(externalIdentity):null;
   return createServer(async(req,res)=>{
     const requestId=randomUUID();
@@ -480,6 +483,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       const url=new URL(req.url,'http://localhost');
       if(req.method==='GET'&&await serveUi(url.pathname,res))return;
       if(url.pathname==='/api/v1/dev/login'&&req.method==='POST'){
+        if(strictStaffMode)fail(404,'NOT_FOUND','严格员工模式不允许演示口令登录');
         if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))
           fail(403,'FORBIDDEN','演示登录仅允许本机访问');
         const body=await readJson(req);
@@ -494,6 +498,14 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
         .find(x=>x.method===req.method&&x.match);
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
+      // Strict mode deliberately blocks every old non-migrated broad write.
+      // Also blocks old manager-level family, identity, audit and other reads
+      // until they receive their own scoped SQL/HTTP security migration.
+      if(strictStaffMode && !(
+        req.method==='GET' && (route.op==='getMe'||
+          migratedLegacyReads.has(route.op)) ||
+        req.method==='POST' && migratedLegacyWrites.has(route.op)
+      ))fail(403,'STAFF_ROUTE_UNMIGRATED','此业务尚未完成员工专属权限迁移，严格模式下已关闭');
       const token=(req.headers.authorization||'').match(/^Bearer (\S+)$/i)?.[1];
       let identity,externalClaims;
       if(externalVerifier && typeof token==='string'){
@@ -503,6 +515,8 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         catch{fail(401,'AUTH_REQUIRED','身份凭据无效');}
         if(alg==='RS256')externalClaims=externalVerifier(token);
       }
+      if(strictStaffMode&&!externalClaims)
+        fail(403,'STAFF_AUTH_REQUIRED','严格员工模式只接受经审核的外部 RSA 身份');
       if(!externalClaims)identity=verifyToken(token,secret,issuer);
       const body=req.method==='POST'?await readJson(req):null;
       const key=req.headers['idempotency-key'];
@@ -549,6 +563,19 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
           operation:route.op,params:route.match.slice(1)
         });
       } else result=await handle(c,ctx,route.op,route.match.slice(1),null,url);
+      if(strictStaffMode&&route.op==='getMe'){
+        result={
+          ...result,
+          capabilities:{
+            view_own_students:true,create_students:true,create_contacts:true,
+            manage_own_leads:false,propose_family_review:false,
+            decide_other_person_family_review:false,review_family_audit:false,
+            manage_identity_requests:false,
+            strict_employee_mode:true
+          },
+          environment:'isolated-trusted-employee-test'
+        };
+      }
       await c.query('COMMIT');
       send(res,200,{code:'OK',message:'操作成功',data:result},requestId);
     } catch(e){
