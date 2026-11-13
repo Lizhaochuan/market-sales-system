@@ -126,6 +126,7 @@ function render(){
   paint('contacts-list',state.contacts,x=>record(
     x.display_name,x.do_not_contact?'已标记不接受主动联系':'可联系状态未核实','共享联系人','人'));
   const consultationBox=$('strict-consultation-list');
+  if($('strict-consultation-card'))$('strict-consultation-card').hidden=!state.strict;
   if(consultationBox){
     consultationBox.hidden=!state.strict;
     if(state.strict)paint('strict-consultation-list',state.events,x=>record(
