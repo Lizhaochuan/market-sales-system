@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -165,12 +165,15 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
   return result.data;
 }
 async function refresh(){
-  const endpoints=[
+  const endpoints=state.strict?[
+    ['students','/api/v1/students'],['contacts','/api/v1/contacts']
+  ]:[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],['leads','/api/v1/leads'],
     ['opportunities','/api/v1/opportunities'],['families','/api/v1/family-groups']
   ];
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
+  if(state.strict)for(const key of ['events','leads','opportunities','families'])state[key]=[];
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     state[key]=r.status==='fulfilled'?r.value.items||[]:[];
@@ -191,12 +194,22 @@ function setView(view){
   if(view==='audit')$('audit-list').replaceChildren();
 }
 function logout(notice=true){
-  state.token=null;state.user=null;state.capabilities={};
+  state.token=null;state.user=null;state.capabilities={};state.strict=false;
+  applyStrictLayout();
   for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings'])state[key]=[];
   document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
   $('workspace').hidden=true;$('login-screen').hidden=false;
-  $('login-form').reset();$('audit-list').replaceChildren();
+  $('login-form').reset();$('external-login-form').reset();$('audit-list').replaceChildren();
   if(notice)toast('已退出演示账号');
+}
+function applyStrictLayout(){
+  const allowed=new Set(['overview','students','contacts']);
+  for(const nav of document.querySelectorAll('button[data-view]')){
+    nav.hidden=state.strict&&!allowed.has(nav.dataset.view);
+  }
+  const contactLink=$('contact-link-form');
+  if(contactLink)contactLink.closest('.panel').hidden=state.strict;
+  $('strict-scope-note').hidden=!state.strict;
 }
 function register(id,action){
   const form=$(id);
@@ -225,6 +238,7 @@ register('login-form',async data=>{
   const profile=await api('/api/v1/me');
   state.user={...payload.data,...profile};
   state.capabilities=profile.capabilities||{};
+  state.strict=false;applyStrictLayout();
   $('staff-name').textContent=payload.data.display_name;
   $('staff-role').textContent=payload.data.role_label;
   $('avatar').textContent=payload.data.display_name.slice(0,1);
@@ -232,6 +246,27 @@ register('login-form',async data=>{
   setView('overview');
   await refresh();
   return '已进入虚构数据演示工作台';
+});
+// A second, local-only test entrypoint to the same Chinese workbench.
+ // It does NOT implement OIDC authorization-code/PKCE/MFA or production SSO.
+register('external-login-form',async d=>{
+  const signed=d.signed_token?.trim();
+  if(!signed||signed.length>8192)throw Error('员工测试签名凭据无效');
+  state.token=signed;
+  let profile;
+  try{profile=await api('/api/v1/me');}
+  catch(e){state.token=null;throw e;}
+  state.user=profile;
+  state.capabilities=profile.capabilities||{};
+  state.strict=state.capabilities.strict_employee_mode===true;
+  applyStrictLayout();
+  $('staff-name').textContent=profile.display_name;
+  $('staff-role').textContent=state.strict?'已核实测试员工 · 低权限模式':'已核实测试员工';
+  $('avatar').textContent=profile.display_name.slice(0,1);
+  $('login-screen').hidden=true;$('workspace').hidden=false;
+  setView('overview');
+  await refresh();
+  return state.strict?'已进入员工专属数据库严格权限测试模式':'已通过外部签名验证（隔离环境）';
 });
 register('student-form',async d=>{
   await api('/api/v1/students',{method:'POST',body:{
@@ -330,3 +365,9 @@ $('audit-type').addEventListener('change',fillAuditSelect);
 $('refresh-button').addEventListener('click',()=>refresh().then(()=>toast('当前权限范围内的数据已刷新')).catch(e=>toast(e.message,true)));
 $('logout-button').addEventListener('click',()=>logout());
 setDefaultDate();
+fetch('/api/v1/health',{cache:'no-store'}).then(r=>r.json()).then(r=>{
+  if(r?.data?.strict_employee_mode){
+    $('login-form').hidden=true;
+    $('external-login-form').querySelector('h2').textContent='严格员工测试模式登录';
+  }
+}).catch(()=>{});
