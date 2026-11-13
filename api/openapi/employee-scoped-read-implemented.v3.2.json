@@ -204,7 +204,7 @@
     "/api/v1/scoped/contact-events": {
       "get": {
         "operationId": "listScopedContactEvents",
-        "summary": "咨询记录（本人登记或有权限联系人关联）",
+        "summary": "咨询记录（仅本人登记，不因共享家长而开放其他咨询）",
         "description": "隔离环境只读示范。真实 JWT RS256 验签后，还要在员工专用的、非所有者数据库 LOGIN 里验证当前批准身份绑定；该角色无权读基础表或写任何财务记录。",
         "security": [
           {
