@@ -10,9 +10,14 @@
     "start:isolated": "node src/server.mjs",
     "test:contracts": "node --test tests/contracts/contracts.test.mjs",
     "test:core": "node --test tests/core/core-api.test.mjs",
-    "test": "node --test tests/contracts/contracts.test.mjs tests/core/core-api.test.mjs"
+    "test": "node --test tests/contracts/contracts.test.mjs tests/core/core-api.test.mjs",
+    "test:browser": "playwright test",
+    "test:ui-http": "node --test tests/ui/*.test.mjs"
   },
   "dependencies": {
     "pg": "8.16.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
   }
 }

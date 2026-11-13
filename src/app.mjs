@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
 import { randomUUID, createHash } from 'node:crypto';
+import { demoLogin } from './dev-login.mjs';
+import { serveUi } from './ui-assets.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -51,6 +53,12 @@ async function getContact(c,ctx,id) {
 }
 const routeDefs=[
   ['POST',/^\/api\/v1\/students$/,'createStudent'],
+  ['GET',/^\/api\/v1\/students$/,'listStudents'],
+  ['GET',/^\/api\/v1\/contacts$/,'listContacts'],
+  ['GET',/^\/api\/v1\/contact-events$/,'listEvents'],
+  ['GET',/^\/api\/v1\/leads$/,'listLeads'],
+  ['GET',/^\/api\/v1\/opportunities$/,'listOpportunities'],
+  ['GET',/^\/api\/v1\/family-groups$/,'listFamilyGroups'],
   ['GET',/^\/api\/v1\/students\/([0-9a-f-]+)$/,'getStudent'],
   ['POST',/^\/api\/v1\/contacts$/,'createContact'],
   ['POST',/^\/api\/v1\/contact-events$/,'createEvent'],
@@ -67,6 +75,80 @@ const routeDefs=[
 async function handle(c,ctx,op,p,body,requestUrl) {
   const org=ctx.user.organization_id,actor=ctx.user.id;
   switch(op){
+    case 'listStudents': {
+      const r=await c.query(
+        "SELECT s.id AS student_id,s.display_name,s.grade_label,s.owner_user_id,"+
+        "u.display_name AS owner_display_name FROM ms.students s "+
+        "LEFT JOIN ms.staff_users u ON u.id=s.owner_user_id "+
+        "WHERE s.organization_id=$1 AND s.archived_at IS NULL AND "+
+        "($2::boolean OR s.owner_user_id=$3 OR EXISTS ("+
+        "SELECT 1 FROM ms.data_scope_grants g WHERE g.user_id=$3 "+
+        "AND g.resource_type='student' AND g.scope_type='specific' "+
+        "AND g.scope_ref=s.id AND g.revoked_at IS NULL)) "+
+        "ORDER BY s.created_at DESC,s.id LIMIT 100",
+        [org,ctx.manager,actor]);
+      return {items:r.rows};
+    }
+    case 'listContacts': {
+      const r=await c.query(
+        "SELECT c.id AS contact_id,c.display_name,c.do_not_contact "+
+        "FROM ms.contacts c WHERE c.organization_id=$1 AND c.archived_at IS NULL "+
+        "AND ($2::boolean OR c.created_by=$3 OR EXISTS ("+
+        "SELECT 1 FROM ms.leads l WHERE l.contact_id=c.id "+
+        "AND l.organization_id=$1 AND l.owner_user_id=$3) OR EXISTS ("+
+        "SELECT 1 FROM ms.student_contacts sc JOIN ms.students s ON s.id=sc.student_id "+
+        "WHERE sc.contact_id=c.id AND sc.valid_to IS NULL "+
+        "AND s.organization_id=$1 AND s.archived_at IS NULL "+
+        "AND (s.owner_user_id=$3 OR EXISTS ("+
+        "SELECT 1 FROM ms.data_scope_grants g WHERE g.user_id=$3 "+
+        "AND g.resource_type='student' AND g.scope_type='specific' "+
+        "AND g.scope_ref=s.id AND g.revoked_at IS NULL)))) "+
+        "ORDER BY c.created_at DESC,c.id LIMIT 100",
+        [org,ctx.manager,actor]);
+      return {items:r.rows};
+    }
+    case 'listEvents': {
+      const r=await c.query(
+        "SELECT e.id AS event_id,e.event_type,e.occurred_at,c.display_name AS contact_display_name "+
+        "FROM ms.contact_events e LEFT JOIN ms.contacts c ON c.id=e.contact_id "+
+        "WHERE e.organization_id=$1 AND ($2::boolean OR e.recorded_by=$3) "+
+        "ORDER BY e.occurred_at DESC,e.id LIMIT 100",
+        [org,ctx.manager,actor]);
+      return {items:r.rows};
+    }
+    case 'listLeads': {
+      const r=await c.query(
+        "SELECT l.id AS lead_id,l.lead_state,l.created_at,c.display_name AS contact_display_name "+
+        "FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id "+
+        "WHERE l.organization_id=$1 AND ($2::boolean OR l.owner_user_id=$3) "+
+        "ORDER BY l.created_at DESC,l.id LIMIT 100",
+        [org,ctx.manager,actor]);
+      return {items:r.rows};
+    }
+    case 'listOpportunities': {
+      const r=await c.query(
+        "SELECT o.id AS opportunity_id,o.student_id,o.owner_user_id,"+
+        "o.predicted_amount_cents,o.lifecycle_state,s.display_name AS student_display_name,"+
+        "u.display_name AS owner_display_name "+
+        "FROM ms.opportunities o JOIN ms.students s ON s.id=o.student_id "+
+        "LEFT JOIN ms.staff_users u ON u.id=o.owner_user_id "+
+        "WHERE s.organization_id=$1 AND s.archived_at IS NULL "+
+        "AND ($2::boolean OR o.owner_user_id=$3) "+
+        "ORDER BY o.created_at DESC,o.id LIMIT 100",
+        [org,ctx.manager,actor]);
+      return {items:r.rows};
+    }
+    case 'listFamilyGroups': {
+      if(!ctx.manager)fail(403,'FORBIDDEN','仅主管可以查看待核实家庭关联');
+      const r=await c.query(
+        "SELECT f.id AS family_group_id,f.display_name,f.verification_state,"+
+        "COUNT(m.student_id)::integer AS student_count "+
+        "FROM ms.family_groups f LEFT JOIN ms.family_memberships m "+
+        "ON m.family_group_id=f.id AND m.revoked_at IS NULL "+
+        "WHERE f.organization_id=$1 GROUP BY f.id "+
+        "ORDER BY f.created_at DESC,f.id LIMIT 100",[org]);
+      return {items:r.rows};
+    }
     case 'createStudent': {
       object(body,['display_name','grade_label','school_name','owner_user_id']);
       const display_name=needText(body.display_name,'学生姓名',100);
@@ -77,7 +159,9 @@ async function handle(c,ctx,op,p,body,requestUrl) {
         ' VALUES($1,$2,$3,$4,$5,$6) RETURNING id,display_name,owner_user_id,version',
         [org,display_name,sourceName(body.grade_label)||null,sourceName(body.school_name)||null,owner,actor]);
       const x=r.rows[0];
-      await audit(c,ctx,'student',x.id,'STUDENT_CREATED','新建学生客户：'+x.display_name,{}, {'学生':x.display_name,'负责人':owner});
+      const ownerLabel=owner===actor?ctx.user.display_name:
+        (await c.query('SELECT display_name FROM ms.staff_users WHERE id=$1',[owner])).rows[0]?.display_name;
+      await audit(c,ctx,'student',x.id,'STUDENT_CREATED','新建学生客户：'+x.display_name,{}, {'学生':x.display_name,'负责人':ownerLabel||'已分配负责人'});
       return {student_id:x.id,display_name:x.display_name,owner_user_id:owner,version:x.version};
     }
     case 'getStudent': {
@@ -113,7 +197,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     case 'linkContact': {
       object(body,['contact_id','relation_type','verification_state','is_primary','permission_basis_ref']);
       const student=await ownsStudent(c,ctx,needId(p[0],'学生编号'));
-      const contact=await orgEntity(c,'contacts',body.contact_id,org,'联系人');
+      const contact=await getContact(c,ctx,body.contact_id);
       const relation=needText(body.relation_type,'联系人与学生的关系',50);
       const state=body.verification_state||'unverified';
       if(!['unverified','verified','disputed'].includes(state))
@@ -280,7 +364,7 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer'}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
   return createServer(async(req,res)=>{
@@ -288,6 +372,16 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer'}={}) {
     let c;
     try {
       const url=new URL(req.url,'http://localhost');
+      if(req.method==='GET'&&await serveUi(url.pathname,res))return;
+      if(url.pathname==='/api/v1/dev/login'&&req.method==='POST'){
+        if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))
+          fail(403,'FORBIDDEN','演示登录仅允许本机访问');
+        const body=await readJson(req);
+        c=await pool.connect();
+        const result=await demoLogin(c,body,{secret,issuer,devLoginSecret});
+        send(res,200,{code:'OK',message:'已进入虚构数据演示工作台',data:result},requestId);
+        return;
+      }
       if(url.pathname==='/api/v1/health'&&req.method==='GET'){
         send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test'}},requestId);return;
       }

@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   core-api:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:
@@ -31,6 +31,7 @@ jobs:
       DATABASE_URL: postgresql://ms_test:isolated_test_only_password@127.0.0.1:5432/ms_test
       AUTH_HMAC_SECRET: fictional-test-only-strong-token-secret-9c92789dc3b9
       AUTH_ISSUER: market-sales-test-issuer
+      DEV_LOGIN_SECRET: fictional-strong-ui-demo-passphrase-0001
       PGPASSWORD: isolated_test_only_password
       PGHOST: localhost
       PGPORT: '5432'
@@ -43,13 +44,30 @@ jobs:
           node-version: '22'
       - name: Install pinned PostgreSQL client library
         run: npm install --no-audit --no-fund
+      - name: Install isolated Chromium and browser dependencies
+        run: npx playwright install --with-deps chromium
       - name: Create isolated schema
         run: |
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/001_initial_schema.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/002_financial_integrity_draft.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/003_low_risk_api_idempotency.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/004_contact_event_owner_scope.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/005_unique_consultation_lead.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/fixtures/fictional_ui_demo_seed.sql
+      - name: Check frontend JavaScript syntax
+        run: node --check web/app.js
       - name: Core API, authorization, idempotency and Chinese audit E2E
-        run: node --test tests/core/*.test.mjs
+        run: node --test tests/core/*.test.mjs tests/ui/*.test.mjs
+      - name: Real headless Chromium workflow and responsive UI
+        run: npx playwright test
+      - name: Upload isolated browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-chinese-ui-browser-evidence
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
       - name: Existing design contract regression
         run: node --test tests/contracts/contracts.test.mjs

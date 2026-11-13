@@ -43,6 +43,20 @@
 
 **只用于 isolated-test 本机环境**，没有生产身份提供方、Web 管理界面、真实支付、正式订单、CRM 预约或课时写入。相关接口仍保持关闭。PR #5 以 V3.1-04 PR #4 为基础，在 #4 审核后才能按依赖顺序处理；不要重复合并旧的 #1/#2/#3。
 
+## V3.2-02 中文业务管理工作台（草稿 PR #6）
+
+本阶段已新增真实可运行的中文网页操作界面，但**只允许在本机隔离演示环境**启动。正式登录、真实支付和 CRM 写入均未开放。
+
+- [八个中文业务模块与演示操作说明](docs/V3.2-02_ADMIN_UI.md)
+- [工作台页面](web/index.html)、[交互代码](web/app.js)、[界面样式](web/styles.css)
+- [V3.2-01 已实现的14个核心接口](api/openapi/core-implemented.v3.2.json)
+- [V3.2-02 新增的7个列表及演示登录接口](api/openapi/admin-ui-implemented.v3.2.json)
+- [同一次咨询只生成一条销售线索的数据库约束](db/migrations/005_unique_consultation_lead.sql)
+- [实际 Chromium 浏览器自动化测试](tests/browser/admin.spec.mjs)
+- [GitHub Actions 自动化执行证据](https://github.com/Lizhaochuan/market-sales-system/actions/runs/43462743543)：虚构数据、PostgreSQL、浏览器操作成功；**不代表真人或生产验收**。
+
+PR #6 从 V3.2-01 PR #5 叠加开发，而后者依赖 V3.1-04 PR #4。以上均待审核、未合并主分支；旧 PR #1/#2/#3 不应与整合 PR 重复合并。既有教培 CRM 代码与技术文档不受影响。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
