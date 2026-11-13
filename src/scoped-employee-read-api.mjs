@@ -36,7 +36,9 @@ export async function assertScopedReadPool(pool){
     "has_table_privilege(current_user,'ms.staff_identity_bindings','SELECT') AS raw_identity, "+
     "has_table_privilege(current_user,'ms.sales_orders','SELECT') AS finance, "+
     "has_table_privilege(current_user,'ms.scoped_contacts_directory','SELECT') AS contacts_view, "+
-    "has_function_privilege(current_user,'ms.scoped_employee_identity_valid(text,text)','EXECUTE') AS check_identity "+
+    "has_function_privilege(current_user,'ms.scoped_employee_identity_valid(text,text)','EXECUTE') AS check_identity, "+
+    "ms.current_scoped_staff_id() AS scoped_staff_id, "+
+    "ms.current_scoped_organization_id() AS scoped_organization_id "+
     "FROM pg_roles WHERE rolname=current_user"
   );
   const x=r.rows[0];
