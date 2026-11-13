@@ -51,7 +51,7 @@ export async function ownsStudent(c,ctx,id) {
   if(!student)fail(404,'NOT_FOUND','没有找到有权查看的学生');
   if(!ctx.manager&&student.owner_user_id!==ctx.user.id) {
     const g=await c.query("SELECT 1 FROM ms.data_scope_grants WHERE user_id=$1 AND resource_type='student' "+
-     "AND scope_type='specific' AND scope_ref=$2 AND revoked_at IS NULL LIMIT 1",
+     "AND scope_type='specific' AND scope_ref=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>now()) LIMIT 1",
      [ctx.user.id,id]);
     if(!g.rowCount)fail(403,'FORBIDDEN','当前账号无权查看该学生');
   }
