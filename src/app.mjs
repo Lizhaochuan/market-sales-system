@@ -501,11 +501,9 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       await c.query('BEGIN');
       if(externalClaims)identity=await resolveExternalStaff(c,externalClaims);
       const ctx=await staffContext(c,identity);
-      // Transaction-local defense in depth for RLS-covered business rows.
-      // Never trust an organization ID supplied in the request body/token claims.
-      // Do not use an unscoped shared-session setting on pooled connections.
-      await c.query("SELECT set_config('ms.tenant_org',$1,true)",
-        [ctx.user.organization_id]);
+      // RLS tenant is bound to PostgreSQL SESSION_USER by a migration-owner
+      // protected mapping; no request/session GUC can select another tenant.
+      // A service must use the correct dedicated tenant database login.
       let result;
       if(req.method==='POST'){
         const hash=digest(req.method,url.pathname,body);
