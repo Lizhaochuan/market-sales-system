@@ -52,6 +52,7 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/002_financial_integrity_draft.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/003_low_risk_api_idempotency.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/004_contact_event_owner_scope.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/005_unique_consultation_lead.sql
           psql -X -v ON_ERROR_STOP=1 -f tests/fixtures/fictional_ui_demo_seed.sql
       - name: Check frontend JavaScript syntax
         run: node --check web/app.js
