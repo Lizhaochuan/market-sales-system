@@ -73,6 +73,10 @@ const routeDefs=[
   ['POST',/^\/api\/v1\/identity\/change-requests\/([0-9a-f-]+)\/decision$/,'identityDecideRequest'],
   ['GET',/^\/api\/v1\/students\/([0-9a-f-]+)$/,'getStudent'],
   ['POST',/^\/api\/v1\/contacts$/,'createContact'],
+  ['GET',/^\/api\/v1\/contact-custody\/requests$/,'listContactCustodyRequests'],
+  ['GET',/^\/api\/v1\/contact-custody\/staff$/,'listContactCustodyStaff'],
+  ['POST',/^\/api\/v1\/contact-custody\/requests$/,'requestContactCustody'],
+  ['POST',/^\/api\/v1\/contact-custody\/requests\/([0-9a-f-]+)\/decision$/,'decideContactCustody'],
   ['POST',/^\/api\/v1\/contact-events$/,'createEvent'],
   ['POST',/^\/api\/v1\/students\/([0-9a-f-]+)\/contacts$/,'linkContact'],
   ['POST',/^\/api\/v1\/leads$/,'createLead'],
@@ -579,6 +583,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
           capabilities:{
             view_own_students:true,create_students:true,create_contacts:true,
             link_own_student_contact:true,record_own_contact_consultation:true,
+            request_contact_custody:true,review_contact_custody:ctx.manager,
             manage_own_leads:false,propose_family_review:false,
             decide_other_person_family_review:false,review_family_audit:false,
             manage_identity_requests:false,
