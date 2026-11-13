@@ -44,3 +44,5 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/001_initial_schema.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/002_financial_integrity_draft.sql
           psql -X -v ON_ERROR_STOP=1 -f tests/sql/financial_integrity.smoke.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/sql/payment_concurrency.seed.sql
+          bash tests/scripts/payment_concurrency_smoke.sh
