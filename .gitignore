@@ -1,0 +1,22 @@
+# Never commit dependency cache, local secrets or actual learner/payment records.
+node_modules/
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.log
+coverage/
+.nyc_output/
+.DS_Store
+.tmp/
+tmp/
+data/
+backups/
+secrets/
+credentials/
+*.db
+*.sqlite
+*.sqlite3
