@@ -231,6 +231,22 @@ V3.2-09 的员工专属接口是新的只读服务；V3.2-10 开始**真正改�
 
 严格模式需要本机虚构 RSA 员工凭据和不同员工的受限数据库账号，不是生产统一登录。独立市场销售仓库交付；旧教培 CRM、数据和技术说明不动，正式收退款/成交/课时继续关闭。所有 PR 保持 Draft，只有实际跨系统集成与联合验收后才融合技术资料。
 
+## V3.2-15 员工身份目录去高权化与联系人管理权独立审批（草稿 PR #19）
+
+本阶段真正把**严格员工模式**原先使用机构级业务数据库账号的身份/角色查询迁移到仅可执行 `ms.resolve_strict_verified_staff` 的独立认证目录 LOGIN。严格模式服务器**不再创建原较宽业务数据库连接池**，员工身份和实时角色只从函数-only 认证目录取得；客户查询与写入继续分别使用员工专属的非所有者数据库账号。
+
+新建受保护的联系人当前管理权登记、交接申请和独立主管审批。**不重写 `contacts.created_by` 原创建人历史**，不转移关联学生、既往咨询、家庭、线索、商机、财务、CRM 课时或归因。原中文管理页面可以由销售提出交接，另一位真实有效主管独立批准后接收员工才得到联系人当前管理权；申请人与接收人不可自批，所有写操作受真实数据库权限及审计约束。
+
+- [V3.2-15 独立完整中文技术和业务审批说明](docs/V3.2-15_AUTH_DIRECTORY_AND_CONTACT_CUSTODY.md)
+- [018 号：函数-only 员工身份目录](db/migrations/018_strict_function_only_auth_directory.sql)、[独立认证服务适配器](src/strict-auth-directory.mjs)
+- [019 号：联系人当前管理权、待审核申请和独立主管审批](db/migrations/019_independent_contact_custody_approval.sql)
+- [真实 PostgreSQL、HTTP、伪造身份和旧高权限连接次数为 0 的安全测试](tests/security/strict-auth-directory.test.mjs)
+- [真实三员工联系人交接审批、不转移学生/旧咨询/业绩的安全测试](tests/security/contact-custody-approval.test.mjs)
+- [原中文页面 Chromium 三员工交接实操](tests/browser/contact-custody.spec.mjs)
+- [联系人交接四条实际接口 OpenAPI](api/openapi/contact-custody-implemented.v3.2.json)
+
+**仍仅本机虚构环境**：没有正式企业 IdP/OIDC Code+PKCE/MFA；其他旧线索/商机/家庭业务接口尚未全量低权限迁移，收款退款与 CRM 课时继续关闭。所有 PR 保持草稿、不合并，旧 `edu-management-system` 代码和文档完全不改。真实跨系统联合验收后才考虑合并技术资料。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
