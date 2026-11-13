@@ -89,6 +89,8 @@ test('V3.2-02 served Chinese UI and isolated demo login with authorized business
       assert.equal(theft.status,403);
       const lead=await post('/api/v1/leads',{source_event_ref:ids.event},A.token);
       assert.equal(lead.status,200);
+      const duplicate=await post('/api/v1/leads',{source_event_ref:ids.event},A.token);
+      assert.equal(duplicate.status,409,'A real consultation must not create duplicate leads');
       assert.ok((await get('/api/v1/leads',A.token)).data.items.some(x=>x.lead_id===lead.data.lead_id));
       assert.ok(!(await get('/api/v1/leads',B.token)).data.items.some(x=>x.lead_id===lead.data.lead_id));
     });
