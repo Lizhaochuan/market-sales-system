@@ -31,6 +31,14 @@
       <button class="primary full" type="submit">进入工作台</button>
       <p class="fineprint">演示访问口令必须由运行者在本地配置。正式身份认证尚未实现。</p>
     </form>
+    <form id="external-login-form" class="field-stack isolated-staff-signin">
+      <h2>已批准员工签名身份（仅本机测试）</h2>
+      <p class="fineprint">粘贴测试管理员提供的临时 RSA 签名凭据。不会保存到本地存储、Cookie 或网址；刷新即失效。此方式不是正式企业登录。</p>
+      <label>员工签名测试凭据
+        <input name="signed_token" type="password" autocomplete="off" spellcheck="false" required placeholder="仅供本地测试的签名员工凭据">
+      </label>
+      <button class="primary full" type="submit">验证员工身份并进入</button>
+    </form>
   </div>
 </div>
 <div id="workspace" class="app-shell" hidden>
@@ -63,6 +71,7 @@
       <div class="topbar-actions"><span class="status-pill"><span class="status-dot"></span>本机测试环境</span><button id="refresh-button" class="secondary" type="button">刷新数据</button></div>
     </header>
 
+    <p id="strict-scope-note" class="strict-scope-note" hidden>严格员工权限测试模式：只开放本人授权的学生、联系人查询和低风险登记。其他咨询、商机、家庭审批和收款操作仍关闭。</p>
     <section class="view active" data-panel="overview">
       <div class="welcome"><div><p class="eyebrow">STUDENT-FIRST CRM</p><h2>每位学生独立管理，家庭关系按需关联</h2><p>营销咨询、学生、联系人和销售商机分开记录，避免重复统计。</p></div><span class="welcome-mark" aria-hidden="true">MS</span></div>
       <div class="stats">

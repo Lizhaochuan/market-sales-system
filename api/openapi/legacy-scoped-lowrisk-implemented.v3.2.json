@@ -1,0 +1,175 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "V3.2-13 Existing Sales POST: Employee-only Strict Mode",
+    "version": "3.2.13-isolated",
+    "description": "Exactly 2 original low-risk sales POST endpoints are migrated, protected by employee-specific session_user DB LOGIN, require live approved RS256 external identity; other existing broad writes are DENIED in strict mode."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3100",
+      "description": "Only loopback isolated-test strict employee mode"
+    }
+  ],
+  "paths": {
+    "/api/v1/students": {
+      "post": {
+        "operationId": "createStudentStrictStaff",
+        "summary": "在原中文页面新增当前员工负责的学生",
+        "description": "ONLY with MS_STRICT_STAFF_MODE=1 in isolated-test. The preexisting original route now writes through exactly the approved employee's function-only database LOGIN, never via the old broad organization receipt or original CRUD handler.",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "display_name"
+                ],
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "grade_label": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100
+                  },
+                  "school_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功，重复提交完全相同的业务和防重编号返回原记录"
+          },
+          "403": {
+            "description": "签名身份未获批准、账号撤销/停用或员工数据库账号缺失/错配"
+          },
+          "409": {
+            "description": "防重复编号用于不同内容"
+          },
+          "422": {
+            "description": "未允许的字段或字段验证失败"
+          },
+          "500": {
+            "description": "数据库操作失败，不泄漏 SQL 细节"
+          }
+        },
+        "x-isolated-mode-only": true,
+        "x-function-only-employee-db": true,
+        "x-production-ready": false
+      }
+    },
+    "/api/v1/contacts": {
+      "post": {
+        "operationId": "createContactStrictStaff",
+        "summary": "在原中文页面创建不采集手机/微信的联系人",
+        "description": "ONLY with MS_STRICT_STAFF_MODE=1 in isolated-test. The preexisting original route now writes through exactly the approved employee's function-only database LOGIN, never via the old broad organization receipt or original CRUD handler.",
+        "security": [
+          {
+            "externalEmployeeBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "display_name"
+                ],
+                "properties": {
+                  "display_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "do_not_contact": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "创建成功，重复提交完全相同的业务和防重编号返回原记录"
+          },
+          "403": {
+            "description": "签名身份未获批准、账号撤销/停用或员工数据库账号缺失/错配"
+          },
+          "409": {
+            "description": "防重复编号用于不同内容"
+          },
+          "422": {
+            "description": "未允许的字段或字段验证失败"
+          },
+          "500": {
+            "description": "数据库操作失败，不泄漏 SQL 细节"
+          }
+        },
+        "x-isolated-mode-only": true,
+        "x-function-only-employee-db": true,
+        "x-production-ready": false
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "externalEmployeeBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Local-test RS256 approved staff binding; NOT a production OIDC login."
+      }
+    }
+  },
+  "x-production-ready": false,
+  "x-migrated-post-routes": 2,
+  "x-legacy-broad-fallback": false,
+  "x-financial-and-crm-writes-enabled": false
+}

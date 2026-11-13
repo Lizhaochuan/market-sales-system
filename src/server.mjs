@@ -2,6 +2,7 @@
 import pg from 'pg';
 import { createApp } from './app.mjs';
 import { assertRestrictedRuntime } from './runtime-preflight.mjs';
+import { initializeStrictStaffPools } from './strict-staff-pools.mjs';
 
 if(process.env.MS_STAGE!=='isolated-test'){
   throw new Error('This backend is test-only. Production identity provider and tenant authorization are not ready.');
@@ -25,12 +26,31 @@ const externalIdentity=supplied.length===3?{
   audience:process.env.OIDC_AUDIENCE,
   jwks:JSON.parse(process.env.OIDC_JWKS_JSON)
 }:undefined;
+// Optional local-only strict rehearsal. Never honor employee pool URLs from
+// requests, untrusted claims, browser input or the legacy organization JWT.
+const strictStaffMode=process.env.MS_STRICT_STAFF_MODE==='1';
+if(strictStaffMode&&!externalIdentity)
+  throw new Error('Strict employee mode requires external RS256 issuer, audience and pinned public JWKS');
+if(strictStaffMode&&(!process.env.MS_STAFF_READ_URLS_JSON||
+  !process.env.MS_STAFF_WRITE_URLS_JSON))
+  throw new Error('Strict mode requires both per-employee read and write database pools');
+let strictPools;
+if(strictStaffMode)strictPools=await initializeStrictStaffPools({
+  readUrlsJson:process.env.MS_STAFF_READ_URLS_JSON,
+  writeUrlsJson:process.env.MS_STAFF_WRITE_URLS_JSON
+});
 const server=createApp(pool,{
   secret,issuer:process.env.AUTH_ISSUER||'market-sales-test-issuer',
-  devLoginSecret:process.env.DEV_LOGIN_SECRET,externalIdentity
+  devLoginSecret:strictStaffMode?undefined:process.env.DEV_LOGIN_SECRET,
+  externalIdentity,
+  strictStaffMode,
+  ...(strictPools?{
+    scopedReadPools:strictPools.scopedReadPools,
+    scopedWritePools:strictPools.scopedWritePools
+  }:{})
 });
 const port=Number(process.env.PORT||3100);
 server.listen(port,'127.0.0.1',()=>{console.log('Market-sales isolated backend listening on loopback '+port);});
-const shutdown=async()=>{server.close();await pool.end();};
+const shutdown=async()=>{server.close();await pool.end();if(strictPools)await strictPools.close();};
 process.on('SIGINT',shutdown);
 process.on('SIGTERM',shutdown);
