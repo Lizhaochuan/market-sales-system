@@ -89,6 +89,20 @@ PR #7 基于 V3.2-02 PR #6，且依赖 #5 和 #4；在依赖审核和基线明�
 
 该项目仍然 **MS_STAGE=isolated-test + localhost + 虚构数据**，尚无生产身份供应商或已完整验证的低权限生产运行账号。旧的 PR #4–#7 都是待审草稿，本 PR 依赖 PR #7；不可多分支重复合并。**不修改现有 edu-management-system 的代码及技术文档，实际完成双系统集成和联合验收后才融合文档。**
 
+## V3.2-05 非所有者数据库账号与首批租户行级隔离（草稿 PR #9）
+
+本轮把 V3.2-04 仅有的受限数据库角色升级为**真实独立非所有者 LOGIN 的隔离测试**，增加第一批 PostgreSQL 租户行级策略和数据库事务内的机构上下文。
+
+- [V3.2-05 技术实现、两机构隔离试验和生产安全阻断](docs/V3.2-05_RUNTIME_TENANT_ISOLATION.md)
+- [009 核心表 RLS 及继承角色身份审批修复](db/migrations/009_isolated_tenant_rls.sql)
+- [隔离测试独立数据库 LOGIN 初始化](tests/sql/create_isolated_runtime_login.sql)
+- [数据库受限运行账号启动前安全验证](src/runtime-preflight.mjs)
+- [真实非所有者 LOGIN、两机构 HTTP 和数据库行级安全测试](tests/security/isolated-login-tenant-rls.test.mjs)
+
+**必须特别注意：** 本轮 RLS 使用的自定义 PostgreSQL 机构上下文变量并非不可伪造，具备任意 SQL 执行权限者可以修改该变量，因此目前只是纵深保护，而非已经通过生产级多租户隔离审查。间接关系表、正式身份供应商、完整 PKCE 登录和全部数据库权限审查均未完成。
+
+服务仍强制 `MS_STAGE=isolated-test` 与本机回环地址，收款、自动成交、退款和 CRM 实际课时操作继续关闭。PR #9 依赖 #8，且原有 CRM 数据、代码及技术文档均未修改。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
