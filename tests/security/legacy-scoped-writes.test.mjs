@@ -362,7 +362,7 @@ test('V3.2-13 original student/contact POST uses employee-only DB identity and c
         {contact_id:contactId,relation_type:'母亲',verification_state:'unverified'});
       assert.ok([403,422].includes(wrongOrg.status));
       assert.equal((await request('POST','/api/v1/students/'+studentId+'/contacts',
-        tokenA,{contact_id,relation_type:'母亲'},key())).status,409);
+        tokenA,{contact_id:contactId,relation_type:'母亲'},key())).status,409);
     });
     await t.test('concurrent consultation retries create one actual consultation; shared receipt key spans old/new writes',async()=>{
       const idem=key();
