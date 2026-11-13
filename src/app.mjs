@@ -4,6 +4,7 @@ import { demoLogin } from './dev-login.mjs';
 import { serveUi } from './ui-assets.mjs';
 import { identityOperation } from './identity-governance.mjs';
 import { createExternalTokenVerifier, resolveExternalStaff } from './external-identity.mjs';
+import { migratedLegacyReads, readLegacyViaStaffPool } from './scoped-legacy-read-adapter.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -458,9 +459,14 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
+  // Explicit opt-in migration: legacy demo behavior is unchanged unless
+  // dedicated employee pools have been configured by the trusted server.
+  // Providing an empty Map deliberately denies ALL migrated reads.
+  if(scopedReadPools!==undefined && !(scopedReadPools instanceof Map))
+    throw new Error('Scoped legacy read mode requires a trusted staff-to-DB-pool Map');
   const externalVerifier=externalIdentity?createExternalTokenVerifier(externalIdentity):null;
   return createServer(async(req,res)=>{
     const requestId=randomUUID();
@@ -524,6 +530,11 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
             fail(409,'IDEMPOTENCY_CONFLICT','同一防重复编号已用于另一项操作，请核实原请求');
           result=existing.rows[0].response_json;
         }
+      } else if(scopedReadPools!==undefined && migratedLegacyReads.has(route.op)) {
+        result=await readLegacyViaStaffPool({
+          pools:scopedReadPools,context:ctx,claims:externalClaims,
+          operation:route.op,params:route.match.slice(1)
+        });
       } else result=await handle(c,ctx,route.op,route.match.slice(1),null,url);
       await c.query('COMMIT');
       send(res,200,{code:'OK',message:'操作成功',data:result},requestId);
