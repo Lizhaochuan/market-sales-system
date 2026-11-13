@@ -69,7 +69,7 @@ for (const [name,doc] of [['CRM',crm],['Market sales',sales]]) {
 }
 
 test('CRM endpoints never masquerade as existing routes',()=>{
-  assert.ok(crm.info.description.includes('not'));
+  assert.match(crm.info.description,/DESIGN ONLY|未实现/i);
   assert.ok(crm.servers[0].url.endsWith('.invalid'));
   assert.ok(sales.servers[0].url.endsWith('.invalid'));
   assert.equal(crm['x-owning-system'],'edu-management-system');
