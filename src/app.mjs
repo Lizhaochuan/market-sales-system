@@ -5,6 +5,7 @@ import { serveUi } from './ui-assets.mjs';
 import { identityOperation } from './identity-governance.mjs';
 import { createExternalTokenVerifier, resolveExternalStaff } from './external-identity.mjs';
 import { migratedLegacyReads, readLegacyViaStaffPool } from './scoped-legacy-read-adapter.mjs';
+import { migratedLegacyWrites, writeLegacyViaStaffPool } from './scoped-legacy-write-adapter.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -459,7 +460,7 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
   // Explicit opt-in migration: legacy demo behavior is unchanged unless
@@ -467,6 +468,10 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
   // Providing an empty Map deliberately denies ALL migrated reads.
   if(scopedReadPools!==undefined && !(scopedReadPools instanceof Map))
     throw new Error('Scoped legacy read mode requires a trusted staff-to-DB-pool Map');
+  if(scopedWritePools!==undefined && !(scopedWritePools instanceof Map))
+    throw new Error('Scoped legacy write mode requires a trusted staff-to-DB-pool Map');
+  if((scopedWritePools!==undefined||scopedReadPools!==undefined)&&!externalIdentity)
+    throw new Error('Employee scoped mode requires the trusted RS256 issuer/audience/JWKS configuration');
   const externalVerifier=externalIdentity?createExternalTokenVerifier(externalIdentity):null;
   return createServer(async(req,res)=>{
     const requestId=randomUUID();
@@ -511,7 +516,15 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       // protected mapping; no request/session GUC can select another tenant.
       // A service must use the correct dedicated tenant database login.
       let result;
-      if(req.method==='POST'){
+      if(req.method==='POST'&&scopedWritePools!==undefined&&
+         migratedLegacyWrites.has(route.op)){
+        // This branch precedes the old organization-level idempotency receipt
+        // and handler. It NEVER falls through to their broad SQL credentials.
+        result=await writeLegacyViaStaffPool({
+          pools:scopedWritePools,context:ctx,claims:externalClaims,
+          operation:route.op,body,idempotencyKey:key
+        });
+      }else if(req.method==='POST'){
         const hash=digest(req.method,url.pathname,body);
         const reserved=await c.query(
           "INSERT INTO ms.api_write_receipts(organization_id,actor_user_id,request_key,operation_name,request_digest,response_json)"+
