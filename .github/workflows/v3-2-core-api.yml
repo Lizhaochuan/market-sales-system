@@ -89,7 +89,7 @@ jobs:
           node --check web/app.js
           node --check web/identity.js
       - name: Core API, authorization, idempotency and Chinese audit E2E
-        run: node --test tests/core/*.test.mjs tests/ui/*.test.mjs tests/security/*.test.mjs
+        run: node --test --test-concurrency=1 tests/core/*.test.mjs tests/ui/*.test.mjs tests/security/*.test.mjs
       - name: Real headless Chromium workflow and responsive UI
         run: npx playwright test
       - name: Upload isolated browser evidence
