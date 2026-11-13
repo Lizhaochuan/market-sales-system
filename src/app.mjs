@@ -31,7 +31,7 @@ function audit(c,ctx,targetType,targetId,event,reason,before={},after={}){
 async function orgEntity(c,table,id,org,name) {
   const allowed={contacts:'contacts',contact_events:'contact_events',marketing_channels:'marketing_channels'};
   if(!allowed[table])throw Error('Disallowed table lookup');
-  const r=await c.query('SELECT id'+(table==='contact_events'?',contact_id':'')+' FROM ms.'+allowed[table]+
+  const r=await c.query('SELECT id'+(table==='contact_events'?',contact_id,recorded_by':'')+' FROM ms.'+allowed[table]+
     ' WHERE id=$1 AND organization_id=$2'+(table==='contacts'?' AND archived_at IS NULL':''),
     [needId(id,name),org]);
   if(!r.rowCount)fail(422,'VALIDATION_ERROR',name+'不存在于当前机构');
@@ -41,7 +41,8 @@ async function getContact(c,ctx,id) {
   const x=await orgEntity(c,'contacts',id,ctx.user.organization_id,'联系人');
   if(ctx.manager)return x;
   const scope=await c.query(
-    "SELECT 1 FROM ms.leads l WHERE l.contact_id=$1 AND l.organization_id=$2 AND l.owner_user_id=$3"+
+    "SELECT 1 FROM ms.contacts c WHERE c.id=$1 AND c.organization_id=$2 AND c.created_by=$3"+
+    " UNION SELECT 1 FROM ms.leads l WHERE l.contact_id=$1 AND l.organization_id=$2 AND l.owner_user_id=$3"+
     " UNION SELECT 1 FROM ms.student_contacts sc JOIN ms.students s ON s.id=sc.student_id"+
     " WHERE sc.contact_id=$1 AND sc.valid_to IS NULL AND s.organization_id=$2 AND s.owner_user_id=$3 LIMIT 1",
     [id,ctx.user.organization_id,ctx.user.id]);
@@ -88,9 +89,9 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       const name=needText(body.display_name,'联系人姓名',100);
       if(body.do_not_contact!==undefined&&typeof body.do_not_contact!=='boolean')
         fail(422,'VALIDATION_ERROR','拒绝联系设置不正确');
-      const r=await c.query('INSERT INTO ms.contacts(organization_id,display_name,do_not_contact)'+
-        ' VALUES($1,$2,$3) RETURNING id,display_name,do_not_contact',
-        [org,name,body.do_not_contact===true]);
+      const r=await c.query('INSERT INTO ms.contacts(organization_id,display_name,do_not_contact,created_by)'+
+        ' VALUES($1,$2,$3,$4) RETURNING id,display_name,do_not_contact',
+        [org,name,body.do_not_contact===true,actor]);
       // Important: no phone or WeChat PII is accepted in this isolated MVP.
       const x=r.rows[0];
       await audit(c,ctx,'contact',x.id,'CONTACT_CREATED','新建联系人：'+name,{}, {'联系人':name});
@@ -98,14 +99,14 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     }
     case 'createEvent': {
       object(body,['contact_id','channel_id','event_type','occurred_at','source_evidence_ref']);
-      const contact=body.contact_id?await orgEntity(c,'contacts',body.contact_id,org,'联系人'):null;
+      const contact=body.contact_id?await getContact(c,ctx,body.contact_id):null;
       if(body.channel_id)await orgEntity(c,'marketing_channels',body.channel_id,org,'渠道');
       const when=Date.parse(body.occurred_at);
       if(!Number.isFinite(when))fail(422,'VALIDATION_ERROR','咨询发生时间格式不正确');
       const type=needText(body.event_type,'咨询类型',50);
-      const r=await c.query('INSERT INTO ms.contact_events(organization_id,contact_id,channel_id,event_type,occurred_at,source_evidence_ref)'+
-        ' VALUES($1,$2,$3,$4,$5,$6) RETURNING id',
-        [org,contact?.id||null,body.channel_id||null,type,new Date(when),sourceName(body.source_evidence_ref)||null]);
+      const r=await c.query('INSERT INTO ms.contact_events(organization_id,contact_id,channel_id,event_type,occurred_at,source_evidence_ref,recorded_by)'+
+        ' VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+        [org,contact?.id||null,body.channel_id||null,type,new Date(when),sourceName(body.source_evidence_ref)||null,actor]);
       await audit(c,ctx,'contact_event',r.rows[0].id,'CONTACT_EVENT_CREATED','登记了一次真实客户咨询');
       return {event_id:r.rows[0].id};
     }
@@ -130,8 +131,10 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     case 'createLead': {
       object(body,['source_event_ref','contact_id','source_channel_id','notes']);
       const event=await orgEntity(c,'contact_events',body.source_event_ref,org,'咨询事件');
+      if(!ctx.manager&&event.recorded_by!==actor)
+        fail(403,'FORBIDDEN','当前账号无权将其他员工的咨询转为线索');
       if(body.contact_id){
-        await orgEntity(c,'contacts',body.contact_id,org,'联系人');
+        await getContact(c,ctx,body.contact_id);
         if(event.contact_id&&event.contact_id!==body.contact_id)
           fail(422,'VALIDATION_ERROR','线索联系人与原咨询不一致');
       }
