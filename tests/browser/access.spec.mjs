@@ -47,7 +47,7 @@ test('真实 Chromium：中文独立授权页面完成学生共享→双主管�
     const q=await owner.query(
       "INSERT INTO ms.identity_change_requests(organization_id,action,target_staff_id,"+
       "issuer,subject,requested_by,request_evidence_ref,request_reason_zh) "+
-      "VALUES($1,'bind',$2,$3,$4,'虚构管理员批准材料','独立核实员工') RETURNING id",
+      "VALUES($1,'bind',$2,$3,$4,$5,'虚构管理员批准材料','独立核实员工') RETURNING id",
       [org,target,issuer,subject,requester]);
     await owner.query(
       "INSERT INTO ms.identity_change_decisions(request_id,reviewer_user_id,decision,"+
