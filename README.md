@@ -216,6 +216,21 @@ V3.2-09 的员工专属接口是新的只读服务；V3.2-10 开始**真正改�
 
 **严格模式仍是本机虚构数据测试**：正式企业登录 / OIDC Code+PKCE / MFA、全量旧写入迁移及真实财务/教培 CRM 集成均未完成。原 `edu-management-system` 及其技术文档保持独立不修改，全部草稿 PR 不合并，真实跨系统集成与联合验收后才考虑融合技术资料。
 
+## V3.2-14 原有学生—联系人待核实关联与一次真实咨询登记（草稿 PR #18）
+
+本阶段在 V3.2-13 已迁移原学生/联系人新增的基础上，进一步把**原中文工作台**的 `POST /api/v1/students/{studentId}/contacts` 与 `POST /api/v1/contact-events` 接入员工专属、函数-only 的低权限数据库写入。严格模式总计有 **4 条原有低风险 POST** 完成迁移；未迁移的线索创建、商机、家庭审批、收款与课时仍拒绝。
+
+- [V3.2-14 独立中文技术和业务权限说明](docs/V3.2-14_SCOPED_CONTACT_LINKS_AND_CONSULTATIONS.md)
+- [017 数据库：单学生待核实关系、一次咨询以及共同防重收据](db/migrations/017_scoped_contact_links_consultations.sql)
+- [原业务 POST 员工函数-only SQL 适配](src/scoped-legacy-write-adapter.mjs)
+- [真实 PostgreSQL/HTTP 的跨销售、兄弟姐妹与咨询单次计数安全回归](tests/security/legacy-scoped-writes.test.mjs)
+- [实际 Chromium 原中文页面联系人关联及咨询登记测试](tests/browser/strict-employee.spec.mjs)
+- [原四条已迁移低风险接口 OpenAPI](api/openapi/legacy-scoped-lowrisk-implemented.v3.2.json)
+
+**学生是主要单位；家庭只有在两个及以上确实同属家庭的学生核实后才按需关联。** 普通销售可给本人学生关联本人联系人，但只能标记“待核实”，不能确认监护人与兄弟姐妹。一次真实家长咨询只计**一条**，不会按关联孩子数复制咨询、线索或业绩。共享某名学生给销售 B 也不让 B 自动取得这名家长在其他销售处的客户、咨询或商机。
+
+严格模式需要本机虚构 RSA 员工凭据和不同员工的受限数据库账号，不是生产统一登录。独立市场销售仓库交付；旧教培 CRM、数据和技术说明不动，正式收退款/成交/课时继续关闭。所有 PR 保持 Draft，只有实际跨系统集成与联合验收后才融合技术资料。
+
 ## 版本与融合边界
 
 当前 V3.0 是独立设计稿，**并不代表软件已完成或接口已经实测通过**。后续技术设计、业务决策、实现和验收证据优先保留在本仓库。
