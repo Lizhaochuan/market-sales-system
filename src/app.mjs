@@ -493,7 +493,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         return;
       }
       if(url.pathname==='/api/v1/health'&&req.method==='GET'){
-        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test'}},requestId);return;
+        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode}},requestId);return;
       }
       const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
         .find(x=>x.method===req.method&&x.match);
