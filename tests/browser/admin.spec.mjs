@@ -152,3 +152,73 @@ test('真实 Chromium：独立两位主管审核家庭关系，记录中文变�
   await expect(page.locator('#family-form button[type="submit"]')).toBeDisabled();
   await expect(page.locator('#family-decision-form button[type="submit"]')).toBeDisabled();
 });
+
+
+test('真实 Chromium：双主管身份绑定和撤销审批，普通销售不可见',async({page},testInfo)=>{
+  await login(page,'sales-a');
+  await expect(page.getByRole('button',{name:'员工身份审批'})).toHaveCount(0);
+  await logout(page);
+  await login(page,'supervisor');
+  await navigate(page,'员工身份审批');
+  await page.locator('#identity-staff-select').selectOption({label:'模拟销售顾问 A'});
+  await page.locator('#identity-bind-form input[name="issuer"]')
+    .fill('https://fictional-browser-identity.example.invalid');
+  await page.locator('#identity-bind-form input[name="subject"]')
+    .fill('browser-fake-external-identity-person-A');
+  await page.locator('#identity-bind-form input[name="request_evidence_ref"]')
+    .fill('虚构入职核验编号');
+  await page.locator('#identity-bind-form textarea[name="request_reason_zh"]')
+    .fill('申请为销售顾问 A 关联虚构的外部身份');
+  await page.getByRole('button',{name:'提交身份绑定申请'}).click();
+  await expect(page.locator('#identity-list')).toContainText('外部身份绑定 · 模拟销售顾问 A');
+  await expect(page.locator('#identity-list')).toContainText('待另一主管审核');
+  await expect(page.locator('#identity-decision-form button[type="submit"]')).toBeDisabled();
+  await testInfo.attach('identity-pending-review',{body:await page.screenshot({fullPage:true}),contentType:'image/png'});
+
+  await logout(page);
+  await login(page,'supervisor-2');
+  await navigate(page,'员工身份审批');
+  await page.locator('#identity-review-select')
+    .selectOption({label:'绑定 · 模拟销售顾问 A · 申请人：模拟销售主管'});
+  await expect(page.locator('#identity-decision-form button[type="submit"]')).toBeEnabled();
+  await page.locator('#identity-decision-form input[name="review_evidence_ref"]')
+    .fill('第二主管重新核实材料');
+  await page.locator('#identity-decision-form textarea[name="reason_zh"]')
+    .fill('确认虚构入职材料对应本人');
+  await page.getByRole('button',{name:'提交独立审核决定'}).click();
+  await expect(page.locator('#identity-list')).toContainText('已批准');
+  await navigate(page,'业务变更记录');
+  await page.locator('#audit-type').selectOption('identity_change');
+  await page.locator('#audit-object')
+    .selectOption({label:'绑定 · 模拟销售顾问 A · 已批准'});
+  await page.getByRole('button',{name:'查看记录'}).click();
+  await expect(page.locator('#audit-list')).toContainText('独立主管批准');
+  await expect(page.locator('#audit-list')).not.toContainText('before_business_json');
+
+  await logout(page);
+  await login(page,'supervisor');
+  await navigate(page,'员工身份审批');
+  await page.locator('#identity-binding-select')
+    .selectOption({label:'模拟销售顾问 A · https://fictional-browser-identity.example.invalid'});
+  await page.locator('#identity-revoke-form input[name="request_evidence_ref"]')
+    .fill('虚构离职材料核验编号');
+  await page.locator('#identity-revoke-form textarea[name="request_reason_zh"]')
+    .fill('不再允许旧的虚构外部身份访问系统');
+  await page.getByRole('button',{name:'提交身份撤销申请'}).click();
+  await expect(page.locator('#identity-list')).toContainText('外部身份撤销 · 模拟销售顾问 A');
+  await expect(page.locator('#identity-decision-form button[type="submit"]')).toBeDisabled();
+
+  await logout(page);
+  await login(page,'supervisor-2');
+  await navigate(page,'员工身份审批');
+  await page.locator('#identity-review-select')
+    .selectOption({label:'撤销 · 模拟销售顾问 A · 申请人：模拟销售主管'});
+  await page.locator('#identity-decision-form input[name="review_evidence_ref"]')
+    .fill('第二主管确认撤销');
+  await page.locator('#identity-decision-form textarea[name="reason_zh"]')
+    .fill('独立复核离职撤销资料');
+  await page.getByRole('button',{name:'提交独立审核决定'}).click();
+  await expect(page.locator('#identity-list')).toContainText('已批准');
+  await expect(page.locator('#identity-binding-select')).toHaveCount(1);
+  await expect(page.locator('#identity-binding-select option')).toHaveCount(0);
+});
