@@ -3,6 +3,7 @@
 // IMPORTANT: legitimate staff JWT -> SESSION_USER employee mapping is required.
 import {createServer} from 'node:http';
 import {randomUUID} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
 import {createExternalTokenVerifier} from './external-identity.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -84,6 +85,26 @@ export function createStudentAccessApi(pool,{externalIdentity}={}){
         answer(res,404,'NOT_FOUND','未开放该业务路径',trace);return;
       }
       const path=url.pathname;
+      // Static asset paths are fixed: no user-supplied filename, traversal,
+      // arbitrary directory read, external network or browser token storage.
+      const staticAssets={
+        '/app/':['../web/access.html','text/html; charset=utf-8'],
+        '/app':['../web/access.html','text/html; charset=utf-8'],
+        '/app/access.js':['../web/access.js','application/javascript; charset=utf-8'],
+        '/app/access.css':['../web/access.css','text/css; charset=utf-8']
+      };
+      if(req.method==='GET'&&Object.hasOwn(staticAssets,path)){
+        const [file,type]=staticAssets[path];
+        const body=await readFile(new URL(file,import.meta.url));
+        res.writeHead(200,{
+          'Content-Type':type,'Cache-Control':'no-store',
+          'X-Content-Type-Options':'nosniff',
+          'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+        });
+        res.end(body);return;
+      }
+      const listStudents=req.method==='GET'&&path==='/api/v1/student-access/students';
+      const listStaff=req.method==='GET'&&path==='/api/v1/student-access/staff';
       const listReq=req.method==='GET'&&path==='/api/v1/student-access/requests';
       const listGrants=req.method==='GET'&&path==='/api/v1/student-access/grants';
       const createReq=req.method==='POST'&&path==='/api/v1/student-access/requests';
@@ -91,7 +112,7 @@ export function createStudentAccessApi(pool,{externalIdentity}={}){
         /^\/api\/v1\/student-access\/requests\/[0-9a-f-]+\/decision$/.test(path);
       const revoke=req.method==='POST'&&
         /^\/api\/v1\/student-access\/grants\/[0-9a-f-]+\/revoke$/.test(path);
-      if(!(listReq||listGrants||createReq||decision||revoke)){
+      if(!(listStudents||listStaff||listReq||listGrants||createReq||decision||revoke)){
         answer(res,404,'NOT_FOUND','该操作未开放',trace);return;
       }
       const token=(req.headers.authorization||'').match(/^Bearer (\S+)$/i)?.[1];
@@ -114,7 +135,13 @@ export function createStudentAccessApi(pool,{externalIdentity}={}){
         answer(res,403,'FORBIDDEN','员工身份未获批准或已经撤销',trace);return;
       }
       let data,message;
-      if(listReq){
+      if(listStudents){
+        const result=await client.query('SELECT * FROM ms.list_student_access_choices()');
+        data={items:result.rows};message='已查询本人负责的学生';
+      }else if(listStaff){
+        const result=await client.query('SELECT * FROM ms.list_student_access_staff()');
+        data={items:result.rows};message='已查询本机构可选的接收员工';
+      }else if(listReq){
         const result=await client.query('SELECT * FROM ms.list_student_access_requests()');
         data={items:result.rows};message='已查询学生授权及转交申请';
       }else if(listGrants){
