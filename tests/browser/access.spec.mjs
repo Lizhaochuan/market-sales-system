@@ -110,9 +110,11 @@ test('真实 Chromium：中文独立授权页面完成学生共享→双主管�
     await pageM.getByRole('button',{name:'保存独立审核结果'}).click();
     await expect(pageM.locator('#requests-list')).toContainText('已批准');
 
-    const beforeRevoke=await readB.query(
-      'SELECT student_id FROM ms.student_directory_assigned');
-    expect(beforeRevoke.rows.some(x=>x.student_id===studentId)).toBe(true);
+    await expect.poll(async()=>{
+      const beforeRevoke=await readB.query(
+        'SELECT student_id FROM ms.student_directory_assigned');
+      return beforeRevoke.rows.some(x=>x.student_id===studentId);
+    },{timeout:10000,message:'审批完成后独立只读账号应可见该学生'}).toBe(true);
     const pageB=await connect('B');
     await pageB.getByRole('button',{name:'当前共享与撤销'}).click();
     await expect(pageB.locator('#grants-list')).toContainText(studentName);
