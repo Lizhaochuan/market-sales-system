@@ -14,6 +14,7 @@ export const migratedLegacyReads=new Set([
   'listCampaignFinanceIncidentHistory',
   'listCampaignFinanceEscalationFollowups',
   'listCampaignFinanceEscalationEvidenceGates',
+  'listCampaignCrossModuleAcceptancePrerequisites',
   'listChannelChangeRequests',
   'listChannelAuditHistory',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
@@ -26,6 +27,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listCampaignCrossModuleAcceptancePrerequisites:
+    'SELECT incident_id,review_id,incident_status,sales_packet_complete,prerequisite_status,finance_principal_verified,finance_signed_receipt_verified,finance_budget_decision_verified,academic_principal_verified,academic_student_impact_reconciled,academic_signed_attestation_verified,cross_module_evidence_reconciled,three_party_acceptance_verified,compensation_history_verified,hold_active,release_eligible,finance_authorized,execution_allowed,activity_publish_allowed FROM ms.scoped_isolated_campaign_cross_module_acceptance_prerequisites ORDER BY incident_id LIMIT 101',
   listCampaignFinanceEscalationEvidenceGates:
     'SELECT incident_id,review_id,incident_status,reporter_evidence_present,independent_sales_review_present,finance_requirements_documented,sales_packet_complete,sales_packet_status,finance_acceptance_verified,academic_acceptance_verified,cross_department_accepted,hold_active,finance_authorized,execution_allowed FROM ms.scoped_isolated_campaign_escalation_evidence_gates ORDER BY incident_id LIMIT 101',
   listCampaignFinanceEscalationFollowups:
@@ -157,7 +160,7 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates'].includes(operation)&&r.rows.length>100)
+      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)
