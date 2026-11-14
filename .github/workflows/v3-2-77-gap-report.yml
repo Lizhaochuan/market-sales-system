@@ -1,0 +1,22 @@
+name: V3.2-77 isolated final handoff gap report
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-handoff-gap-report.mjs'
+      - 'tests/security/v3-2-77-m02-handoff-gap-report.test.mjs'
+      - '.github/workflows/v3-2-77-gap-report.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-handoff-report:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check CI-only gap report syntax
+        run: node --check src/cross-module-handoff-gap-report.mjs
+      - name: Check gap reporting, forged authority and upstream blockers
+        run: node --test tests/security/v3-2-77-m02-handoff-gap-report.test.mjs tests/security/v3-2-76-m02-final-handoff-preflight.test.mjs tests/security/v3-2-75-m02-reconfirmation.test.mjs
