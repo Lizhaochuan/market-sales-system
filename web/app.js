@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],campaigns:['获客管理','市场活动'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -233,13 +233,15 @@ function renderChannelMaintenance(){
 }
 function setCampaignRevisionChoice(){
   const form=$('campaign-revise-form');
-  const own=state.campaignDrafts.filter(x=>x.owner_user_id===state.user?.staff_id);
+  const own=state.campaignDrafts.filter(x=>x.owner_user_id===state.user?.staff_id&&
+    !state.campaignSalesReviews.some(r=>r.campaign_id===x.campaign_id&&
+      ['pending_sales','sales_approved_pending_finance'].includes(r.status)));
   const selector=$('campaign-revise-choice');
   setSelect(selector,own,'campaign_id',x=>x.name+' · 版本 '+x.version);
   const active=state.channels.filter(x=>x.effective_status==='active');
   setSelect($('campaign-revise-channel-choice'),active,'channel_id',x=>x.name);
   const selected=own.find(x=>x.campaign_id===selector.value);
-  $('campaign-revise-panel').hidden=!selected||state.campaignLoadError||state.channelLoadError;
+  $('campaign-revise-panel').hidden=!selected||state.campaignLoadError||state.channelLoadError||state.campaignSalesLoadError;
   form.querySelector('button[type="submit"]').disabled=!selected||!active.length;
   if(!selected){
     $('campaign-revise-version').textContent='暂无本人可修改的活动草稿';
@@ -258,6 +260,47 @@ function setCampaignRevisionChoice(){
   for(const option of $('campaign-revise-channel-choice').options)
     option.selected=selectedChannels.has(option.value);
   $('campaign-revise-version').textContent='当前草稿版本 '+selected.version+'；保存时需与数据库版本一致';
+}
+function renderCampaignSalesReview(){
+  const healthy=state.strict&&!state.campaignSalesLoadError&&
+    !state.campaignLoadError&&!state.channelLoadError;
+  const own=state.campaignDrafts.filter(x=>x.owner_user_id===state.user?.staff_id&&
+    !state.campaignSalesReviews.some(r=>r.campaign_id===x.campaign_id&&
+      ['pending_sales','sales_approved_pending_finance'].includes(r.status)));
+  const pending=state.campaignSalesReviews.filter(x=>
+    x.status==='pending_sales'&&x.can_sales_review===true&&
+    x.requested_by!==state.user?.staff_id);
+  $('campaign-sales-total').textContent=state.campaignSalesReviews.length+' 条';
+  $('campaign-sales-status').textContent=state.campaignSalesLoadError
+    ?'销售审批数据读取失败，已清空旧待办并禁止操作。'
+    :'销售通过后仍在财务待确认中。尚无实际财务预算批准或活动执行许可。';
+  $('campaign-sales-request-panel').hidden=!healthy||!own.length;
+  $('campaign-sales-review-panel').hidden=!healthy||
+    state.capabilities.review_campaign_sales!==true||!pending.length;
+  if(!healthy){
+    $('campaign-sales-list').replaceChildren();
+    $('campaign-sales-request-choice').replaceChildren();
+    $('campaign-sales-review-choice').replaceChildren();
+    $('campaign-sales-request-version').textContent='尚未核实可提交的活动版本';
+    return;
+  }
+  paint('campaign-sales-list',state.campaignSalesReviews,x=>record(
+    ({pending_sales:'等待销售主管独立审核',
+       sales_rejected:'销售审核驳回',
+       sales_approved_pending_finance:'销售审核通过，仍等待财务确认'})[x.status],
+    '活动：'+(state.campaignDrafts.find(c=>c.campaign_id===x.campaign_id)?.name||
+      '本机构已授权草稿')+' · 申请版本：'+x.campaign_version+
+      ' · 时间：'+formatDate(x.created_at),
+    '预算未获财务授权，禁止投放或支出','审'));
+  setSelect($('campaign-sales-request-choice'),own,'campaign_id',
+    x=>x.name+' · 草稿版本 '+x.version);
+  setSelect($('campaign-sales-review-choice'),pending,'review_id',
+    x=>(state.campaignDrafts.find(c=>c.campaign_id===x.campaign_id)?.name||
+      '本机构待审核草稿')+' · 申请版本 '+x.campaign_version);
+  const selected=own.find(x=>x.campaign_id===$('campaign-sales-request-choice').value);
+  $('campaign-sales-request-version').textContent=selected
+    ?'当前版本 '+selected.version+'；提交后冻结草稿直至驳回，批准后仍等待财务确认。'
+    :'没有可以提交的本人草稿';
 }
 function render(){
   $('stat-students').textContent=state.students.length;
@@ -286,10 +329,11 @@ function render(){
   renderChannelMaintenance();
   $('campaign-workbench').hidden=!state.strict;
   $('campaigns-total').textContent=state.campaignDrafts.length+' 条';
+  renderCampaignSalesReview();
   $('campaigns-status').textContent=state.campaignLoadError||state.channelLoadError
     ?'活动草稿或渠道目录读取失败，旧数据已清空，禁止新建。'
     :'只显示本人负责的草稿和主管有权查看的本机构草稿。预算均为未审批的计划金额。';
-  if(!state.strict||state.campaignLoadError||state.channelLoadError){
+  if(!state.strict||state.campaignLoadError||state.channelLoadError||state.campaignSalesLoadError){
     $('campaigns-list').replaceChildren();
     $('campaign-channel-choice').replaceChildren();
     $('campaign-revise-choice').replaceChildren();
@@ -466,6 +510,7 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
 async function refresh(){
   const endpoints=state.strict?[
     ['campaignDrafts','/api/v1/marketing-campaigns/drafts'],
+    ['campaignSalesReviews','/api/v1/marketing-campaigns/sales-reviews'],
     ['channels','/api/v1/marketing-channels'],
     ['channelRequests','/api/v1/marketing-channels/change-requests'],
     ['channelAuditHistory','/api/v1/marketing-channels/change-requests/audit-history'],
@@ -502,11 +547,22 @@ async function refresh(){
   }
   else {
     state.campaignDrafts=[];state.campaignLoadError=false;
+    state.campaignSalesReviews=[];state.campaignSalesLoadError=false;
     state.channelRequests=[];state.channelRequestLoadError=false;
     state.channelAuditHistory=[];state.channelAuditLoadError=false;state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
-    if(key==='campaignDrafts'){
+    if(key==='campaignSalesReviews'){
+      const items=r.status==='fulfilled'?r.value?.items:null;
+      const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
+        x&&typeof x.review_id==='string'&&typeof x.campaign_id==='string'&&
+        Number.isSafeInteger(x.campaign_version)&&x.campaign_version>=1&&
+        typeof x.requested_by==='string'&&typeof x.can_sales_review==='boolean'&&
+        typeof x.created_at==='string'&&
+        ['pending_sales','sales_rejected','sales_approved_pending_finance'].includes(x.status));
+      state.campaignSalesReviews=valid?items:[];
+      state.campaignSalesLoadError=!valid;
+    }else if(key==='campaignDrafts'){
       const items=r.status==='fulfilled'?r.value?.items:null;
       const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
         x&&typeof x.campaign_id==='string'&&
@@ -575,6 +631,12 @@ function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
   state.campaignDrafts=[];state.campaignLoadError=false;
+  state.campaignSalesReviews=[];state.campaignSalesLoadError=false;
+  $('campaign-sales-list').replaceChildren();
+  $('campaign-sales-request-choice').replaceChildren();
+  $('campaign-sales-review-choice').replaceChildren();
+  $('campaign-sales-request-version').textContent='未登录，销售审批记录已清空';
+  $('campaign-sales-total').textContent='0 条';
   $('campaign-workbench').hidden=true;
   $('campaigns-list').replaceChildren();
   $('campaign-channel-choice').replaceChildren();
@@ -694,13 +756,58 @@ $('channel-target-choice').addEventListener('change',()=>{
     'channel_id',c=>c.name,true);
 });
 $('campaign-revise-choice').addEventListener('change',setCampaignRevisionChoice);
-register('campaign-revise-form',async d=>{
+$('campaign-sales-request-choice').addEventListener('change',()=>{
+  const selected=state.campaignDrafts.find(x=>
+    x.campaign_id===$('campaign-sales-request-choice').value);
+  $('campaign-sales-request-version').textContent=selected
+    ?'当前版本 '+selected.version+'；独立销售审核不代表财务预算批准'
+    :'没有有效的本人草稿';
+});
+register('campaign-sales-request-form',async d=>{
   if(!state.strict||state.campaignLoadError||state.channelLoadError||
+      state.campaignSalesLoadError||state.capabilities.request_campaign_sales_review!==true)
+    throw Error('活动计划或销售审批权限尚未核实');
+  const own=state.campaignDrafts.find(x=>x.campaign_id===d.campaign_id&&
+    x.owner_user_id===state.user?.staff_id&&
+    !state.campaignSalesReviews.some(r=>r.campaign_id===d.campaign_id&&
+      ['pending_sales','sales_approved_pending_finance'].includes(r.status)));
+  if(!own)throw Error('当前版本已在审核中，不可重复提交');
+  const result=await api('/api/v1/marketing-campaigns/drafts/'+
+    encodeURIComponent(own.campaign_id)+'/sales-review-requests',{
+    method:'POST',body:{expected_version:own.version,
+      evidence_ref:d.evidence_ref.trim(),reason_zh:d.reason_zh.trim()}
+  });
+  return result.status==='pending_sales'
+    ?'活动销售审核已提交，仍是草稿，预算和支出均未获批准'
+    :'已有该审核申请，状态：'+result.status;
+});
+register('campaign-sales-review-form',async d=>{
+  if(!state.strict||state.campaignLoadError||state.campaignSalesLoadError||
+     state.capabilities.review_campaign_sales!==true)
+    throw Error('未核实有效销售主管审批权');
+  const review=state.campaignSalesReviews.find(x=>
+    x.review_id===d.review_id&&x.status==='pending_sales'&&
+    x.can_sales_review===true&&x.requested_by!==state.user?.staff_id);
+  if(!review)throw Error('没有有权审批的他人待审申请');
+  const result=await api('/api/v1/marketing-campaigns/sales-reviews/'+
+    encodeURIComponent(review.review_id)+'/decision',{
+    method:'POST',body:{decision:d.decision,
+      evidence_ref:d.evidence_ref.trim(),reason_zh:d.reason_zh.trim()}
+  });
+  return result.status==='sales_approved_pending_finance'
+    ?'销售审核通过，但财务尚未确认；活动仍是草稿，禁止支出'
+    :'销售审核已驳回；草稿保持未发布、预算未审批';
+});
+register('campaign-revise-form',async d=>{
+  if(!state.strict||state.campaignLoadError||state.channelLoadError||state.campaignSalesLoadError||
     state.capabilities.revise_own_campaign_draft!==true)
     throw Error('当前活动资料或修改权限未经核实');
   const own=state.campaignDrafts.find(x=>
     x.campaign_id===d.campaign_id&&x.owner_user_id===state.user?.staff_id&&
-    x.status==='draft'&&Number.isSafeInteger(x.version));
+    x.status==='draft'&&Number.isSafeInteger(x.version)&&
+    !state.campaignSalesReviews.some(r=>r.campaign_id===x.campaign_id&&
+      ['pending_sales','sales_approved_pending_finance'].includes(r.status)));
+
   if(!own)throw Error('只有草稿原负责人可以修改，需刷新重新核实');
   const ids=[...$('campaign-revise-channel-choice').selectedOptions].map(x=>x.value);
   if(ids.length<1||ids.length>20||new Set(ids).size!==ids.length||

@@ -232,6 +232,50 @@
               <button type="submit" class="primary">保存草稿修改</button>
             </form>
           </article>
+          <article class="panel" id="campaign-sales-request-panel">
+            <h3>提交市场活动销售审核</h3>
+            <p class="form-hint">销售审核与财务确认分离。提交后冻结本草稿修改，销售主管批准仍不能使用预算或启动活动。</p>
+            <form id="campaign-sales-request-form" class="field-stack">
+              <label>本人待提交的活动草稿
+                <select name="campaign_id" id="campaign-sales-request-choice" required></select>
+              </label>
+              <p id="campaign-sales-request-version" class="form-hint">只允许提交本人、当前版本、尚未进入审批流程的活动草稿。</p>
+              <label>提交材料索引
+                <input name="evidence_ref" maxlength="200" minlength="2" required placeholder="只用虚构材料索引">
+              </label>
+              <label>提交理由
+                <textarea name="reason_zh" maxlength="400" minlength="2" required></textarea>
+              </label>
+              <button type="submit" class="primary">提交活动销售审核</button>
+            </form>
+          </article>
+          <article class="panel" id="campaign-sales-review-panel" hidden>
+            <h3>销售主管独立审核</h3>
+            <p class="form-hint">不能审批本人申请。批准后仅进入财务待确认；没有预算拨付、费用支付或活动发布权限。</p>
+            <form id="campaign-sales-review-form" class="field-stack">
+              <label>可审核的活动申请
+                <select name="review_id" id="campaign-sales-review-choice" required></select>
+              </label>
+              <label>销售审核结论
+                <select name="decision" required>
+                  <option value="approved">销售审核通过，转财务待确认</option>
+                  <option value="rejected">销售审核驳回</option>
+                </select>
+              </label>
+              <label>审核证据索引
+                <input name="evidence_ref" maxlength="200" minlength="2" required>
+              </label>
+              <label>独立审核理由
+                <textarea name="reason_zh" maxlength="400" minlength="2" required></textarea>
+              </label>
+              <button type="submit" class="primary">保存销售审核结论</button>
+            </form>
+          </article>
+          <article class="panel" id="campaign-sales-queue-panel">
+            <div class="panel-header"><h3>活动销售审核与财务待确认状态</h3><span id="campaign-sales-total" class="count">0 条</span></div>
+            <p id="campaign-sales-status" class="form-hint" role="status">这里只展示本人申请、本人审核及主管有权查看的待审申请。</p>
+            <div id="campaign-sales-list" class="record-list"></div>
+          </article>
           <article class="panel">
             <div class="panel-header"><h3>已授权活动草稿</h3><span id="campaigns-total" class="count">0 条</span></div>
             <p id="campaigns-status" role="status" class="form-hint">只显示自己负责的草稿；主管可查看同机构草稿。</p>

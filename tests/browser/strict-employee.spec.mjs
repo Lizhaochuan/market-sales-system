@@ -135,7 +135,18 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
     await expect(a.locator('#lead-form')).toBeHidden();
     await a.locator('#event-form select[name="contact_id"]').selectOption({label:contactName});
     await a.getByRole('button',{name:'保存本次咨询'}).click();
+    // The timeline may already contain an unrelated telephone event.
+    // Wait for THIS submitted consultation to finish rather than observing
+    // another employee's earlier list text during asynchronous refresh.
+    await expect(a.locator('#toast')).toContainText('一次真实咨询已登记');
     await expect(a.locator('#strict-consultation-card')).toBeVisible();
+    await expect.poll(async()=>{
+      const r=await owner.query(
+       'SELECT count(*)::int AS n FROM ms.contact_events '+
+       'WHERE contact_id=(SELECT id FROM ms.contacts WHERE display_name=$1)',
+       [contactName]);
+      return r.rows[0].n;
+    }).toBe(1);
     await expect(a.locator('#strict-consultation-list')).toContainText('电话咨询');
     const consultation=await owner.query(
       'SELECT id,recorded_by,event_type FROM ms.contact_events '+

@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-58",
-    "description": "Isolated fictional campaigns: creation and owner-only optimistic-lock draft revisions. No campaign launch, approved spending or production integration."
+    "version": "v3.2-59",
+    "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented."
   },
   "x-contract-status": "isolated-implemented",
   "x-production-integration-allowed": false,
@@ -235,6 +235,176 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/sales-reviews": {
+      "get": {
+        "operationId": "listScopedCampaignSalesReviews",
+        "summary": "View own sales review requests and eligible pending manager reviews only",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Maximum 100 minimal permission-filtered review records; no evidence or finance data"
+          },
+          "403": {
+            "description": "No approved signed employee or matching dedicated read LOGIN"
+          },
+          "500": {
+            "description": "Fail closed if view results exceed the bounded size"
+          }
+        }
+      }
+    },
+    "/api/v1/marketing-campaigns/drafts/{campaign_id}/sales-review-requests": {
+      "post": {
+        "operationId": "submitOwnCampaignForSalesReview",
+        "summary": "Submit owner-owned draft version for independent sales review; no budget authorization",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected_version",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "expected_version": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "reason_zh": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 400
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "pending_sales, no change to campaign draft or finance"
+          },
+          "403": {
+            "description": "Only campaign owner with approved strict employee LOGIN can submit"
+          },
+          "409": {
+            "description": "Stale version, already under review or conflicting idempotency key"
+          },
+          "422": {
+            "description": "Invalid evidence or draft details"
+          }
+        }
+      }
+    },
+    "/api/v1/marketing-campaigns/sales-reviews/{review_id}/decision": {
+      "post": {
+        "operationId": "decideIndependentSalesReview",
+        "summary": "Independent active sales manager decides: approval remains on finance hold",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "decision",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "rejected"
+                    ]
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "reason_zh": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 400
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "sales_approved_pending_finance or sales_rejected; campaign stays draft; finance_authorized=false"
+          },
+          "403": {
+            "description": "Only different active same-institution sales manager"
+          },
+          "409": {
+            "description": "Already reviewed, conflicting replay or stale campaign snapshot"
+          },
+          "422": {
+            "description": "Invalid review decision or content"
+          }
+        }
+      }
     }
-  }
+  },
+  "x-sales-approval-releases-budget": false,
+  "x-finance-approval-implemented": false,
+  "x-campaign-publishing-implemented": false
 }

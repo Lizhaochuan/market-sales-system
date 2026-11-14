@@ -52,7 +52,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
    "VALUES($1,$2,$3,$4,$5)",
    [target,issuer,subjects.get(target),M2,q.rows[0].id]);
  }
- let app,staffPage,managerPage,createdId,campaignId;
+ let app,staffPage,managerPage,createdId,campaignId,salesReviewId;
  const name='隔离界面渠道-'+randomUUID();
  const changedName=name+'-改名';
  const login=async(staff)=>{
@@ -164,12 +164,50 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(managerPage.locator('#campaign-revise-panel')).toBeHidden();
   // Manager can edit only their own drafts; employee A's draft is absent.
   await expect(managerPage.locator('#campaign-revise-choice option[value="'+campaignId+'"]')).toHaveCount(0);
+
+  // V3.2-59: sales manager approves the frozen v2 proposal, not the budget.
+  await expect(staffPage.locator('#campaign-sales-request-panel')).toBeVisible();
+  await staffPage.locator('#campaign-sales-request-choice').selectOption(campaignId);
+  await staffPage.locator('#campaign-sales-request-form input[name="evidence_ref"]')
+    .fill('虚构市场活动方案索引');
+  await staffPage.locator('#campaign-sales-request-form textarea[name="reason_zh"]')
+    .fill('将本人最新版本活动草稿交给独立销售主管审核');
+  await staffPage.getByRole('button',{name:'提交活动销售审核'}).click();
+  await expect(staffPage.locator('#toast')).toContainText('预算和支出均未获批准');
+  await expect(staffPage.locator('#campaign-sales-list')).toContainText('等待销售主管');
+  await expect(staffPage.locator('#campaign-revise-panel')).toBeHidden();
+  salesReviewId=(await admin.query(
+   'SELECT id FROM ms.isolated_campaign_sales_reviews WHERE campaign_id=$1',
+   [campaignId])).rows[0]?.id;
+  expect(salesReviewId).toBeTruthy();
+  await managerPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(managerPage.locator('#campaign-sales-review-panel')).toBeVisible();
+  await managerPage.locator('#campaign-sales-review-choice').selectOption(salesReviewId);
+  await managerPage.locator('#campaign-sales-review-form select[name="decision"]')
+    .selectOption('approved');
+  await managerPage.locator('#campaign-sales-review-form input[name="evidence_ref"]')
+    .fill('虚构销售经理审核依据');
+  await managerPage.locator('#campaign-sales-review-form textarea[name="reason_zh"]')
+    .fill('销售认可方案但财务预算仍需单独确认');
+  await managerPage.getByRole('button',{name:'保存销售审核结论'}).click();
+  await expect(managerPage.locator('#toast')).toContainText('财务尚未确认');
+  await expect(managerPage.locator('#campaign-sales-list')).toContainText('等待财务确认');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-sales-list')).toContainText('等待财务确认');
+  await expect(staffPage.locator('#campaign-revise-panel')).toBeHidden();
+  expect((await admin.query('SELECT status FROM ms.marketing_campaigns WHERE id=$1',
+    [campaignId])).rows[0].status).toBe('draft');
+  expect((await admin.query('SELECT status FROM ms.isolated_campaign_sales_reviews WHERE id=$1',
+    [salesReviewId])).rows[0].status).toBe('sales_approved_pending_finance');
+
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
     status:500,contentType:'application/json',
     body:JSON.stringify({code:'INTERNAL_ERROR',message:'隔离活动读取故障'})
   }));
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(staffPage.locator('#campaigns-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-sales-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-sales-review-choice')).toBeEmpty();
   await expect(staffPage.locator('#campaign-create-panel')).toBeHidden();
   await staffPage.unroute('**/api/v1/marketing-campaigns/drafts');
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
@@ -232,6 +270,10 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await Promise.allSettled([staffPage,managerPage].filter(Boolean).map(x=>x.close()));
   if(app?.listening)await new Promise(ok=>app.close(ok));
   // Release only temporary CI fixture records in FK-safe order.
+  if(salesReviewId){
+   await admin.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign_sales_review' AND target_id=$1",[salesReviewId]);
+   await admin.query('DELETE FROM ms.isolated_campaign_sales_reviews WHERE id=$1',[salesReviewId]);
+  }
   if(campaignId){
    await admin.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign' AND target_id=$1",[campaignId]);
    await admin.query('DELETE FROM ms.isolated_campaign_draft_revision_receipts WHERE campaign_id=$1',[campaignId]);
