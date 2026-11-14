@@ -211,6 +211,7 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE source_event_id=$1',[eventId])).rows[0].n).toBe(0);
   await a.getByRole('button',{name:'刷新数据'}).click();
   await expect(a.locator('#lead-candidates-list')).toContainText('候选核查通过（未生成线索）');
+  await m.locator('button[data-view="contacts"]').click();
   await m.setViewportSize({width:390,height:844});
   await expect(m.locator('#custody-decision-card')).toBeVisible();
   const overflow=await m.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
