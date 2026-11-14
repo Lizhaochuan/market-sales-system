@@ -50,6 +50,7 @@
       <button data-view="students" class="nav-item"><span class="nav-glyph">◉</span>学生客户</button>
       <button data-view="contacts" class="nav-item"><span class="nav-glyph">♧</span>家长与联系人</button>
       <button data-view="channels" class="nav-item"><span class="nav-glyph">☷</span>获客渠道</button>
+      <button data-view="campaigns" class="nav-item"><span class="nav-glyph">▧</span>市场活动</button>
       <button data-view="leads" class="nav-item"><span class="nav-glyph">✦</span>咨询与线索</button>
       <button data-view="opportunities" class="nav-item"><span class="nav-glyph">▤</span>销售商机</button>
       <button data-view="interactions" class="nav-item"><span class="nav-glyph">✎</span>跟进记录</button>
@@ -174,6 +175,45 @@
         </article>
       </div>
       <p class="muted channel-scope-note">渠道维护仅限隔离测试的严格签名员工及独立主管。未经审核不修改渠道；真实渠道、跨渠道费用分摊、学生首次来源和商机归因金额仍未开放。</p>
+    </section>
+
+    <section class="view" data-panel="campaigns">
+      <div class="section-head">
+        <h2>市场活动草稿</h2>
+        <p>仅供已核实员工在隔离环境规划活动。计划预算不是财务审批额度，草稿不能启动投放、分配成本或影响学生来源。</p>
+      </div>
+      <div id="campaign-workbench" hidden>
+        <div class="two-col">
+          <article class="panel" id="campaign-create-panel">
+            <h3>新建我负责的活动草稿</h3>
+            <form id="campaign-draft-form" class="field-stack">
+              <label>活动名称
+                <input name="name" maxlength="100" minlength="2" required placeholder="仅填写虚构市场活动名称">
+              </label>
+              <label>计划开始时间（可空）
+                <input type="datetime-local" name="starts_at">
+              </label>
+              <label>计划结束时间（可空）
+                <input type="datetime-local" name="ends_at">
+              </label>
+              <label>计划预算（人民币元，未审批）
+                <input name="budget_yuan" inputmode="decimal" required value="0" placeholder="0.00">
+              </label>
+              <label>关联渠道（可按 Ctrl / Command 多选）
+                <select name="channel_ids" id="campaign-channel-choice" multiple size="5" required></select>
+              </label>
+              <p class="form-hint">负责人固定为当前签名员工，不能代别人创建或指定财务预算；仅可选择本机构有效渠道。</p>
+              <button type="submit" class="primary">保存市场活动草稿</button>
+            </form>
+          </article>
+          <article class="panel">
+            <div class="panel-header"><h3>已授权活动草稿</h3><span id="campaigns-total" class="count">0 条</span></div>
+            <p id="campaigns-status" role="status" class="form-hint">只显示自己负责的草稿；主管可查看同机构草稿。</p>
+            <div id="campaigns-list" class="record-list"></div>
+          </article>
+        </div>
+      </div>
+      <p class="muted channel-scope-note">不能把计划预算视为实际支出。活动发布、预算审批、费用分摊、营销归因及真实财务/CRM 同步仍被阻断。</p>
     </section>
 
     <section class="view" data-panel="students">
