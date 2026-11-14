@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,28 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='requestLeadStudentLinkReview'){
+    only(body,['association_request_id','action','basis_kind','evidence_ref','confirmation_ref','reason_zh']);
+    if(!['verify','withdraw'].includes(body.action))
+      fail(422,'VALIDATION_ERROR','只能申请核实或撤回指定学生关联');
+    if(body.action==='verify'&&!['student_consultation','independent_student_confirmation'].includes(body.basis_kind))
+      fail(422,'VALIDATION_ERROR','请指定独立人工核实的业务依据类型');
+    if(body.action==='withdraw'&&(body.basis_kind!==undefined||body.confirmation_ref!==undefined))
+      fail(422,'VALIDATION_ERROR','错误关联撤回不得伪造新的核实证明');
+    return {params:[uuid(body.association_request_id,'单名学生原关联'),
+      body.action,body.action==='verify'?body.basis_kind:null,
+      approvalText(body.evidence_ref,'核实或撤回证据',200),
+      body.action==='verify'?approvalText(body.confirmation_ref,'人工确认的依据',200):null,
+      approvalText(body.reason_zh,'申请理由',400)]};
+  }
+  if(op==='decideLeadStudentLinkReview'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['approved','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择独立核实通过或驳回');
+    return {params:[uuid(routeParams?.[0],'核实或撤回申请'),body.decision,
+      approvalText(body.evidence_ref,'独立主管复核凭据',200),
+      approvalText(body.reason_zh,'独立审核理由',400)]};
+  }
   if(op==='requestLeadStudentAssociation'){
     only(body,['lead_id','student_id','evidence_ref','reason_zh']);
     return {params:[uuid(body.lead_id,'本人正式线索'),
@@ -251,6 +273,14 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'requestLeadStudentLinkReview':
+        result=await client.query(
+          'SELECT ms.request_lead_student_link_review($1,$2,$3,$4,$5,$6,$7) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideLeadStudentLinkReview':
+        result=await client.query(
+          'SELECT ms.decide_lead_student_link_review($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'requestLeadStudentAssociation':
         result=await client.query(
           'SELECT ms.request_lead_student_association($1,$2,$3,$4,$5) AS result',
