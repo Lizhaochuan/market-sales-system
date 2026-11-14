@@ -263,9 +263,9 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   const readinessDecision=m.locator('#conversion-readiness-decision-form');
   const readinessChoice=readinessDecision.locator('select[name="review_id"] option')
     .filter({hasText:candidateContact}).first();
-  const reviewId=await readinessChoice.getAttribute('value');
-  expect(reviewId).toBeTruthy();
-  await readinessDecision.locator('select[name="review_id"]').selectOption(reviewId);
+  const preflightId=await readinessChoice.getAttribute('value');
+  expect(preflightId).toBeTruthy();
+  await readinessDecision.locator('select[name="review_id"]').selectOption(preflightId);
   await readinessDecision.locator('select[name="decision"]').selectOption('cleared');
   await readinessDecision.locator('textarea[name="reason_zh"]')
     .fill('两方咨询记录已独立核清，未存在相同联系人正式线索');
@@ -273,19 +273,19 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
     .fill('虚构主管预审证明');
   await readinessDecision.getByRole('button',{name:'保存独立预审结论'}).click();
   await expect.poll(async()=>(
-    await owner.query('SELECT status FROM ms.lead_conversion_readiness WHERE id=$1',[reviewId])
+    await owner.query('SELECT status FROM ms.lead_conversion_readiness WHERE id=$1',[preflightId])
   ).rows[0]?.status).toBe('cleared');
   expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE contact_id=$1',
     [candidateContactId])).rows[0].n).toBe(0);
   const revocation=m.locator('#conversion-readiness-revoke-form');
-  await revocation.locator('select[name="review_id"]').selectOption(reviewId);
+  await revocation.locator('select[name="review_id"]').selectOption(preflightId);
   await revocation.locator('textarea[name="reason_zh"]')
     .fill('预审结束后取消此前许可，保留历史审计链');
   await revocation.locator('input[name="evidence_ref"]')
     .fill('虚构主管主动撤销依据');
   await revocation.getByRole('button',{name:'撤销预审并保留不可变决定'}).click();
   await expect.poll(async()=>(
-    await owner.query('SELECT status FROM ms.lead_conversion_readiness WHERE id=$1',[reviewId])
+    await owner.query('SELECT status FROM ms.lead_conversion_readiness WHERE id=$1',[preflightId])
   ).rows[0]?.status).toBe('revoked');
   expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE contact_id=$1',
     [candidateContactId])).rows[0].n).toBe(0);
