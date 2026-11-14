@@ -67,10 +67,10 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
    [q.rows[0].id,independentReviewer]);
   await owner.query(
    "UPDATE ms.identity_change_requests SET status='approved',decided_by=$2,decided_at=now() WHERE id=$1",
-   [q.rows[0].id,reviewer]);
+   [q.rows[0].id,independentReviewer]);
   await owner.query(
    "INSERT INTO ms.staff_identity_bindings(staff_user_id,issuer,subject,bound_by,approval_request_id) "+
-   "VALUES($1,$2,$3,$4,$5)",[ids[who],issuer,subs[who],reviewer,q.rows[0].id]);
+   "VALUES($1,$2,$3,$4,$5)",[ids[who],issuer,subs[who],independentReviewer,q.rows[0].id]);
  }
  async function login(who){
   const page=await browser.newPage();
