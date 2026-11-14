@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <meta name="color-scheme" content="light">
+ <title>跨部门 UAT 待办预览 · 隔离测试</title>
+ <link rel="stylesheet" href="/uat/styles.css">
+ <script src="/uat/app.js" defer></script>
+</head>
+<body>
+ <div class="shell">
+  <header class="hero">
+   <div class="hero-copy">
+    <p class="eyebrow">MARKET SALES / ISOLATED READ-ONLY</p>
+    <h1>跨部门 UAT 待办报告</h1>
+    <p>销售、财务、教务与信息安全的真实联调前置条件和验收要求</p>
+   </div>
+   <div class="hero-status" role="status">
+    <strong>真实联调暂未授权</strong>
+    <span>只读预览 · 资金、订单、课时均不可修改</span>
+   </div>
+  </header>
+
+  <section class="notice" aria-label="隔离保护">
+   <strong>隔离测试环境</strong>
+   <p>仅显示虚构来源申请的验收待办。没有正式财务或 CRM 接口、生产审批、自动通知和解除学生隔离功能。技术 CI 通过不代表业务授权完成。</p>
+  </section>
+
+  <section id="login-card" class="panel login-card">
+   <div class="panel-head">
+    <div><span class="eyebrow">01 / 身份校验</span>
+     <h2>使用已绑定的本机构测试员工身份</h2></div>
+    <span class="tag neutral">仅限本机</span>
+   </div>
+   <p class="note">临时签名凭据只保留在页面运行内存，提交后立即清空输入框。需使用与服务器专属只读数据库账号匹配的已批准员工身份。</p>
+   <form id="login-form">
+    <label for="signed-token">员工签名测试凭据</label>
+    <div class="login-input">
+     <input id="signed-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required placeholder="粘贴本机测试管理员签发的临时凭据">
+     <button type="submit" class="primary">验证并查看待办</button>
+    </div>
+   </form>
+   <p id="login-error" class="error" role="alert"></p>
+  </section>
+
+  <main id="workspace" hidden>
+   <div class="toolbar">
+    <div><span class="verified-dot" aria-hidden="true"></span><strong>本机构只读身份已验证</strong>
+     <span class="subtle">不具备审核通过或执行权限</span></div>
+    <button id="disconnect" class="secondary" type="button">清除身份并退出</button>
+   </div>
+   <section class="panel">
+    <div class="panel-head">
+     <div><span class="eyebrow">02 / 选择来源</span><h2>可查看的联调申请</h2></div>
+     <button id="refresh" class="secondary" type="button">重新核对机构权限</button>
+    </div>
+    <div class="selection">
+     <label for="request-choice">选择本机构虚构来源申请</label>
+     <select id="request-choice" aria-label="选择本机构来源申请"></select>
+     <button id="view-report" class="primary" type="button">查看待办报告</button>
+    </div>
+    <p id="empty-state" class="note" hidden>当前员工无可查看的来源申请。不能通过输入其他机构编号绕过授权。</p>
+   </section>
+
+   <section id="report-panel" class="panel" hidden aria-live="polite">
+    <div class="panel-head">
+     <div><span class="eyebrow">03 / 核对证据</span><h2>跨部门 UAT 检查清单</h2></div>
+     <span class="tag blocked">全部为待取得真实证据</span>
+    </div>
+    <div class="metrics">
+     <div><span>适用检查</span><strong id="metric-total">—</strong></div>
+     <div><span>已登记缺失事件</span><strong id="metric-gaps">—</strong></div>
+     <div><span>真实联调状态</span><strong class="blocked-text">禁止联调</strong></div>
+    </div>
+    <p class="note">缺失事件为 0 不等于已验收。所有检查仍处于阻断状态，不能修改原订单、资金归属、学员课时或解除隔离。</p>
+    <div class="table-scroll">
+     <table aria-label="按部门划分的 UAT 待办事项">
+      <thead><tr><th scope="col">任务与部门</th><th scope="col">责任人</th>
+       <th scope="col">需要的证明</th><th scope="col">验收动作</th><th scope="col">拒绝条件</th><th scope="col">状态</th></tr></thead>
+      <tbody id="task-rows"></tbody>
+     </table>
+    </div>
+   </section>
+
+   <section id="export-panel" class="panel" hidden>
+    <div class="panel-head"><div><span class="eyebrow">04 / 只读导出</span>
+     <h2>Markdown 报告预览</h2></div>
+     <button id="download-report" class="secondary" type="button">导出本次脱敏 Markdown</button>
+    </div>
+    <p class="note">导出前服务器会再次校验临时签名身份、数据库员工和机构权限。此文件仅供整理待办，不代表真实验收通过，也不包含生产账号或资金信息。</p>
+    <pre id="markdown-preview" tabindex="0" aria-label="Markdown 待办报告内容"></pre>
+   </section>
+  </main>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+  <footer>V3.2-33 · 本机隔离只读演示 · 仅供虚构业务安全验收</footer>
+ </div>
+</body>
+</html>
