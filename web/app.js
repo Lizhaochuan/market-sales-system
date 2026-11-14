@@ -795,7 +795,9 @@ $('family-review-select').addEventListener('change',()=>{
     !chosen||chosen.verification_state!=='pending'||chosen.requested_by===state.user?.staff_id;
 });
 $('audit-type').addEventListener('change',fillAuditSelect);
-$('refresh-button').addEventListener('click',()=>refresh().then(()=>toast('当前权限范围内的数据已刷新')).catch(e=>toast(e.message,true)));
+$('refresh-button').addEventListener('click',()=>refresh().then(()=>toast(
+  state.channelLoadError?'渠道目录读取失败，已清空旧数据':'当前权限范围内的数据已刷新',
+  state.channelLoadError)).catch(e=>toast(e.message,true)));
 $('logout-button').addEventListener('click',()=>logout());
 setDefaultDate();
 fetch('/api/v1/health',{cache:'no-store'}).then(r=>r.json()).then(r=>{
