@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
+export const migratedLegacyWrites=new Set(['requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,34 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='requestChannelChange'){
+    only(body,['action','channel_id','name','parent_id','channel_type','evidence_ref','reason_zh']);
+    if(!['create','edit','deactivate'].includes(body.action))
+      fail(422,'VALIDATION_ERROR','渠道变更类型必须为新增、编辑或停用');
+    const id=body.action==='create'?null:uuid(body.channel_id,'目标渠道');
+    if(body.action==='create'&&body.channel_id!==undefined)
+      fail(422,'VALIDATION_ERROR','新增渠道不能指定现有渠道');
+    if(body.action==='deactivate'&&
+       ['name','parent_id','channel_type'].some(x=>body[x]!==undefined))
+      fail(422,'VALIDATION_ERROR','停用不能同时更改渠道名称或层级');
+    const name=body.action==='deactivate'?null:cleanName(body.name,'渠道名称');
+    const type=body.action==='deactivate'?null:cleanName(body.channel_type,'渠道类别');
+    if(name&&name.length>100||type&&type.length>60)
+      fail(422,'VALIDATION_ERROR','渠道名称或类别超出允许长度');
+    const parent=body.action==='deactivate'?null:
+      body.parent_id==null?null:uuid(body.parent_id,'上级渠道');
+    return {params:[body.action,id,name,parent,type,
+      approvalText(body.evidence_ref,'渠道维护依据',200),
+      approvalText(body.reason_zh,'渠道维护理由',400)]};
+  }
+  if(op==='reviewChannelChange'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['approved','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择批准执行或驳回');
+    return {params:[uuid(routeParams?.[0],'渠道维护申请'),
+      body.decision,approvalText(body.evidence_ref,'独立审批凭据',200),
+      approvalText(body.reason_zh,'独立审批理由',400)]};
+  }
   if(op==='attestDownstreamReconciliation'){
     only(body,['finding','student_evidence_ref','opportunity_evidence_ref','finance_evidence_ref','reason_zh']);
     if(!['original_student_confirmed','wrong_student_confirmed'].includes(body.finding))
@@ -306,6 +334,14 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'requestChannelChange':
+        result=await client.query(
+          'SELECT ms.request_isolated_channel_change($1,$2,$3,$4,$5,$6,$7,$8) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'reviewChannelChange':
+        result=await client.query(
+          'SELECT ms.review_isolated_channel_change($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'attestDownstreamReconciliation':
         result=await client.query(
           'SELECT ms.attest_downstream_student_reconciliation($1,$2,$3,$4,$5,$6,$7) AS result',
