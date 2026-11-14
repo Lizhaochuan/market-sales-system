@@ -92,8 +92,9 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
   server=createUatPreviewApi(A,{externalIdentity});
   await open(server);
   const base='http://127.0.0.1:'+server.address().port;
-  const get=(path,token)=>fetch(base+path,{
-   headers:token?{Authorization:'Bearer '+token}:{}
+  const get=(path,token,expectedRevision)=>fetch(base+path,{
+   headers:{...(token?{Authorization:'Bearer '+token}:{}),
+    ...(expectedRevision===undefined?{}:{'If-Match':'"'+expectedRevision+'"'})}
   });
   await t.test('no bearer, wrong signature and wrong approved user denied',async()=>{
    const missing=await get('/api/v1/uat-preview/requests');
@@ -147,13 +148,30 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
    const diffReport=(await comparison.json()).data.history;
    assert.equal(diffReport.events.length,1);
    assert.equal(diffReport.events[0].fixtureRef,'fictional_api_history01');
-   const historyExport=await get(
+   const missingPrecondition=await get(
     '/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown',jwt());
+   assert.equal(missingPrecondition.status,428);
+   const historyExport=await get(
+    '/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown',jwt(),1);
    assert.equal(historyExport.status,200);
    const historyMd=await historyExport.text();
    assert.match(historyMd,/禁止解除学生错误关联隔离/);
    assert.match(historyMd,/fictional_api_history01/);
    assert.doesNotMatch(historyMd,/staff_identity_bindings|AUTH_HMAC_SECRET/);
+   const freezeState=await get('/api/v1/uat-preview/reports/'+sourceA+'/freeze-state',jwt());
+   assert.equal(freezeState.status,200);
+   assert.equal((await freezeState.json()).data.freeze_state.is_frozen,false);
+   const seq2=(await fin.query(
+    'SELECT ms.record_fixture_uat_evidence($1,$2,$3,$4,$5,$6,$7) AS result',
+    [sourceA,'finance_reconciliation','fixture_added','fictional_api_late_event',
+     null,'fixture_received',idKey()])).rows[0].result;
+   assert.equal(seq2,2);
+   const stale=await get('/api/v1/uat-preview/reports/'+sourceA+
+    '/diff/0/1/markdown',jwt(),1);
+   assert.equal(stale.status,412);
+   const current=await get('/api/v1/uat-preview/reports/'+sourceA+
+    '/diff/0/1/markdown',jwt(),2);
+   assert.equal(current.status,200);
    const unknownVersion=await get('/api/v1/uat-preview/reports/'+sourceA+'/diff/0/9',jwt());
    assert.equal(unknownVersion.status,422);
    const historyCross=await get('/api/v1/uat-preview/reports/'+sourceB+'/history',jwt());
