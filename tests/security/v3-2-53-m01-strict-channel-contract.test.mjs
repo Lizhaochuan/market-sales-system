@@ -36,7 +36,9 @@ test('V3.2-53 strictly limits M01 employee channel read to security-barrier CI S
 });
 test('V3.2-53 retains strict UI boundary and negative runtime tests',()=>{
  const js=read('web/app.js'),browser=read(m.observed_browser_test),real=read(m.observed_real_db_test);
- assert.ok(js.includes("const allowed=new Set(['overview','students','contacts','leads','channels'])"));
+ assert.ok(js.includes("const allowed=new Set(['overview','students','contacts','leads','channels','campaigns'])"));
+ assert.ok(js.includes("(!state.strict&&nav.dataset.view==='campaigns')"),
+  'market activities must be hidden for the broad demo login');
  assert.ok(js.slice(js.indexOf('const endpoints=state.strict?['),js.indexOf('  ]:['))
   .includes("['channels','/api/v1/marketing-channels']"));
  assert.ok(browser.includes("nav button[data-view=\"channels\"]"));
