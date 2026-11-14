@@ -26,6 +26,13 @@ test('V3.2-51 M01 channel API is isolated GET-only with no strict mode downgrade
  for(const s of ['inactive_inherited','parent_id','organization_id','nodes.has(row.id)',
   'depth>16','source_attribution_verified:false','production_integration_allowed:false'])
   assert.ok(src.includes(s),'Missing channel catalog guard: '+s);
+ const openapi=JSON.parse(read('api/openapi/m01-isolated-channel-catalog.v3.2.json'));
+ assert.equal(openapi['x-contract-status'],'isolated-implemented');
+ assert.equal(openapi['x-strict-employee-mode-enabled'],false);
+ assert.equal(openapi['x-production-integration-allowed'],false);
+ assert.equal(openapi['x-write-operations-allowed'],false);
+ assert.ok(openapi.paths[m.http_path].get);
+ assert.equal(openapi.paths[m.http_path].post,undefined);
  const t=read(m.http_test);
  for(const a of ['invalidParent.status,500','cycle.status,500','missing.status,401',
   'wrongOrg.status,403','effective_active_count','channelB'])
