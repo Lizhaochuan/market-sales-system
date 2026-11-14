@@ -127,6 +127,9 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
    // This closes the tested gap when a bound identity is revoked during a read.
    // It does not claim cancellation of previously delivered responses.
    const confirmStillAuthorized=async()=>{
+    // The signed token may expire while a protected DB read is in flight.
+    // Reverify its time bounds in addition to checking the DB employee binding.
+    verify(token);
     const recheck=await client.query(
      'SELECT ms.scoped_employee_identity_valid($1,$2) AS permitted',
      [claims.issuer,claims.subject]);
