@@ -253,7 +253,7 @@ BEGIN
   JOIN ms.cross_module_source_onboarding_requests q ON q.id=r.request_id
   WHERE q.manifest_id=m.id AND r.decision<>'approved_for_planning') INTO has_rejected;
  -- Approval is no longer currently valid if a reviewer's org role was revoked.
- SELECT count(*) INTO active_review_count
+ SELECT count(DISTINCT r.id) INTO active_review_count
  FROM ms.cross_module_source_onboarding_reviews r
  JOIN ms.cross_module_source_onboarding_requests q ON q.id=r.request_id
  JOIN ms.staff_users su ON su.id=r.reviewed_by AND su.organization_id=m.organization_id AND su.status='active'
