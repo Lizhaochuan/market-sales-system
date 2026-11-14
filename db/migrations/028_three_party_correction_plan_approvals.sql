@@ -6,6 +6,9 @@ BEGIN;
 CREATE ROLE ms_cross_module_plan_writer NOLOGIN;
 CREATE ROLE ms_cross_module_plan_reader NOLOGIN;
 GRANT USAGE ON SCHEMA ms TO ms_cross_module_plan_writer,ms_cross_module_plan_reader;
+-- Scoped views call these two identity functions as the querying LOGIN.
+GRANT EXECUTE ON FUNCTION ms.current_scoped_staff_id(),
+ ms.current_scoped_organization_id() TO ms_cross_module_plan_reader;
 
 CREATE TABLE ms.cross_module_correction_plans(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
