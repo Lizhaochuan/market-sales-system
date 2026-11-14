@@ -15,8 +15,8 @@ const KINDS={
 };
 const SOURCE=/^[a-z][a-z0-9_-]{2,63}$/;
 const TENANT=/^[A-Za-z0-9_-]{2,80}$/;
-const REF=/^[A-Za-z0-9_:./-]{6,160}$/;
-const REVISION=/^[A-Za-z0-9_:./-]{2,120}$/;
+const REF=/^[A-Za-z0-9_:.-]{6,160}$/;
+const REVISION=/^[A-Za-z0-9_:.-]{2,120}$/;
 const EXACT_FIELDS=[
  'schema_version','department','source_kind','source_system',
  'source_tenant','source_object_ref','source_revision',
