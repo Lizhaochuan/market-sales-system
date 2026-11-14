@@ -1,0 +1,22 @@
+name: V3.2-82 isolated unified handoff blocker
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-unified-handoff-blocker.mjs'
+      - 'tests/security/v3-2-82-m02-unified-handoff-blocker.test.mjs'
+      - '.github/workflows/v3-2-82-unified-handoff.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-unified-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check unified gate
+        run: node --check src/cross-module-unified-handoff-blocker.mjs
+      - name: Run unified handoff and dependent safety tests
+        run: node --test tests/security/v3-2-82-m02-unified-handoff-blocker.test.mjs tests/security/v3-2-81-m02-supplement-review-final-check.test.mjs tests/security/v3-2-76-m02-final-handoff-preflight.test.mjs
