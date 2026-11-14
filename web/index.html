@@ -484,6 +484,40 @@
           <article class="panel"><h3>核实／撤回的审批历史</h3><div id="student-link-reviews-list" class="record-list"></div></article>
         </div>
       </div>
+      <div id="downstream-correction-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>错误学生关联：已有商机时的纠错保护</h2>
+          <p>该关联已影响销售商机，不能直接撤回或改绑其他学生。本步骤先登记影响范围并隔离相关销售推进；已有订单、收款和合同不会被自动修改。</p></div>
+        <div class="two-col">
+          <article class="panel"><h3>报告指定学生的下游错误关联</h3>
+            <form id="downstream-correction-request-form" class="field-stack">
+              <label>我负责的存在下游商机的学生关联
+                <select name="association_request_id" data-options="downstreamCorrectionCandidates" required></select></label>
+              <label>为什么关联有误 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构纠错证据 <input name="evidence_ref" maxlength="200" required></label>
+              <p class="form-hint">提交后，受影响的商机、报价、销售订单及试课的新增销售推进会被保护性阻止；真实收退款入账与既有历史不能被悄悄撤销。这一步不是完成纠错。</p>
+              <button class="secondary" type="submit">登记下游纠错并启动销售隔离</button>
+            </form>
+          </article>
+          <article class="panel" id="downstream-correction-decision-card" hidden>
+            <h3>独立主管审核下游风险案件</h3>
+            <form id="downstream-correction-decision-form" class="field-stack">
+              <label>待复核案件 <select name="case_id" data-options="pendingDownstreamCorrections" required></select></label>
+              <label>结论 <select name="decision">
+                <option value="hold_active">确认维持隔离，等待跨模块纠错</option>
+                <option value="rejected">驳回该次风险隔离申请</option>
+              </select></label>
+              <label>独立复核理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构独立核对材料 <input name="evidence_ref" maxlength="200" required></label>
+              <p class="form-hint">独立确认隔离不等于转移商机、删除错误学生关联或完成财务纠错；有真实订单和收款时必须另行跨部门处理。</p>
+              <button class="primary" type="submit">保存独立纠错保护决定</button>
+            </form>
+          </article>
+        </div>
+        <article class="panel space-top">
+          <h3>下游影响与当前保护状态</h3>
+          <div id="downstream-correction-cases-list" class="record-list"></div>
+        </article>
+      </div>
       <article class="panel space-top" id="strict-consultation-card" hidden>
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>
