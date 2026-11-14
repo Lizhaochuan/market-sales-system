@@ -33,7 +33,7 @@ test('V3.2-54 channel maintenance uses function-only independent manager review'
  assert.ok(!sql.includes('GRANT SELECT ON ms.isolated_channel_change_requests'));
  const app=read('src/app.mjs'),adapter=read('src/scoped-legacy-write-adapter.mjs');
  for(const x of ["'requestChannelChange'","'reviewChannelChange'",
- "if(!strictStaffMode&&['listChannelChangeRequests','listChannelAuditHistory','requestChannelChange','reviewChannelChange'].includes(route.op))"])
+ "if(!strictStaffMode&&['listCampaignDrafts','createCampaignDraft','listChannelChangeRequests','listChannelAuditHistory','requestChannelChange','reviewChannelChange'].includes(route.op))"])
   assert.ok(app.includes(x),'App router missing '+x);
  for(const x of ["'requestChannelChange'","'reviewChannelChange'",
  'ms.request_isolated_channel_change($1,$2,$3,$4,$5,$6,$7,$8)',
