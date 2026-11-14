@@ -58,6 +58,11 @@ test('真实 Chromium：受限中文 UAT 页面显示待办及脱敏导出、跨
    'INSERT INTO ms.staff_identity_bindings(staff_user_id,issuer,subject,bound_by,approval_request_id) '+
    'VALUES($1,$2,$3,$4,$5)',
    [financeStaff,issuer,subject,reviewer,approval]);
+  const added=(await finance.query(
+   'SELECT ms.record_fixture_uat_evidence($1,$2,$3,$4,$5,$6,$7) AS result',
+   [sourceA,'finance_reconciliation','fixture_added','fictional_browser_history01',
+    null,'fixture_received',randomUUID().replaceAll('-','')])).rows[0].result;
+  expect(added).toBe(1);
   server=createUatPreviewApi(restricted,{externalIdentity});
   await listen(server);
   const base='http://127.0.0.1:'+server.address().port;
@@ -91,6 +96,11 @@ test('真实 Chromium：受限中文 UAT 页面显示待办及脱敏导出、跨
   await expect(page.locator('#markdown-preview')).toContainText('禁止真实联调');
   await expect(page.locator('#task-rows')).toContainText('财务');
   await expect(page.locator('#task-rows')).toContainText('信息安全');
+  await expect(page.locator('#history-panel')).toBeVisible();
+  await expect(page.locator('#audit-current')).toHaveText('1');
+  await expect(page.locator('#audit-change')).toHaveText('1 / 0');
+  await expect(page.locator('#audit-events tr')).toHaveCount(1);
+  await expect(page.locator('#audit-events')).toContainText('fictional_browser_history01');
 
   const blocked=await page.request.get(base+'/api/v1/uat-preview/reports/'+sourceB,{
    headers:{Authorization:'Bearer '+jwt()}
@@ -110,7 +120,33 @@ test('真实 Chromium：受限中文 UAT 页面显示待办及脱敏导出、跨
   expect(markdown).toContain('财务');
   expect(markdown).not.toContain(subject);
   expect(markdown).not.toContain('AUTH_HMAC_SECRET');
-  await page.setViewportSize({width:390,height:844});
+  const withdrawn=(await finance.query(
+   'SELECT ms.record_fixture_uat_evidence($1,$2,$3,$4,$5,$6,$7) AS result',
+   [sourceA,'finance_reconciliation','fixture_withdrawn',
+    'fictional_browser_history01',1,'fixture_revoked',randomUUID().replaceAll('-','')])).rows[0].result;
+  expect(withdrawn).toBe(2);
+  await page.getByRole('button',{name:'重新鉴权导出审计'}).click();
+  await expect(page.locator('#status')).toContainText('较新虚构证据历史');
+  await page.getByRole('button',{name:'查看待办报告'}).click();
+  await expect(page.locator('#audit-current')).toHaveText('2');
+  await expect(page.locator('#audit-change')).toHaveText('1 / 1');
+  await expect(page.locator('#audit-active')).toHaveText('0 → 0');
+  await expect(page.locator('#audit-events tr')).toHaveCount(2);
+  await page.locator('#audit-from').fill('1');
+  await page.locator('#audit-to').fill('2');
+  await page.getByRole('button',{name:'核对版本差异'}).click();
+  await expect(page.locator('#audit-events tr')).toHaveCount(1);
+  await expect(page.locator('#audit-events')).toContainText('撤销虚构引用');
+  const [auditDownload]=await Promise.all([
+   page.waitForEvent('download'),
+   page.getByRole('button',{name:'重新鉴权导出审计'}).click()
+  ]);
+  expect(auditDownload.suggestedFilename()).toBe('uat-audit-'+sourceA+'-1-2.md');
+  const auditMd=await readFile(await auditDownload.path(),'utf8');
+  expect(auditMd).toContain('禁止解除学生错误关联隔离');
+  expect(auditMd).toContain('fictional_browser_history01');
+  expect(auditMd).not.toContain(subject);
+    await page.setViewportSize({width:390,height:844});
   await expect(page.getByRole('heading',{name:'跨部门 UAT 待办报告'})).toBeVisible();
   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(1);
