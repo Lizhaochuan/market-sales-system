@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:market-sales:m02:cross-module-acceptance-protocol:v3.2-66:proposed",
+  "title": "Proposed, non-executable three-party acceptance evidence envelope",
+  "description": "A future integration handshake only. There is no receiver, trust anchor, signature verifier or approval API in the CI build.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "handoff_id",
+    "incident_id",
+    "organization_id",
+    "sales_packet_digest",
+    "events",
+    "parties",
+    "original_records_preserved",
+    "request_nonce"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": "v3.2-66-proposed"
+    },
+    "handoff_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "incident_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "organization_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sales_packet_digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "request_nonce": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128
+    },
+    "original_records_preserved": {
+      "const": true
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_event_id",
+          "source_system",
+          "event_type",
+          "occurred_at",
+          "digest"
+        ],
+        "properties": {
+          "source_event_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_system": {
+            "enum": [
+              "market_sales",
+              "crm_finance",
+              "academic"
+            ]
+          },
+          "event_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      }
+    },
+    "parties": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sales",
+        "finance",
+        "academic"
+      ],
+      "properties": {
+        "sales": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authority_domain",
+            "principal_id",
+            "organization_id",
+            "signed_receipt_id",
+            "evidence_digest",
+            "decision",
+            "signed_at"
+          ],
+          "properties": {
+            "authority_domain": {
+              "const": "sales"
+            },
+            "principal_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "organization_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "signed_receipt_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "decision": {
+              "enum": [
+                "accepted",
+                "rejected",
+                "requires_correction"
+              ]
+            },
+            "signed_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "finance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authority_domain",
+            "principal_id",
+            "organization_id",
+            "signed_receipt_id",
+            "evidence_digest",
+            "decision",
+            "signed_at"
+          ],
+          "properties": {
+            "authority_domain": {
+              "const": "finance"
+            },
+            "principal_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "organization_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "signed_receipt_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "decision": {
+              "enum": [
+                "accepted",
+                "rejected",
+                "requires_correction"
+              ]
+            },
+            "signed_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "academic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authority_domain",
+            "principal_id",
+            "organization_id",
+            "signed_receipt_id",
+            "evidence_digest",
+            "decision",
+            "signed_at"
+          ],
+          "properties": {
+            "authority_domain": {
+              "const": "academic"
+            },
+            "principal_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "organization_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "signed_receipt_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence_digest": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "decision": {
+              "enum": [
+                "accepted",
+                "rejected",
+                "requires_correction"
+              ]
+            },
+            "signed_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      }
+    }
+  }
+}

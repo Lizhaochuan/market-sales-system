@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-65",
+    "version": "v3.2-66",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -734,6 +734,28 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/acceptance-prerequisites": {
+      "get": {
+        "operationId": "listCrossModuleAcceptancePrerequisites",
+        "summary": "Strictly scoped read-only three-party prerequisites; no external finance or academic authority",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100 blocked prerequisite summaries. All external signed attestations false; hold_active=true, release_eligible=false."
+          },
+          "403": {
+            "description": "Strict authorized employee only"
+          },
+          "500": {
+            "description": "Read/overflow failure, no fallback"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
@@ -751,5 +773,8 @@
   "x-sales-evidence-not-cross-department-acceptance": true,
   "x-academic-acceptance-implemented": false,
   "x-finance-acceptance-implemented": false,
-  "x-escalation-evidence-allows-hold-release": false
+  "x-escalation-evidence-allows-hold-release": false,
+  "x-cross-module-acceptance-protocol-status": "proposed-not-authorized",
+  "x-finance-and-academic-trust-chains-established": false,
+  "x-three-party-release-endpoint-implemented": false
 }

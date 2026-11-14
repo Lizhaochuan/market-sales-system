@@ -78,6 +78,12 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const acceptancePrerequisites=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/acceptance-prerequisites',
+    {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
  const evidenceGates=async staff=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
    '/api/v1/marketing-campaigns/finance-incidents/evidence-gates',
@@ -415,6 +421,32 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     await assert.rejects(pool.query('DELETE FROM ms.audit_events WHERE FALSE'),
       e=>e.code==='42501');
   }
+  // V3.2-66: trustworthy finance and academic attestations are absent, regardless of sales readiness.
+  let prerequisites=await acceptancePrerequisites(A);
+  assert.equal(prerequisites.status,200,JSON.stringify(prerequisites));
+  assert.equal(prerequisites.data.items.some(x=>x.incident_id===incident1),false,
+    'closed incident must not enter three-party release prerequisites');
+  assert.equal((await acceptancePrerequisites(B)).status,401,
+    'unbound employee cannot read future authority requirements');
+  const verifyNoRelease=(x,salesComplete)=>{
+    assert.ok(x,'expected a scoped escalated incident prerequisite');
+    assert.equal(x.incident_status,'manual_escalated');
+    assert.equal(x.sales_packet_complete,salesComplete);
+    assert.equal(x.prerequisite_status,salesComplete
+      ?'blocked_trusted_finance_identity_missing':'blocked_sales_packet_incomplete');
+    for(const key of ['finance_principal_verified','finance_signed_receipt_verified',
+      'finance_budget_decision_verified','academic_principal_verified',
+      'academic_student_impact_reconciled','academic_signed_attestation_verified',
+      'cross_module_evidence_reconciled','three_party_acceptance_verified',
+      'compensation_history_verified','release_eligible','finance_authorized',
+      'execution_allowed','activity_publish_allowed'])
+      assert.equal(x[key],false,'untrusted acceptance or release field '+key);
+    assert.equal(x.hold_active,true);
+    for(const secret of ['organization_id','evidence_ref','reason_zh','request_key',
+      'before_business_json','after_business_json','principal_id','signed_receipt_id'])
+      assert.equal(Object.hasOwn(x,secret),false,'untrusted credential or history leaked: '+secret);
+  };
+  verifyNoRelease(prerequisites.data.items.find(x=>x.incident_id===incident2),false);
   // V3.2-65: server-side completeness is a scoped derived gate, never approval.
   let gateResponse=await evidenceGates(A);
   assert.equal(gateResponse.status,200,JSON.stringify(gateResponse));
@@ -485,6 +517,27 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     assert.equal(ready.finance_requirements_documented,true);
     assert.equal(ready.sales_packet_complete,true);
     requireHardHold(ready);
+  }
+  for(const who of [A,M]){
+    prerequisites=await acceptancePrerequisites(who);
+    assert.equal(prerequisites.status,200,JSON.stringify(prerequisites));
+    verifyNoRelease(prerequisites.data.items.find(x=>x.incident_id===incident2),true);
+  }
+  const unauthorizedRelease=await fetch(
+    'http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/acceptance-prerequisites',{
+      method:'POST',headers:{Authorization:'Bearer '+sign(A),
+        'Content-Type':'application/json','Idempotency-Key':key()},
+      body:JSON.stringify({finance_authorized:true,release_eligible:true,
+        three_party_acceptance_verified:true})
+    });
+  assert.equal(unauthorizedRelease.status,404,
+    'there is no writable fake cross-department approval endpoint');
+  for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+    await assert.rejects(
+      pool.query("UPDATE ms.scoped_isolated_campaign_cross_module_acceptance_prerequisites SET release_eligible=true WHERE FALSE"),
+      e=>['42501','55000','0A000'].includes(e.code),
+      'readonly derived acceptance view cannot be edited by any employee');
   }
   for(const who of [A,M]){
     const notes=await followups(who);
@@ -595,6 +648,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     'revoked signed identity cannot enumerate escalation follow-ups');
   assert.equal((await evidenceGates(A)).status,403,
     'revoked signed identity cannot enumerate evidence gates');
+  assert.equal((await acceptancePrerequisites(A)).status,403,
+    'revoked signed identity cannot claim cross-department acceptance');
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));
