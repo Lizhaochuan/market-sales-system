@@ -1,0 +1,98 @@
+{
+  "schema_version": "v3.2-49-alternate-delta-audit-v1",
+  "repository": "Lizhaochuan/market-sales-system",
+  "baseline_pr": 55,
+  "baseline_head": "2e4bdcfe3c4a063da549ca77aaf097c6c8b4e3b8",
+  "baseline_ci_run": 43586865765,
+  "baseline_ci_outcome": "success",
+  "scope": "NON_DESTRUCTIVE_SOURCE_PR_COMPARISON",
+  "evidence_level": "GITHUB_PR_PATCH_AND_SELECTED_BRANCH_SOURCE_REVIEW",
+  "selection_policy": "DO_NOT_CHERRY_PICK_CONFLICTING_MIGRATIONS_OR_COERCE_APPROVAL",
+  "alternates": [
+    {
+      "alternate_pr": 27,
+      "canonical_pr": 28,
+      "migration_number": "027",
+      "alternate_migration": "027_downstream_reconciliation_and_guarded_release.sql",
+      "selected_migration": "027_two_supervisor_downstream_reconciliation.sql",
+      "source_findings": [
+        "downstream_correction_reconciliation_requests",
+        "downstream_correction_reconciliation_decisions",
+        "downstream_correction_reconciliation_effects"
+      ],
+      "canonical_findings": [
+        "downstream_student_reconciliation_findings",
+        "downstream_student_reconciliation_resolutions",
+        "released_verified"
+      ],
+      "delta": "ADDITIONAL_APPEND_ONLY_EFFECT_LEDGER_AND_EXPLICIT_EXTERNAL_HANDOFF_SEMANTICS",
+      "not_equivalent": true,
+      "risk": "NO_AUTOMATIC_RELEASE_FOR_TRUE_ERROR_OR_DOWNSTREAM_FACTS",
+      "decision": "REVIEW_POSSIBLE_FUTURE_NONDESTRUCTIVE_ADAPTER",
+      "needs": "Maintainer and domain owner must confirm whether selected canonical findings/resolutions already satisfy effect audit requirements; if not create independent compatibility design and safe tests."
+    },
+    {
+      "alternate_pr": 37,
+      "canonical_pr": 34,
+      "migration_number": "032",
+      "alternate_migration": "032_source_onboarding_planning_reviews.sql",
+      "selected_migration": "032_fixture_source_registration_readiness.sql",
+      "source_findings": [
+        "cross_module_source_onboarding_requests",
+        "cross_module_source_onboarding_reviews",
+        "assert_source_onboarding_current",
+        "request_cross_module_source_onboarding"
+      ],
+      "canonical_findings": [
+        "source_readiness_requests",
+        "source_readiness_reviews",
+        "propose_fixture_source_readiness",
+        "review_fixture_source_readiness"
+      ],
+      "delta": "COMPENSATION_MANIFEST_BOUND_FINANCE_ACADEMIC_PLANNING_REVIEW_WITH_SECURITY_SIGNOFF",
+      "not_equivalent": true,
+      "risk": "DO_NOT_ENABLE_REAL_FINANCE_CRM_AUTHORITY_OR_CHANGE_MANIFEST",
+      "decision": "DEFER_FOR_INDEPENDENT_SECURITY_AND_SOURCE_OWNER_REVIEW",
+      "needs": "Separate approved schema number and integration contract only after reconciliation of sealed manifest fingerprint, review role separation, security scope, and source trust."
+    },
+    {
+      "alternate_pr": 38,
+      "canonical_pr": 39,
+      "migration_number": "035",
+      "alternate_migration": "035_joint_integration_uat_readonly_report.sql",
+      "selected_migration": "035_readonly_integration_uat_report.sql",
+      "source_findings": [
+        "readonly_joint_integration_uat_report",
+        "ms_joint_uat_report_reader",
+        "finance_source_request_id",
+        "academic_source_request_id"
+      ],
+      "canonical_findings": [
+        "readonly_integration_uat_report",
+        "readonly_integration_hard_gate",
+        "required_gate_count"
+      ],
+      "delta": "ONE_CROSS_DOMAIN_16_CHECK_JOINT_REPORT_VERSUS_SEPARATE_12_CHECK_DOMAIN_REPORTS",
+      "not_equivalent": true,
+      "risk": "DO_NOT_PRESENT_JOINT_FIXTURE_CHECKLIST_AS_REAL_SIGNOFF",
+      "decision": "BACKLOG_ISOLATED_READONLY_COMPOSITE_UNDER_NEW_VERSION_ONLY",
+      "needs": "Separate same-organization finance/academic request checks, independent security-only read access, fixed 16-check catalogue, explicit blocked output, and isolated tenant denial tests before use."
+    }
+  ],
+  "candidate_prs_preserved_as_drafts": true,
+  "all_selected_migrations_expected": 38,
+  "new_migration": false,
+  "migration_039_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "execution_allowed": false,
+  "production_integration_allowed": false,
+  "release_allowed": false,
+  "real_approvals_complete": false,
+  "student_primary": true,
+  "family_optional": true,
+  "wrong_student_hold_active_required": true,
+  "preserve_original_orders_finance_saleevent_and_lesson_history": true,
+  "contracts": "proposed-unimplemented",
+  "next_action": "SELECT_AND_IMPLEMENT_NONDESTRUCTIVE_BUSINESS_VALUE_WITH_SEPARATE_REVIEW_AND_TESTS"
+}
