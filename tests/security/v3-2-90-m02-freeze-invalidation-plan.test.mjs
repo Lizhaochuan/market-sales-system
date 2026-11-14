@@ -72,5 +72,5 @@ test('V3.2-90 forged permission, changed reference and unavailable report reject
  assert.equal(different.reason_code,'FROZEN_REFERENCE_CHANGED_RESTART_REQUIRED');
  f.setGood(false);
  const failed=await f.planner.plan(ref(f,x.freeze));safe(failed);
- assert.equal(failed.reason_code,'CURRENT_UNIFIED_REPORT_UNAVAILABLE');
+ assert.equal(failed.reason_code,'FREEZE_NOT_TRUSTWORTHY_FOR_RECHECK');
 });
