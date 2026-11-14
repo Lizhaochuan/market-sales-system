@@ -18,18 +18,18 @@ BEGIN
  THEN RAISE EXCEPTION '真实联调准入仍必须保持拒绝' USING ERRCODE='23514'; END IF;
  -- No evidence counts can be converted to "accepted" by this report.
  SELECT COALESCE(jsonb_agg(jsonb_build_object(
-   'check_code',x.check->>'check_code',
-   'responsible_department',x.check->>'department',
-   'required_evidence_zh',x.check->>'required_evidence_zh',
-   'label_zh',x.check->>'label_zh',
-   'missing_events',(x.check->>'missing_events')::integer,
+   'check_code',x.item->>'check_code',
+   'responsible_department',x.item->>'department',
+   'required_evidence_zh',x.item->>'required_evidence_zh',
+   'label_zh',x.item->>'label_zh',
+   'missing_events',(x.item->>'missing_events')::integer,
    'uat_status','blocked_real_approval_missing',
    'real_evidence_verified',false,
    'real_owner_signed',false,
    'ready_for_production',false
- ) ORDER BY x.check->>'department',x.check->>'check_code'),
+ ) ORDER BY x.item->>'department',x.item->>'check_code'),
  '[]'::jsonb) INTO checks
- FROM jsonb_array_elements(source_gate->'checks') AS x(check);
+ FROM jsonb_array_elements(source_gate->'checks') AS x(item);
  RETURN jsonb_build_object(
    'schema_version','v3.2-32-readonly-uat-v1',
    'source_request_id',source_gate->'source_request_id',
