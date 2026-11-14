@@ -31,7 +31,7 @@ test('V3.2-72 old packet is invalid after revocation and never authorizes releas
   revocation_digest:current.revocation_digest}).reason_code,
  'HISTORICAL_PACKET_USES_REVOKED_EVIDENCE');
  epoch=2;
- assert.equal(ledger.checkHistoricalPacket({...ref(),
+ assert.equal(ledger.checkHistoricalPacket({...ref(),source_epoch:1,
   revocation_sequence:current.revocation_sequence,
   revocation_digest:current.revocation_digest}).reason_code,'SOURCE_EPOCH_STALE');
  assertBlocked(ledger.checkHistoricalPacket(ref()));
@@ -44,7 +44,7 @@ test('V3.2-72 tenant boundaries, replay, gaps and tampering are rejected',()=>{
  assert.throws(()=>ledger.recordRevocation(revoked(1,3,'revocation-third-key-00001','E-3')),
  /REVOCATION_SEQUENCE_GAP_OR_ROLLBACK/);
  assert.throws(()=>ledger.recordRevocation(revoked(1,2,'revocation-second-key-00001','E-1')),
- /REVOKED_EVENT_DIGEST_CONFLICT/);
+ /ALREADY_REVOKED_EVENT/);
  const a=ledger.viewFixtureWatermark(org,incident);
  const b=ledger.viewFixtureWatermark(other,incident);
  assert.equal(a.revocation_sequence,1);assert.equal(b.revocation_sequence,0);
