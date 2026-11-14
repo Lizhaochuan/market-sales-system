@@ -96,14 +96,13 @@ test('V3.2-19 approved, atomic and truly scoped LEAD creation',async t=>{
   });
   await t.test('rollback of real lead INSERT also rolls back execution and audit',async()=>{
     const conn=await a.connect();
-    const before=(await root.query(
-      "SELECT COUNT(*)::int AS n FROM ms.audit_events WHERE event_name='LEAD_FINAL_CONVERSION_EXECUTED' AND target_id=$1",
-      [base.contact])).rows[0].n;
+    let rolledBackLeadId=null;
     try{
       await conn.query('BEGIN');
       const r=await conn.query('SELECT ms.execute_final_lead_conversion($1,$2) AS result',
         [auth,k()]);
-      assert.ok(r.rows[0].result.lead_id);
+      rolledBackLeadId=r.rows[0].result.lead_id;
+      assert.ok(rolledBackLeadId);
       await conn.query('ROLLBACK');
     }finally{conn.release();}
     assert.deepEqual(await counts(base.contact),{leads:0,executions:0});
@@ -112,7 +111,7 @@ test('V3.2-19 approved, atomic and truly scoped LEAD creation',async t=>{
       'approved');
     assert.equal((await root.query(
       "SELECT COUNT(*)::int AS n FROM ms.audit_events WHERE event_name='LEAD_FINAL_CONVERSION_EXECUTED' AND target_id=$1",
-      [base.contact])).rows[0].n,before);
+      [rolledBackLeadId])).rows[0].n,0);
   });
   await t.test('applicant executes one actual lead, exact replay safe and immutable ledger',async()=>{
     const key=k();
