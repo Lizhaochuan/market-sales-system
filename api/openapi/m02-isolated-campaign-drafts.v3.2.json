@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-67",
+    "version": "v3.2-68",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -778,6 +778,28 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/compensation-matrix": {
+      "get": {
+        "operationId": "listScopedCampaignCompensationResponsibilityMatrix",
+        "summary": "Read-only failure classification and three-party duties, never an executed compensation or release",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to 100 scoped incident classifications; historical integrity is explicitly unverified, original records must be preserved"
+          },
+          "403": {
+            "description": "Strict employee and dedicated read principal required"
+          },
+          "500": {
+            "description": "Fail closed on oversized or malformed projection"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
@@ -801,5 +823,8 @@
   "x-three-party-release-endpoint-implemented": false,
   "x-external-signature-verification-implemented": false,
   "x-incident-compensation-write-implemented": false,
-  "x-trust-failure-default-disposition": "reject_preserve_originals_escalate_manually"
+  "x-trust-failure-default-disposition": "reject_preserve_originals_escalate_manually",
+  "x-cross-module-compensation-execution-implemented": false,
+  "x-original-business-history-verification-implemented": false,
+  "x-independent-three-party-compensation-approval-implemented": false
 }

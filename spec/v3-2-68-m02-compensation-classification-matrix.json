@@ -1,0 +1,40 @@
+{
+  "schema_version": "v3.2-68-m02-compensation-classification-matrix-v1",
+  "module": "M02",
+  "parent_pr": 74,
+  "parent_head": "9eb3804cb776ddd5e4f53d5bef6c003f95d11e98",
+  "parent_ci": 43618439287,
+  "parent_ci_conclusion": "success",
+  "scope": "CI_ONLY_READONLY_COMPENSATION_CANDIDATE_CLASSIFICATION_NO_EXECUTION",
+  "sql": "tests/sql/create_v3_2_68_compensation_responsibility_matrix.sql",
+  "endpoint": "GET /api/v1/marketing-campaigns/finance-incidents/compensation-matrix",
+  "max_items": 100,
+  "classification_codes": [
+    "snapshot_integrity_conflict",
+    "sales_evidence_gap",
+    "external_authority_or_reconciliation_unknown"
+  ],
+  "responsible_parties": [
+    "sales",
+    "finance",
+    "academic"
+  ],
+  "historic_business_records_automatically_verified": false,
+  "compensation_execute_endpoint_implemented": false,
+  "compensation_write_allowed": false,
+  "original_records_mutable": false,
+  "finance_authorized": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "production_integration_allowed": false,
+  "new_production_migration": false,
+  "migration_count": 38,
+  "student_primary": true,
+  "family_optional": true,
+  "downstream_wrong_student_hold_active": true,
+  "original_orders_payments_saleevents_lesson_history_preserved": true,
+  "external_contract_status": "proposed-unimplemented",
+  "latest_head_ci": "PENDING"
+}

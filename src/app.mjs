@@ -74,6 +74,7 @@ const routeDefs=[
   ['GET',/^\/api\/v1\/marketing-campaigns\/finance-incidents\/evidence-gates$/,'listCampaignFinanceEscalationEvidenceGates'],
   ['GET',/^\/api\/v1\/marketing-campaigns\/finance-incidents\/acceptance-prerequisites$/,'listCampaignCrossModuleAcceptancePrerequisites'],
   ['GET',/^\/api\/v1\/marketing-campaigns\/finance-incidents\/trust-failure-gates$/,'listCampaignCrossModuleTrustFailureGates'],
+  ['GET',/^\/api\/v1\/marketing-campaigns\/finance-incidents\/compensation-matrix$/,'listCampaignCompensationResponsibilityMatrix'],
   ['POST',/^\/api\/v1\/marketing-campaigns\/finance-incidents\/([0-9a-f-]+)\/follow-ups$/,'appendCampaignFinanceEscalationFollowup'],
   ['POST',/^\/api\/v1\/marketing-campaigns\/finance-handoffs\/([0-9a-f-]+)\/incidents$/,'reportCampaignFinanceIncident'],
   ['POST',/^\/api\/v1\/marketing-campaigns\/finance-incidents\/([0-9a-f-]+)\/decision$/,'triageCampaignFinanceIncident'],
@@ -575,7 +576,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
       // Channel maintenance is CI-only and requires approved strict staff logins.
       // Never run this through the broad tenant-level demo connection.
-      if(!strictStaffMode&&['listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates','appendCampaignFinanceEscalationFollowup','reportCampaignFinanceIncident','triageCampaignFinanceIncident','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft'].includes(route.op))
+      if(!strictStaffMode&&['listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates','listCampaignCompensationResponsibilityMatrix','appendCampaignFinanceEscalationFollowup','reportCampaignFinanceIncident','triageCampaignFinanceIncident','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft'].includes(route.op))
         fail(403,'STAFF_ROUTE_UNMIGRATED','仅已核实员工可修改隔离活动草稿');
       if(!strictStaffMode&&['listCampaignDrafts','createCampaignDraft','listChannelChangeRequests','listChannelAuditHistory','requestChannelChange','reviewChannelChange'].includes(route.op))
         fail(403,'STAFF_ROUTE_UNMIGRATED','渠道维护只能通过隔离员工独立审批流程');
