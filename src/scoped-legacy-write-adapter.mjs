@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['reviseCampaignDraft','createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
+export const migratedLegacyWrites=new Set(['requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft','createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,24 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='requestCampaignSalesReview'){
+    only(body,['expected_version','evidence_ref','reason_zh']);
+    if(!Number.isSafeInteger(body.expected_version)||body.expected_version<1||
+       body.expected_version>2147483645)
+      fail(422,'VALIDATION_ERROR','活动草稿版本无效');
+    return {params:[uuid(routeParams?.[0],'市场活动草稿'),
+      body.expected_version,
+      approvalText(body.evidence_ref,'活动审核依据',200),
+      approvalText(body.reason_zh,'活动审核理由',400)]};
+  }
+  if(op==='decideCampaignSalesReview'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['approved','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','销售主管应明确批准或驳回');
+    return {params:[uuid(routeParams?.[0],'销售审核请求'),body.decision,
+      approvalText(body.evidence_ref,'销售主管审批凭据',200),
+      approvalText(body.reason_zh,'销售主管审批理由',400)]};
+  }
   if(op==='reviseCampaignDraft'){
     only(body,['expected_version','name','starts_at','ends_at','budget_cents','channel_ids']);
     if(!Number.isSafeInteger(body.expected_version)||
@@ -374,6 +392,14 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'requestCampaignSalesReview':
+        result=await client.query(
+          'SELECT ms.request_isolated_campaign_sales_review($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideCampaignSalesReview':
+        result=await client.query(
+          'SELECT ms.decide_isolated_campaign_sales_review($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'reviseCampaignDraft':
         result=await client.query(
           'SELECT ms.revise_isolated_campaign_draft($1,$2,$3,$4,$5,$6,$7,$8) AS result',
