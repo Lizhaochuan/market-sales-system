@@ -16,7 +16,7 @@ const open=s=>new Promise(ok=>s.listen(0,'127.0.0.1',ok));
 const close=s=>new Promise(ok=>s.close(ok));
 
 test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管理权恢复 A',async({browser},testInfo)=>{
- test.setTimeout(120000); // V3.2-20 extends the real full-browser flow; assertions unchanged.
+ test.setTimeout(180000); // V3.2-22 adds a separate true downstream case; all prior assertions remain.
  process.env.MS_STAGE='isolated-test';
  const owner=new pg.Pool({connectionString:process.env.DATABASE_URL,max:4});
  const directory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:3});
@@ -571,6 +571,102 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   )).rows[0].n).toBe(1);
   expect((await owner.query('SELECT count(*)::int AS n FROM ms.lead_conversion_executions WHERE lead_id=$1',
     [finalLeads.rows[0].id])).rows[0].n).toBe(1);
+  // V3.2-22: separate fictional downstream-dependent student case.
+  // Existing V3.2-21 test remains intact; this scenario never rewrites its lead.
+  const fixtureKey=()=>randomUUID();
+  const db=async(p,sql,params)=>(await p.query(sql,params)).rows[0].result;
+  const downstreamName='已有商机待跨模块纠错的学生-'+randomUUID();
+  const downstreamContact=(await db(pools.writeA,
+    'SELECT ms.create_scoped_contact($1,$2,$3) AS result',
+    ['已有商机纠错联系人-'+randomUUID(),false,fixtureKey()])).contact_id;
+  const downstreamEvent=(await db(pools.writeA,
+    'SELECT ms.create_scoped_contact_consultation($1,$2,$3,$4) AS result',
+    [downstreamContact,'微信咨询',new Date(Date.now()-40000),fixtureKey()])).event_id;
+  const downstreamCandidate=await db(pools.writeA,
+    'SELECT ms.request_consultation_lead_candidate($1,$2,$3,$4) AS result',
+    [downstreamEvent,'虚构原始咨询记录','原咨询需要独立核实',fixtureKey()]);
+  await db(pools.writeM,
+    'SELECT ms.decide_consultation_lead_candidate($1,$2,$3,$4,$5) AS result',
+    [downstreamCandidate,'reviewed_eligible','虚构主管候选依据','确认原咨询的候选资格',fixtureKey()]);
+  const downstreamReady=await db(pools.writeA,
+    'SELECT ms.submit_lead_conversion_preflight($1,$2,$3,$4) AS result',
+    [downstreamCandidate,'虚构预审依据','核查本次真实咨询归因',fixtureKey()]);
+  await db(pools.writeM,
+    'SELECT ms.decide_lead_conversion_preflight($1,$2,$3,$4,$5) AS result',
+    [downstreamReady,'cleared','主管预审材料','独立确认可提交最终审核',fixtureKey()]);
+  const downstreamAuthorization=await db(pools.writeA,
+    'SELECT ms.request_final_lead_conversion($1,$2,$3,$4) AS result',
+    [downstreamReady,'虚构最终审批材料','申请原咨询转成线索',fixtureKey()]);
+  await db(pools.writeM,
+    'SELECT ms.decide_final_lead_conversion($1,$2,$3,$4,$5) AS result',
+    [downstreamAuthorization,'approved','虚构独立主管批准材料','批准但尚未执行转换',fixtureKey()]);
+  const downstreamLead=(await db(pools.writeA,
+    'SELECT ms.execute_final_lead_conversion($1,$2) AS result',
+    [downstreamAuthorization,fixtureKey()])).lead_id;
+  const downstreamStudent=(await db(pools.writeA,
+    'SELECT ms.create_scoped_student($1,$2,$3,$4) AS result',
+    [downstreamName,null,null,fixtureKey()])).student_id;
+  const downstreamAssociation=await db(pools.writeA,
+    'SELECT ms.request_lead_student_association($1,$2,$3,$4,$5) AS result',
+    [downstreamLead,downstreamStudent,'虚构该名学生对应线索材料',
+      '学生与线索暂登记为待核实',fixtureKey()]);
+  await db(pools.writeM,
+    'SELECT ms.decide_lead_student_association($1,$2,$3,$4,$5) AS result',
+    [downstreamAssociation,'approved_pending','虚构独立学生核对资料',
+      '只允许这一名学生待核实关联',fixtureKey()]);
+  const downstreamOpportunity=(await owner.query(
+    "INSERT INTO ms.opportunities(student_id,owner_user_id,originating_lead_id) VALUES($1,$2,$3) RETURNING id",
+    [downstreamStudent,ids.A,downstreamLead])).rows[0].id;
+  const downstreamOrder=(await owner.query(
+    'INSERT INTO ms.sales_orders(student_id,opportunity_id,amount_due_cents) VALUES($1,$2,6000) RETURNING id',
+    [downstreamStudent,downstreamOpportunity])).rows[0].id;
+  await a.locator('button[data-view="leads"]').click();
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  await expect(a.locator('#downstream-correction-workbench')).toBeVisible();
+  const downstreamForm=a.locator('#downstream-correction-request-form');
+  await downstreamForm.locator('select[name="association_request_id"]')
+    .selectOption(downstreamAssociation);
+  await downstreamForm.locator('textarea[name="reason_zh"]')
+    .fill('原指定学生关联有争议，但已经创建一条商机和一个虚构订单，需要先保护');
+  await downstreamForm.locator('input[name="evidence_ref"]')
+    .fill('虚构下游错关联核查证明');
+  await downstreamForm.getByRole('button',{name:'登记下游纠错并启动销售隔离'}).click();
+  await expect(a.locator('#downstream-correction-cases-list'))
+    .toContainText('待核查：已阻止新的销售推进');
+  await expect(owner.query("UPDATE ms.opportunities SET stage='qualified' WHERE id=$1",
+    [downstreamOpportunity])).rejects.toHaveProperty('code','23514');
+  await m.locator('button[data-view="leads"]').click();
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const downstreamDecision=m.locator('#downstream-correction-decision-form');
+  const downstreamCaseId=await downstreamDecision.locator('select[name="case_id"] option')
+    .filter({hasText:downstreamName}).first().getAttribute('value');
+  expect(downstreamCaseId).toBeTruthy();
+  await downstreamDecision.locator('select[name="case_id"]').selectOption(downstreamCaseId);
+  await downstreamDecision.locator('select[name="decision"]').selectOption('hold_active');
+  await downstreamDecision.locator('textarea[name="reason_zh"]')
+    .fill('独立主管确认下游商机存在，必须继续隔离并另行跨模块复核');
+  await downstreamDecision.locator('input[name="evidence_ref"]')
+    .fill('虚构独立下游风险复核材料');
+  await downstreamDecision.getByRole('button',{name:'保存独立纠错保护决定'}).click();
+  await expect.poll(async()=>(await owner.query(
+    'SELECT status FROM ms.lead_student_downstream_correction_cases WHERE id=$1',
+    [downstreamCaseId])).rows[0]?.status).toBe('hold_active');
+  expect((await owner.query(
+    'SELECT student_id FROM ms.opportunities WHERE id=$1',[downstreamOpportunity]
+  )).rows[0].student_id).toBe(downstreamStudent);
+  expect((await owner.query(
+    'SELECT student_id FROM ms.sales_orders WHERE id=$1',[downstreamOrder]
+  )).rows[0].student_id).toBe(downstreamStudent);
+  expect((await owner.query(
+    'SELECT confirmation_state FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
+    [downstreamLead,downstreamStudent]
+  )).rows[0].confirmation_state).toBe('pending_review');
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  await expect(a.locator('#downstream-correction-cases-list'))
+    .toContainText('已批准隔离：下游纠错尚未完成');
+  await testInfo.attach('v3-2-22-downstream-hold-business-review',{
+    body:await a.screenshot({fullPage:true}),contentType:'image/png'
+  });
   await testInfo.attach('v3-2-20-student-lead-governance',{
     body:await a.screenshot({fullPage:true}),contentType:'image/png'
   });
