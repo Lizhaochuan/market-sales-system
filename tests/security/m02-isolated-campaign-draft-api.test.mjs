@@ -59,6 +59,12 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const handoffs=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-handoffs',
+    {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
  const submitSales=async(staff,id,version,requestKey=key())=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
     '/api/v1/marketing-campaigns/drafts/'+id+'/sales-review-requests',{
@@ -231,11 +237,34 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   const managerQueue=await reviews(M);
   assert.equal(managerQueue.status,200);
   assert.equal(managerQueue.data.items.find(x=>x.review_id===reviewId).can_sales_review,true);
+  const beforeFinance=await handoffs(A);
+  assert.equal(beforeFinance.status,200);
+  assert.equal(beforeFinance.data.items.some(x=>x.review_id===reviewId),false,
+    'pending sales review is never sent to finance preparation');
   const decisionKey=key();
   const approved=await decideSales(M,reviewId,'approved',decisionKey);
   assert.equal(approved.status,200,JSON.stringify(approved));
   assert.equal(approved.data.status,'sales_approved_pending_finance');
   assert.equal(approved.data.finance_authorized,false);
+  for(const staff of [A,M]){
+   const handoff=await handoffs(staff);
+   assert.equal(handoff.status,200,JSON.stringify(handoff));
+   const item=handoff.data.items.find(x=>x.review_id===reviewId);
+   assert.ok(item,'only owner or actual approver sees the sales handoff');
+   assert.equal(item.campaign_version,2);
+   assert.equal(item.campaign_name,newBody.name);
+   assert.equal(Number(item.planned_budget_cents),99500);
+   assert.equal(item.channel_count,1);
+   assert.equal(item.handoff_status,'awaiting_external_finance_authority');
+   assert.equal(item.campaign_status,'draft');
+   assert.equal(item.finance_authorized,false);
+   assert.equal(item.execution_allowed,false);
+   for(const sensitive of ['evidence_ref','request_reason','review_reason','campaign_snapshot',
+    'organization_id','review_key','request_key']){
+    assert.equal(Object.hasOwn(item,sensitive),false,sensitive+' should not leak');
+   }
+  }
+  assert.equal((await handoffs(B)).status,401,'unbound employee cannot enumerate finance handoffs');
   assert.equal((await decideSales(M,reviewId,'approved',decisionKey)).data.status,
    'sales_approved_pending_finance');
   assert.equal((await decideSales(M,reviewId,'approved')).status,409);
@@ -258,6 +287,10 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    ['模拟活动方案索引']);
   assert.equal(forbiddenMoney.rows[0].n,0,'no marketing cost authorization or ledger entry');
   for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+   if([aRead,bRead,mRead].includes(pool)){
+    await assert.rejects(pool.query('INSERT INTO ms.scoped_isolated_campaign_finance_handoffs(review_id) VALUES($1)',[reviewId]),
+      e=>e.code==='42501','read-only view cannot be written');
+   }
    await assert.rejects(pool.query('SELECT * FROM ms.isolated_campaign_sales_reviews'),
     e=>e.code==='42501');
    await assert.rejects(pool.query("UPDATE ms.marketing_campaigns SET status='active' WHERE FALSE"),
@@ -285,6 +318,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   await owner.query('UPDATE ms.staff_identity_bindings SET revoked_at=now() WHERE issuer=$1 AND subject=$2 AND revoked_at IS NULL',
    [issuer,subjects.get(A)]);
   assert.equal((await get(A)).status,403);
+  assert.equal((await handoffs(A)).status,403);
   assert.equal((await post(A,payload(prefix+'-revoked'))).status,403);
   assert.equal(broadCalls,0);
  }finally{

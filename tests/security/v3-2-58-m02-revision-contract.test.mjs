@@ -30,8 +30,9 @@ test('V3.2-58 only owner may revise versioned drafts through protected function'
  const app=read('src/app.mjs'),write=read('src/scoped-legacy-write-adapter.mjs'),
   readAdapter=read('src/scoped-legacy-read-adapter.mjs');
  for(const x of ["'reviseCampaignDraft'","revise_own_campaign_draft:true",
-  "if(!strictStaffMode&&['listCampaignSalesReviews','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft'].includes(route.op))"])
+  "'reviseCampaignDraft'"])
   assert.ok(app.includes(x),'Missing strict route '+x);
+ assert.match(app,/if\(!strictStaffMode&&\[[^\]]*'reviseCampaignDraft'[^\]]*\]\.includes\(route\.op\)\)/);
  assert.ok(write.includes("'reviseCampaignDraft'"));
  assert.ok(write.includes('ms.revise_isolated_campaign_draft($1,$2,$3,$4,$5,$6,$7,$8)'));
  assert.ok(readAdapter.includes('budget_cents,status,channel_ids,version FROM ms.scoped_isolated_campaign_drafts'));
