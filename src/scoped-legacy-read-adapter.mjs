@@ -18,6 +18,7 @@ export const migratedLegacyReads=new Set([
   'listCampaignCrossModuleTrustFailureGates',
   'listCampaignCompensationResponsibilityMatrix',
   'listCampaignCompensationEvidenceApprovalGates',
+  'listCampaignCompensationPacketFreezeGates',
   'listChannelChangeRequests',
   'listChannelAuditHistory',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
@@ -30,6 +31,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listCampaignCompensationPacketFreezeGates:
+    'SELECT incident_id,review_id,incident_status,issue_kind,failure_classification,sales_packet_complete,freeze_block_reason,freeze_registry_status,frozen_source_revision,freeze_version,evidence_sha256,evidence_packet_frozen,independent_sales_case_approved,trusted_source_revision_verified,canonical_digest_verified,persistent_idempotency_registry_verified,revision_compare_and_swap_verified,evidence_immutability_verified,external_signature_verified,financial_receipt_verified,academic_receipt_verified,historical_originals_integrity_verified,preserve_original_orders_required,preserve_original_payments_required,preserve_original_sale_events_required,preserve_original_lessons_required,original_records_mutable,packet_handoff_allowed,compensation_write_allowed,hold_active,release_eligible,finance_authorized,execution_allowed,activity_publish_allowed FROM ms.scoped_isolated_campaign_compensation_packet_freeze_gates ORDER BY incident_id LIMIT 101',
   listCampaignCompensationEvidenceApprovalGates:
     'SELECT incident_id,review_id,incident_status,issue_kind,failure_classification,sales_packet_complete,preserve_original_orders_required,preserve_original_payments_required,preserve_original_sale_events_required,preserve_original_lessons_required,sales_original_snapshot_verified,sales_independent_case_approved,finance_original_order_evidence_verified,finance_original_payment_evidence_verified,finance_independent_decision_signed,academic_student_identity_verified,academic_original_lesson_evidence_verified,academic_independent_decision_signed,compensation_history_chain_verified,external_replay_and_revocation_verified,all_source_record_hashes_verified,joint_three_party_approval_verified,first_blocking_gate,stage_1_sales,stage_2_finance,stage_3_academic,stage_4_joint,checklist_state,original_records_mutable,compensation_write_allowed,hold_active,release_eligible,finance_authorized,execution_allowed,activity_publish_allowed FROM ms.scoped_isolated_campaign_compensation_evidence_approval_gates ORDER BY incident_id LIMIT 101',
   listCampaignCompensationResponsibilityMatrix:
@@ -169,7 +172,7 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates','listCampaignCompensationResponsibilityMatrix','listCampaignCompensationEvidenceApprovalGates'].includes(operation)&&r.rows.length>100)
+      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates','listCampaignCompensationResponsibilityMatrix','listCampaignCompensationEvidenceApprovalGates','listCampaignCompensationPacketFreezeGates'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)
