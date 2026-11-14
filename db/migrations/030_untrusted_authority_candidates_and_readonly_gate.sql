@@ -15,8 +15,8 @@ CREATE TABLE ms.cross_module_untrusted_source_candidates (
   'crm_entitlement','crm_attendance','crm_schedule')),
  source_system text NOT NULL CHECK(source_system ~ '^[a-z][a-z0-9_-]{2,63}$'),
  source_tenant text NOT NULL CHECK(source_tenant ~ '^[A-Za-z0-9_-]{2,80}$'),
- source_object_ref text NOT NULL CHECK(source_object_ref ~ '^[A-Za-z0-9_:\.\/-]{6,160}$'),
- source_revision text NOT NULL CHECK(source_revision ~ '^[A-Za-z0-9_:\.\/-]{2,120}$'),
+ source_object_ref text NOT NULL CHECK(source_object_ref ~ '^[A-Za-z0-9_:.-]{6,160}$'),
+ source_revision text NOT NULL CHECK(source_revision ~ '^[A-Za-z0-9_:.-]{2,120}$'),
  candidate_sha256 text NOT NULL CHECK(candidate_sha256 ~ '^[a-f0-9]{64}$'),
  reported_status text NOT NULL CHECK(reported_status IN(
   'source_not_connected','unverified_response','result_unknown','disputed')),
@@ -61,8 +61,8 @@ BEGIN
   OR (p_department='academic' AND p_kind NOT LIKE 'crm_%')
   OR p_source_system IS NULL OR p_source_system !~ '^[a-z][a-z0-9_-]{2,63}$'
   OR p_source_tenant IS NULL OR p_source_tenant !~ '^[A-Za-z0-9_-]{2,80}$'
-  OR p_source_ref IS NULL OR p_source_ref !~ '^[A-Za-z0-9_:\.\/-]{6,160}$'
-  OR p_source_revision IS NULL OR p_source_revision !~ '^[A-Za-z0-9_:\.\/-]{2,120}$'
+  OR p_source_ref IS NULL OR p_source_ref !~ '^[A-Za-z0-9_:.-]{6,160}$'
+  OR p_source_revision IS NULL OR p_source_revision !~ '^[A-Za-z0-9_:.-]{2,120}$'
   OR p_sha256 IS NULL OR p_sha256 !~ '^[a-f0-9]{64}$'
   OR p_reported_status NOT IN(
        'source_not_connected','unverified_response','result_unknown','disputed')
