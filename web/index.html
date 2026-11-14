@@ -167,6 +167,11 @@
           <p id="channel-requests-status" class="form-hint" role="status">仅展示本人申请及本机构主管有权查看的待审批记录。</p>
           <div id="channel-requests-list" class="record-list"></div>
         </article>
+        <article class="panel" id="channel-audit-panel">
+          <div class="panel-header"><h3>渠道变更审计时间线</h3><span id="channel-audit-total" class="count">0 条</span></div>
+          <p id="channel-audit-status" class="form-hint" role="status">仅展示本人申请、本人曾审核及当前有权复核的最小事件，不公开内部凭据或审计 JSON。</p>
+          <div id="channel-audit-list" class="record-list" aria-label="本机构授权范围内的渠道变更审计事件"></div>
+        </article>
       </div>
       <p class="muted channel-scope-note">渠道维护仅限隔离测试的严格签名员工及独立主管。未经审核不修改渠道；真实渠道、跨渠道费用分摊、学生首次来源和商机归因金额仍未开放。</p>
     </section>
