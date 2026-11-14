@@ -689,10 +689,10 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   await n.getByRole('button',{name:'刷新数据'}).click();
   await expect(n.locator('#downstream-reconciliation-decision-card')).toBeVisible();
   const reviewForm=n.locator('#downstream-reconciliation-decision-form');
-  const reviewId=await reviewForm.locator('select[name="reconciliation_id"] option')
+  const reconciliationReviewId=await reviewForm.locator('select[name="reconciliation_id"] option')
     .filter({hasText:downstreamName}).first().getAttribute('value');
-  expect(reviewId).toBeTruthy();
-  await reviewForm.locator('select[name="reconciliation_id"]').selectOption(reviewId);
+  expect(reconciliationReviewId).toBeTruthy();
+  await reviewForm.locator('select[name="reconciliation_id"]').selectOption(reconciliationReviewId);
   await reviewForm.locator('select[name="decision"]').selectOption('approved');
   await reviewForm.locator('input[name="evidence_ref"]')
     .fill('虚构第二主管独立复核未结订单');
@@ -701,7 +701,7 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   await reviewForm.getByRole('button',{name:'保存第二轮独立核查决定'}).click();
   await expect.poll(async()=>(await owner.query(
     'SELECT status FROM ms.downstream_correction_reconciliation_requests WHERE id=$1',
-    [reviewId])).rows[0]?.status).toBe('external_action_required');
+    [reconciliationReviewId])).rows[0]?.status).toBe('external_action_required');
   expect((await owner.query(
     'SELECT status FROM ms.lead_student_downstream_correction_cases WHERE id=$1',
     [downstreamCaseId])).rows[0].status).toBe('hold_active');
