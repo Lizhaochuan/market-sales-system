@@ -324,6 +324,49 @@
           </form>
         </article>
       </div>
+      <div id="final-lead-conversion-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>最终授权后正式创建销售线索</h2>
+          <p>仅虚构数据隔离测试。必须已通过候选核查、转换预审及最终独立主管批准；员工最后确认执行。一个联系人不重复生成独立线索。</p></div>
+        <div class="two-col">
+          <article class="panel"><h3>提出最终转换申请</h3>
+            <form id="final-lead-conversion-request-form" class="field-stack">
+              <label>选择本人仍有效的已通过预审
+                <select name="readiness_id" data-options="clearedForFinal" required></select></label>
+              <label>申请理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构确认依据 <input name="evidence_ref" maxlength="200" required></label>
+              <p class="form-hint">提交申请不会创建正式线索。申请人不能自行批准。</p>
+              <button class="primary" type="submit">提交最终转换审核</button>
+            </form>
+          </article>
+          <article class="panel" id="final-lead-conversion-decision-card" hidden>
+            <h3>独立主管最终审批</h3>
+            <form id="final-lead-conversion-decision-form" class="field-stack">
+              <label>待审最终申请
+                <select name="authorization_id" data-options="pendingFinalConversions" required></select></label>
+              <label>决定 <select name="decision">
+                <option value="approved">批准，但暂不创建线索</option>
+                <option value="rejected">驳回申请</option>
+              </select></label>
+              <label>审核理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构独立核查依据 <input name="evidence_ref" maxlength="200" required></label>
+              <button class="primary" type="submit">保存最终独立审核</button>
+            </form>
+          </article>
+        </div>
+        <div class="two-col space-top">
+          <article class="panel"><h3>本人最后确认创建</h3>
+            <form id="final-lead-conversion-execute-form" class="field-stack">
+              <label>已批准且尚未执行的申请
+                <select name="authorization_id" data-options="approvedFinalConversions" required></select></label>
+              <p class="form-hint">再次检查当前管理权、客户拒联、重复正式线索、跨员工争议及主管资格。通过后仅创建一条正式销售线索；不自动关联学生、家庭、合同、业绩或资金。</p>
+              <button class="primary" type="submit">确认创建一条正式销售线索</button>
+            </form>
+          </article>
+          <article class="panel"><h3>我的最终转换记录与主管待审申请</h3>
+            <div id="final-lead-conversions-list" class="record-list"></div>
+          </article>
+        </div>
+      </div>
       <article class="panel space-top" id="strict-consultation-card" hidden>
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>
