@@ -518,6 +518,43 @@
           <div id="downstream-correction-cases-list" class="record-list"></div>
         </article>
       </div>
+      <div id="downstream-reconciliation-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>跨模块学生纠错：第二轮独立核查与隔离处置</h2>
+          <p>第一位主管同意隔离后，原员工可发起复核。第二位不同的主管独立判断：原学生确实正确且没有报价、订单、试课和履约负担，才允许解除隔离；确认有错误则继续隔离并交跨部门处理。不能自动转学生、订单或资金。</p></div>
+        <div class="two-col">
+          <article class="panel"><h3>提交跨模块核查结论申请</h3>
+            <form id="downstream-reconciliation-request-form" class="field-stack">
+              <label>已完成第一轮隔离审批的案件
+                <select name="case_id" data-options="downstreamReconciliationCandidates" required></select></label>
+              <label>实际核查方向 <select name="resolution">
+                <option value="external_action_required">确认关联可能有误，继续保护并交跨部门人工纠正</option>
+                <option value="original_student_valid">经新的证据核实原学生关联正确，申请解除误报隔离</option>
+              </select></label>
+              <label>原始证据引用（虚构）<input name="evidence_ref" maxlength="200" required></label>
+              <label>独立对照材料（虚构）<input name="independent_basis_ref" maxlength="200" required></label>
+              <label>核查理由<textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <p class="form-hint">单有主管同意并不能绕过资金与合同。即使把真实错误交跨部门，系统仍保持销售隔离，绝不视为纠错完成。</p>
+              <button class="secondary" type="submit">提交第二轮独立核查申请</button>
+            </form>
+          </article>
+          <article class="panel" id="downstream-reconciliation-decision-card" hidden>
+            <h3>第二名独立主管核查</h3>
+            <form id="downstream-reconciliation-decision-form" class="field-stack">
+              <label>待审第二轮核查
+                <select name="reconciliation_id" data-options="pendingDownstreamReconciliations" required></select></label>
+              <label>结论 <select name="decision">
+                <option value="approved">通过独立核查，仅按准许条件执行</option>
+                <option value="rejected">驳回第二轮申请，继续隔离</option></select></label>
+              <label>第二位主管的核对依据（虚构）<input name="evidence_ref" maxlength="200" required></label>
+              <label>复核原因<textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <p class="form-hint">第二位主管不能是原销售员工或第一位主管。数据库会重新核查商机、订单、付款、退款、试课和履约数量。真实错误不会自动解除隔离或改写财务。</p>
+              <button class="primary" type="submit">保存第二轮独立核查决定</button>
+            </form>
+          </article>
+        </div>
+        <article class="panel space-top"><h3>跨模块核查状态与保留的证据链</h3>
+          <div id="downstream-reconciliation-list" class="record-list"></div></article>
+      </div>
       <article class="panel space-top" id="strict-consultation-card" hidden>
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>

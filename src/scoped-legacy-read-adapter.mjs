@@ -11,10 +11,14 @@ export const migratedLegacyReads=new Set([
   'listContactCustodyActive','listContactCustodyReviews','listRelatedStudents',
   'listCandidateConsultations','listLeadCandidates',
   'listConversionReadiness','listAttributionDisputes','listAttributionDisputable',
-  'listFinalLeadConversions','listLeadStudentAssociations','listLeadStudentLinkReviews','listCurrentLeadStudentLinks','listDownstreamStudentCorrections','listDownstreamCorrectionEligible','listLeadAdjustments','listLeadCorrectionNotes'
+  'listFinalLeadConversions','listLeadStudentAssociations','listLeadStudentLinkReviews','listCurrentLeadStudentLinks','listDownstreamStudentCorrections','listDownstreamCorrectionEligible','listDownstreamReconciliations','listDownstreamReconciliationEligible','listLeadAdjustments','listLeadCorrectionNotes'
 ]);
 
 const listQueries={
+  listDownstreamReconciliations:
+    'SELECT reconciliation_id,case_id,resolution,status,requested_by,created_at,lead_id,student_id,student_name,opportunity_count,quote_count,order_count,allocation_count,refund_allocation_count,trial_count,sale_event_count,entitlement_count FROM ms.scoped_downstream_reconciliation_requests ORDER BY created_at DESC,reconciliation_id LIMIT 100',
+  listDownstreamReconciliationEligible:
+    'SELECT case_id,lead_id,student_id,student_name,opportunity_count,quote_count,order_count,allocation_count,refund_allocation_count,trial_count,sale_event_count,entitlement_count FROM ms.scoped_downstream_reconciliation_eligible ORDER BY student_name,case_id LIMIT 100',
   listDownstreamStudentCorrections:
     'SELECT case_id,association_request_id,lead_id,student_id,student_name,status,created_at,requested_by,opportunity_count,quote_count,order_count,allocation_count,refund_allocation_count,trial_count,sale_event_count,entitlement_count FROM ms.scoped_downstream_student_correction_cases ORDER BY created_at DESC,case_id LIMIT 100',
   listDownstreamCorrectionEligible:
