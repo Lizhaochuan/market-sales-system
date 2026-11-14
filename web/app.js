@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,campaignFinanceHandoffs:[],campaignFinanceLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],campaigns:['获客管理','市场活动'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -261,6 +261,19 @@ function setCampaignRevisionChoice(){
     option.selected=selectedChannels.has(option.value);
   $('campaign-revise-version').textContent='当前草稿版本 '+selected.version+'；保存时需与数据库版本一致';
 }
+function renderCampaignFinanceHandoffs(){
+  const healthy=state.strict&&!state.campaignFinanceLoadError&&!state.campaignSalesLoadError;
+  $('campaign-finance-total').textContent=healthy?state.campaignFinanceHandoffs.length+' 条':'0 条';
+  $('campaign-finance-status').textContent=healthy
+    ?'销售审核已通过的交接资料；尚未核实真实财务审批人，不能付款、投放或发布。'
+    :'财务交接资料未通过验证，已清空旧数据，禁止使用。';
+  if(!healthy){$('campaign-finance-list').replaceChildren();return;}
+  paint('campaign-finance-list',state.campaignFinanceHandoffs,x=>record(
+    x.campaign_name,
+    '草稿版本 '+x.campaign_version+' · 计划预算 '+yuan(x.planned_budget_cents)+
+      ' · 关联渠道 '+x.channel_count+' 个 · 销售审批时间 '+formatDate(x.sales_approved_at),
+    '等待外部财务权威核验；不代表审批通过或允许支出','财'));
+}
 function renderCampaignSalesReview(){
   const healthy=state.strict&&!state.campaignSalesLoadError&&
     !state.campaignLoadError&&!state.channelLoadError;
@@ -330,6 +343,7 @@ function render(){
   $('campaign-workbench').hidden=!state.strict;
   $('campaigns-total').textContent=state.campaignDrafts.length+' 条';
   renderCampaignSalesReview();
+  renderCampaignFinanceHandoffs();
   $('campaigns-status').textContent=state.campaignLoadError||state.channelLoadError
     ?'活动草稿或渠道目录读取失败，旧数据已清空，禁止新建。'
     :'只显示本人负责的草稿和主管有权查看的本机构草稿。预算均为未审批的计划金额。';
@@ -511,6 +525,7 @@ async function refresh(){
   const endpoints=state.strict?[
     ['campaignDrafts','/api/v1/marketing-campaigns/drafts'],
     ['campaignSalesReviews','/api/v1/marketing-campaigns/sales-reviews'],
+    ['campaignFinanceHandoffs','/api/v1/marketing-campaigns/finance-handoffs'],
     ['channels','/api/v1/marketing-channels'],
     ['channelRequests','/api/v1/marketing-channels/change-requests'],
     ['channelAuditHistory','/api/v1/marketing-channels/change-requests/audit-history'],
@@ -548,11 +563,33 @@ async function refresh(){
   else {
     state.campaignDrafts=[];state.campaignLoadError=false;
     state.campaignSalesReviews=[];state.campaignSalesLoadError=false;
+    state.campaignFinanceHandoffs=[];state.campaignFinanceLoadError=false;
     state.channelRequests=[];state.channelRequestLoadError=false;
     state.channelAuditHistory=[];state.channelAuditLoadError=false;state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
-    if(key==='campaignSalesReviews'){
+    if(key==='campaignFinanceHandoffs'){
+      const items=r.status==='fulfilled'?r.value?.items:null;
+      const fields=['review_id','campaign_id','campaign_version','requested_by',
+        'sales_approved_by','submitted_at','sales_approved_at','campaign_name',
+        'planned_budget_cents','channel_count','handoff_status','finance_authorized',
+        'execution_allowed','campaign_status'];
+      const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
+        x&&Object.keys(x).every(k=>fields.includes(k))&&
+        fields.every(k=>Object.hasOwn(x,k))&&
+        ['review_id','campaign_id','requested_by','sales_approved_by',
+          'submitted_at','sales_approved_at'].every(k=>typeof x[k]==='string')&&
+        typeof x.campaign_name==='string'&&x.campaign_name.length<=100&&
+        Number.isSafeInteger(x.campaign_version)&&x.campaign_version>=1&&
+        Number.isSafeInteger(x.channel_count)&&x.channel_count>=1&&x.channel_count<=20&&
+        Number.isSafeInteger(Number(x.planned_budget_cents))&&
+        Number(x.planned_budget_cents)>=0&&Number(x.planned_budget_cents)<=100000000000&&
+        x.handoff_status==='awaiting_external_finance_authority'&&
+        x.finance_authorized===false&&x.execution_allowed===false&&
+        x.campaign_status==='draft');
+      state.campaignFinanceHandoffs=valid?items:[];
+      state.campaignFinanceLoadError=!valid;
+    }else if(key==='campaignSalesReviews'){
       const items=r.status==='fulfilled'?r.value?.items:null;
       const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
         x&&typeof x.review_id==='string'&&typeof x.campaign_id==='string'&&
@@ -632,6 +669,10 @@ function logout(notice=true){
   state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
   state.campaignDrafts=[];state.campaignLoadError=false;
   state.campaignSalesReviews=[];state.campaignSalesLoadError=false;
+  state.campaignFinanceHandoffs=[];state.campaignFinanceLoadError=false;
+  $('campaign-finance-list').replaceChildren();
+  $('campaign-finance-total').textContent='0 条';
+  $('campaign-finance-status').textContent='未登录，财务交接资料已清空。';
   $('campaign-sales-list').replaceChildren();
   $('campaign-sales-request-choice').replaceChildren();
   $('campaign-sales-review-choice').replaceChildren();

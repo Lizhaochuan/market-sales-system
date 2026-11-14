@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-59",
-    "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented."
+    "version": "v3.2-60",
+    "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
   "x-production-integration-allowed": false,
@@ -402,9 +402,33 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-handoffs": {
+      "get": {
+        "operationId": "listIsolatedCampaignFinanceHandoffs",
+        "summary": "Only own/decided sales-approved records; read-only planning data, never finance approval",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100 scoped sales-approved handoff summaries; finance_authorized=false, execution_allowed=false"
+          },
+          "403": {
+            "description": "Strict approved staff and dedicated read LOGIN required"
+          },
+          "500": {
+            "description": "Oversized or unavailable projection fails closed"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
   "x-finance-approval-implemented": false,
-  "x-campaign-publishing-implemented": false
+  "x-campaign-publishing-implemented": false,
+  "x-finance-handoff-readonly": true,
+  "x-finance-handoff-execution-allowed": false
 }
