@@ -40,6 +40,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   budget_cents:125000,channel_ids:[channels.ok]
  });
  let app,broadCalls=0,ownCampaign,managerCampaign,reviewId;
+ const incidentIds=[];
  const get=async(staff)=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
    '/api/v1/marketing-campaigns/drafts',{headers:{Authorization:'Bearer '+sign(staff)}});
@@ -63,6 +64,28 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   const r=await fetch('http://127.0.0.1:'+app.address().port+
     '/api/v1/marketing-campaigns/finance-handoffs',
     {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
+ const incidents=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+   '/api/v1/marketing-campaigns/finance-incidents',
+   {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
+ const reportIncident=async(staff,id,kind,requestKey=key(),reason='虚构资料需独立复核')=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+   '/api/v1/marketing-campaigns/finance-handoffs/'+id+'/incidents',{
+   method:'POST',headers:{Authorization:'Bearer '+sign(staff),
+    'Content-Type':'application/json','Idempotency-Key':requestKey},
+   body:JSON.stringify({issue_kind:kind,evidence_ref:'虚构交接资料索引',reason_zh:reason})});
+  return {status:r.status,...await r.json()};
+ };
+ const triageIncident=async(staff,id,action,requestKey=key())=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+   '/api/v1/marketing-campaigns/finance-incidents/'+id+'/decision',{
+   method:'POST',headers:{Authorization:'Bearer '+sign(staff),
+    'Content-Type':'application/json','Idempotency-Key':requestKey},
+   body:JSON.stringify({action,evidence_ref:'虚构独立复核依据',reason_zh:'销售侧异常分流而非财务批准'})});
   return {status:r.status,...await r.json()};
  };
  const submitSales=async(staff,id,version,requestKey=key())=>{
@@ -237,6 +260,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   const managerQueue=await reviews(M);
   assert.equal(managerQueue.status,200);
   assert.equal(managerQueue.data.items.find(x=>x.review_id===reviewId).can_sales_review,true);
+  assert.equal((await reportIncident(A,reviewId,'supporting_materials_gap')).status,403,
+    'pending sales review cannot enter finance exception workflow');
   const beforeFinance=await handoffs(A);
   assert.equal(beforeFinance.status,200);
   assert.equal(beforeFinance.data.items.some(x=>x.review_id===reviewId),false,
@@ -266,6 +291,67 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    }
   }
   assert.equal((await handoffs(B)).status,401,'unbound employee cannot enumerate finance handoffs');
+  // V3.2-62: sales-side exception reporting, independent triage, and ongoing finance hold.
+  const firstIncidentKey=key();
+  const first=await reportIncident(A,reviewId,'supporting_materials_gap',firstIncidentKey);
+  assert.equal(first.status,200,JSON.stringify(first));
+  assert.equal(first.data.status,'open');
+  assert.equal(first.data.finance_authorized,false);
+  const incident1=first.data.incident_id;incidentIds.push(incident1);
+  assert.equal((await reportIncident(A,reviewId,'supporting_materials_gap',firstIncidentKey)).data.incident_id,incident1);
+  assert.equal((await reportIncident(A,reviewId,'integrity_mismatch',firstIncidentKey)).status,409);
+  assert.equal((await reportIncident(A,reviewId,'supporting_materials_gap')).status,409,
+    'at most one active incident per handoff');
+  let listing=await incidents(A);
+  assert.equal(listing.status,200,JSON.stringify(listing));
+  let listed=listing.data.items.find(x=>x.incident_id===incident1);
+  assert.equal(listed.can_triage,false);
+  assert.equal(listed.issue_kind,'supporting_materials_gap');
+  assert.equal(Object.hasOwn(listed,'evidence_ref'),false);
+  assert.equal(Object.hasOwn(listed,'report_reason'),false);
+  assert.equal((await handoffs(A)).data.items.find(x=>x.review_id===reviewId).readiness_status,
+    'blocked_active_incident');
+  listing=await incidents(M);
+  assert.equal(listing.status,200);
+  assert.equal(listing.data.items.find(x=>x.incident_id===incident1).can_triage,true);
+  assert.equal((await incidents(B)).status,401);
+  assert.equal((await triageIncident(A,incident1,'close_for_recheck')).status,403);
+  const closeKey=key();
+  const closure=await triageIncident(M,incident1,'close_for_recheck',closeKey);
+  assert.equal(closure.status,200,JSON.stringify(closure));
+  assert.equal(closure.data.status,'closed_for_recheck');
+  assert.equal(closure.data.finance_authorized,false);
+  assert.equal((await triageIncident(M,incident1,'close_for_recheck',closeKey)).data.status,
+    'closed_for_recheck');
+  assert.equal((await triageIncident(M,incident1,'escalate_manual')).status,409);
+  assert.equal((await handoffs(A)).data.items.find(x=>x.review_id===reviewId).readiness_status,
+    'ready_for_external_manual_check','incident closure only resumes technical readiness');
+  await owner.query('UPDATE ms.marketing_campaigns SET budget_cents=budget_cents+1 WHERE id=$1',[ownCampaign]);
+  assert.equal((await handoffs(A)).data.items.find(x=>x.review_id===reviewId).readiness_status,
+    'blocked_snapshot_mismatch');
+  const bad=await reportIncident(A,reviewId,'integrity_mismatch');
+  assert.equal(bad.status,200,JSON.stringify(bad));
+  const incident2=bad.data.incident_id;incidentIds.push(incident2);
+  assert.equal((await triageIncident(M,incident2,'close_for_recheck')).status,422,
+    'snapshot mismatch may never be dismissed for recheck');
+  const escalated=await triageIncident(M,incident2,'escalate_manual');
+  assert.equal(escalated.status,200,JSON.stringify(escalated));
+  assert.equal(escalated.data.status,'manual_escalated');
+  await owner.query('UPDATE ms.marketing_campaigns SET budget_cents=99500 WHERE id=$1',[ownCampaign]);
+  assert.equal((await handoffs(A)).data.items.find(x=>x.review_id===reviewId).readiness_status,
+    'blocked_active_incident','manual escalation remains blocked even after snapshot restored');
+  assert.equal((await reportIncident(A,reviewId,'supporting_materials_gap')).status,409,
+    'escalated incident cannot be silently superseded');
+  const eventNames=(await owner.query(
+    "SELECT event_name FROM ms.audit_events WHERE target_type='marketing_campaign_finance_incident' AND target_id=ANY($1::uuid[])",
+    [incidentIds])).rows.map(x=>x.event_name).sort();
+  assert.deepEqual(eventNames,
+   ['CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED','CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED',
+    'CAMPAIGN_FINANCE_ISSUE_ESCALATED','CAMPAIGN_FINANCE_ISSUE_RECHECK_REQUESTED'].sort());
+  for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+   await assert.rejects(pool.query('SELECT * FROM ms.isolated_campaign_finance_incidents'),
+     e=>e.code==='42501');
+  }
   assert.equal((await decideSales(M,reviewId,'approved',decisionKey)).data.status,
    'sales_approved_pending_finance');
   assert.equal((await decideSales(M,reviewId,'approved')).status,409);
@@ -324,6 +410,10 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));
+  if(incidentIds.length){
+   await owner.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign_finance_incident' AND target_id=ANY($1::uuid[])",[incidentIds]);
+   await owner.query('DELETE FROM ms.isolated_campaign_finance_incidents WHERE id=ANY($1::uuid[])',[incidentIds]);
+  }
   if(reviewId){
    await owner.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign_sales_review' AND target_id=$1",[reviewId]);
    await owner.query('DELETE FROM ms.isolated_campaign_sales_reviews WHERE id=$1',[reviewId]);
