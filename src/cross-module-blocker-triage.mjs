@@ -81,6 +81,16 @@ export function createIsolatedBlockerTriage({audit,getFixtureActor,getFixtureCur
   const root=scope+'\0'+input.audit_sequence+'\0'+input.audit_digest;
   const all=incidents.get(root)||[];
   const previous=all.at(-1);
+  const nonceKey=scope+'\0'+input.idempotency_key;
+  const noncePayload={organization_id:org,incident_id:incident,
+   audit_sequence:input.audit_sequence,audit_digest:input.audit_digest,
+   action:input.action,actor_id:input.actor_id};
+  const fingerprint=digest(noncePayload);
+  const existingNonce=nonces.get(nonceKey);
+  if(existingNonce){
+   if(existingNonce.fingerprint!==fingerprint)fail('TRIAGE_IDEMPOTENCY_CONFLICT');
+   return deny('BLOCKED_HISTORICAL_TRIAGE_REPLAY',existingNonce.event);
+  }
   const nextAction=previous?
    previous.status==='open'?'begin_review':
    previous.status==='in_review'?'close':null:'open';
@@ -94,16 +104,6 @@ export function createIsolatedBlockerTriage({audit,getFixtureActor,getFixtureCur
   actor(org,input.actor_id,expectedRole);
   if(input.action==='close'&&previous?.actor_id===input.actor_id)
    fail('INDEPENDENT_TRIAGE_CLOSER_REQUIRED');
-  const key=scope+'\0'+input.idempotency_key;
-  const noncePayload={organization_id:org,incident_id:incident,
-   audit_sequence:input.audit_sequence,audit_digest:input.audit_digest,
-   action:input.action,actor_id:input.actor_id};
-  const fingerprint=digest(noncePayload);
-  const prior=nonces.get(key);
-  if(prior){
-   if(prior.fingerprint!==fingerprint)fail('TRIAGE_IDEMPOTENCY_CONFLICT');
-   return deny('BLOCKED_HISTORICAL_TRIAGE_REPLAY',prior.event);
-  }
   const payload={schema_version:'v3.2-84-ci-triage-v1',...noncePayload,
    source_revision:base.source_revision,category:classification.category,
    owner_department:classification.owner,gate_reason_code:base.gate_reason_code,
@@ -112,7 +112,7 @@ export function createIsolatedBlockerTriage({audit,getFixtureActor,getFixtureCur
    event_sequence:all.length+1,previous_event_digest:previous?.event_digest||'0'.repeat(64),
    fixture_only:true,hold_active:true,handoff_allowed:false,release_eligible:false};
   const event=Object.freeze({...payload,event_digest:digest(payload)});
-  incidents.set(root,[...all,event]);nonces.set(key,{fingerprint,event});
+  incidents.set(root,[...all,event]);nonces.set(nonceKey,{fingerprint,event});
   return deny('BLOCKED_TRIAGE_RECORDED_NO_RELEASE_AUTHORITY',event);
  }
  function report(input={}){
