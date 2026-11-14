@@ -55,7 +55,7 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
    .sign(kp.privateKey).toString('base64url');
  }
  async function bind(who){
-  const requester=who==='M'?ids.A:ids.M;
+  const requester=(who==='M'||who==='M2')?ids.A:ids.M;
   const evidenceReviewer=who==='M2'?ids.M:reviewer;
   const q=await owner.query(
    "INSERT INTO ms.identity_change_requests(organization_id,action,target_staff_id,"+
