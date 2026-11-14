@@ -13,22 +13,11 @@ REVOKE ALL ON ms.scoped_marketing_channel_catalog FROM PUBLIC;
 GRANT SELECT ON ms.scoped_marketing_channel_catalog TO ms_student_assignee_reader;
 COMMIT;
 
--- Foreign employee LOGIN explicitly bound to the other fictional institution.
-CREATE ROLE ms_assignee_reader_foreign LOGIN INHERIT NOSUPERUSER
- NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-ALTER ROLE ms_assignee_reader_foreign PASSWORD :'foreign_reader_password';
-GRANT ms_student_assignee_reader TO ms_assignee_reader_foreign;
-INSERT INTO ms.database_principal_staff(principal_name,organization_id,staff_user_id)
-VALUES ('ms_assignee_reader_foreign',
- '20000000-0000-4000-8000-000000000002',
- '20000000-0000-4000-8000-000000000021');
-
 DO $privileges$
 DECLARE login_name text;
 BEGIN
  FOREACH login_name IN ARRAY ARRAY[
- 'ms_assignee_reader_a','ms_assignee_reader_b','ms_assignee_reader_manager',
- 'ms_assignee_reader_foreign'
+ 'ms_assignee_reader_a','ms_assignee_reader_b','ms_assignee_reader_manager'
  ] LOOP
   IF NOT has_table_privilege(login_name,'ms.scoped_marketing_channel_catalog','SELECT')
    OR has_table_privilege(login_name,'ms.marketing_channels','SELECT')
