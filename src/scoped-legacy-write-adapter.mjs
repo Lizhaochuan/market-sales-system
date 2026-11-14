@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,24 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='requestFinalLeadConversion'){
+    only(body,['readiness_id','evidence_ref','reason_zh']);
+    return {params:[uuid(body.readiness_id,'已通过的转换预审'),
+      approvalText(body.evidence_ref,'最终申请材料',200),
+      approvalText(body.reason_zh,'最终申请理由',400)]};
+  }
+  if(op==='decideFinalLeadConversion'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['approved','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择批准或驳回最终转换');
+    return {params:[uuid(routeParams?.[0],'最终转换申请'),body.decision,
+      approvalText(body.evidence_ref,'最终审批依据',200),
+      approvalText(body.reason_zh,'最终审批理由',400)]};
+  }
+  if(op==='executeFinalLeadConversion'){
+    only(body,[]);
+    return {params:[uuid(routeParams?.[0],'最终转换授权')]};
+  }
   if(op==='requestConversionReadiness'){
     only(body,['candidate_id','evidence_ref','reason_zh']);
     return {params:[uuid(body.candidate_id,'已核查候选'),
@@ -198,6 +216,18 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'requestFinalLeadConversion':
+        result=await client.query(
+          'SELECT ms.request_final_lead_conversion($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideFinalLeadConversion':
+        result=await client.query(
+          'SELECT ms.decide_final_lead_conversion($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'executeFinalLeadConversion':
+        result=await client.query(
+          'SELECT ms.execute_final_lead_conversion($1,$2) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'requestConversionReadiness':
         result=await client.query(
           'SELECT ms.submit_lead_conversion_preflight($1,$2,$3,$4) AS result',
