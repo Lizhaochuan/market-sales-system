@@ -1,0 +1,22 @@
+name: V3.2-81 isolated supplement final consistency
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-supplement-review-final-check.mjs'
+      - 'tests/security/v3-2-81-m02-supplement-review-final-check.test.mjs'
+      - '.github/workflows/v3-2-81-supplement-final-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-final-review:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check supplement final consistency source
+        run: node --check src/cross-module-supplement-review-final-check.mjs
+      - name: Run supplement consistency, reviewer and version chain tests
+        run: node --test tests/security/v3-2-81-m02-supplement-review-final-check.test.mjs tests/security/v3-2-80-m02-supplement-independent-review.test.mjs tests/security/v3-2-79-m02-supplement-version-chain.test.mjs
