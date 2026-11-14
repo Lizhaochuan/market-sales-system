@@ -127,6 +127,7 @@
                                 "type": "string",
                                 "enum": [
                                   "active",
+                                  "inactive",
                                   "inactive_inherited"
                                 ]
                               },

@@ -31,7 +31,8 @@ export function buildIsolatedChannelCatalog(rows,orgId){
   }
   if(depth>16)broken();
   depths.set(id,depth);
-  effective.set(id,current.status==='active'&&parentEnabled?'active':'inactive_inherited');
+  effective.set(id,current.status==='inactive'?'inactive':
+   parentEnabled?'active':'inactive_inherited');
   states.set(id,'done');
   return depth;
  }
