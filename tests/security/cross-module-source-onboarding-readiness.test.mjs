@@ -189,6 +189,7 @@ test('V3.2-29 immutable source onboarding proposals cannot authorize production 
    assert.equal(q.domain_planning_approvals,2);
    assert.equal(q.independent_security_planning_approvals,2);
    assert.equal(q.planning_paperwork_complete,true);
+   assert.equal(q.upstream_three_party_roles_current,true);
    for(const field of ['official_source_registered',
     'official_credentials_installed','production_readonly_connection_allowed',
     'finance_source_authenticated','crm_source_authenticated',
@@ -206,6 +207,7 @@ test('V3.2-29 immutable source onboarding proposals cannot authorize production 
    assert.equal(q.domain_planning_approvals,2);
    assert.equal(q.independent_security_planning_approvals,2);
    assert.equal(q.valid_current_role_approvals,2);
+   assert.equal(q.upstream_three_party_roles_current,true);
    assert.equal(q.planning_paperwork_complete,false);
    assert.equal(q.production_readonly_connection_allowed,false);
    assert.equal(q.execution_allowed,false);
