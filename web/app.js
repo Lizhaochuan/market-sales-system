@@ -1,9 +1,9 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
-  overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
+  overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
   opportunities:['销售管理','销售商机'],interactions:['客户沟通','跟进记录'],
   families:['客户管理','家庭关系核实'],audit:['操作历史','业务变更记录'],identity:['访问安全','员工身份审批']
@@ -172,6 +172,21 @@ function render(){
     ['students-total',state.students,'人'],['contacts-total',state.contacts,'人'],
     ['leads-total',state.leads,'条'],['opportunities-total',state.opportunities,'条'],
     ['families-total',state.families,'条']])$(id).textContent=items.length+' '+label;
+  $('channels-total').textContent=state.channels.length+' 条';
+  $('channels-status').textContent=state.channelLoadError
+    ?'渠道目录未能读取或层级不一致，已拒绝展示。请联系隔离环境管理员。'
+    :state.channelCatalog
+      ?'本机构 '+state.channelCatalog.count+' 个渠道，其中有效 '+state.channelCatalog.effective_active_count+' 个；仅供虚构数据演示。'
+      :'此模式尚未开放渠道目录。';
+  if(state.channelLoadError){
+    $('channels-list').replaceChildren(node('div','empty','渠道查询失败，未显示任何来源数据。'));
+  }else paint('channels-list',state.channels,x=>record(
+    '　'.repeat(Math.min(x.depth,16))+(x.depth?'↳ ':'')+x.name,
+    '类别：'+(x.channel_type||'未分类')+' · 层级：'+x.depth+
+      ' · '+(x.parent_channel_id?'有上级渠道':'一级渠道'),
+    x.effective_status==='active'?'正常使用':
+      x.effective_status==='inactive'?'本渠道已停用':'因上级渠道停用而不可用',
+    '渠'));
   paint('students-list',state.students,x=>record(
     x.display_name,'年级：'+(x.grade_label||'未填写')+' · 负责人：'+(x.owner_display_name||'待确认'),'独立档案','学'));
   paint('contacts-list',state.contacts,x=>record(
@@ -350,15 +365,28 @@ async function refresh(){
     ['downstreamReconciliations','/api/v1/downstream-reconciliations']
   ]:[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
+    ['channels','/api/v1/marketing-channels'],
     ['events','/api/v1/contact-events'],['leads','/api/v1/leads'],
     ['opportunities','/api/v1/opportunities'],['families','/api/v1/family-groups']
   ];
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
-  if(state.strict)for(const key of ['leads','opportunities','families'])state[key]=[];
+  if(state.strict){
+    for(const key of ['leads','opportunities','families'])state[key]=[];
+    state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
+  }
   else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
-    state[key]=r.status==='fulfilled'?r.value.items||[]:[];
+    if(key==='channels'){
+      const data=r.status==='fulfilled'?r.value:null;
+      const valid=data?.schema_version==='m01-isolated-channel-catalog-v1'&&
+        data?.status==='isolated_readonly_not_production'&&
+        data?.production_integration_allowed===false&&Array.isArray(data.channels)&&
+        Number.isSafeInteger(data.count)&&data.channels.length===data.count;
+      state.channelCatalog=valid?data:null;
+      state.channels=valid?data.channels:[];
+      state.channelLoadError=!valid;
+    }else state[key]=r.status==='fulfilled'?r.value.items||[]:[];
     if(r.status==='rejected'&&!((key==='families')&&!state.capabilities.review_family_audit)){
       toast('部分业务列表未能读取，请检查账号权限或数据库状态',true);
     }
@@ -377,6 +405,7 @@ function setView(view){
 }
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
+  state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
   applyStrictLayout();
   for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions','leadStudentRequests','leadAdjustmentRequests','leadCorrectionNotes','studentLinkReviews','currentStudentLinks','downstreamCorrectionCases','downstreamCorrectionEligible','downstreamReconciliations'])state[key]=[];
   document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
