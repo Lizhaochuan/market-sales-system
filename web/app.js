@@ -610,7 +610,7 @@ $('channel-target-choice').addEventListener('change',()=>{
     'channel_id',c=>c.name,true);
 });
 register('channel-request-form',async d=>{
-  if(!state.strict||state.channelLoadError||state.channelRequestLoadError||state.channelAuditLoadError||state.channelAuditLoadError)
+  if(!state.strict||state.channelLoadError||state.channelRequestLoadError||state.channelAuditLoadError)
     throw Error('渠道请求状态无法确认，禁止提交');
   const action=d.action;
   const data={action,evidence_ref:d.evidence_ref.trim(),reason_zh:d.reason_zh.trim()};
@@ -631,7 +631,7 @@ register('channel-request-form',async d=>{
     '已找到相同申请，当前状态：'+result.status;
 });
 register('channel-review-form',async d=>{
-  if(!state.strict||state.channelLoadError||state.channelRequestLoadError||
+  if(!state.strict||state.channelLoadError||state.channelRequestLoadError||state.channelAuditLoadError||
       state.capabilities.review_channel_change!==true)
     throw Error('当前没有经过核实的渠道审批权限');
   const selected=state.channelRequests.find(x=>x.request_id===d.request_id&&
