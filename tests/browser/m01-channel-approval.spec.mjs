@@ -138,6 +138,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   expect(campaign.rows[0].status).toBe('draft');
   expect(Number(campaign.rows[0].budget_cents)).toBe(125050);
   await managerPage.getByRole('button',{name:'市场活动'}).click();
+  // Manager signed in before the employee saved this draft; fetch fresh scope.
+  await managerPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(managerPage.locator('#campaigns-list')).toContainText(name+'-活动');
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
     status:500,contentType:'application/json',
