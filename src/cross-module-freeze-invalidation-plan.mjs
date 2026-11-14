@@ -62,6 +62,20 @@ function validReport(r){
  }
  return true;
 }
+function validFrozenReport(r){
+ return plain(r)&&HASH.test(r.comparison_digest)&&
+  Number.isSafeInteger(r.total_tasks)&&r.total_tasks>0&&
+  Number.isSafeInteger(r.remaining_count)&&r.remaining_count>=0&&
+  r.remaining_count<=r.total_tasks&&
+  Array.isArray(r.pending_tasks)&&r.pending_tasks.length===r.remaining_count&&
+  r.pending_tasks.every(x=>plain(x)&&typeof x.item==='string'&&
+   ['sales','finance','academic'].includes(x.owner_department)&&
+   ['pending','in_review','reviewer_revoked_recheck_required'].includes(x.status)&&
+   HASH.test(x.difference_digest))&&
+  Array.isArray(r.external_requirements)&&r.external_requirements.length===6&&
+  new Set(r.external_requirements).size===6&&
+  GAPS.every(code=>r.external_requirements.includes(code));
+}
 function canonical(r){
  return {comparison_digest:r.comparison_digest,total_tasks:r.total_tasks,
   remaining_count:r.remaining_count,
@@ -136,13 +150,7 @@ export function createIsolatedFreezeInvalidationPlan({freezeRegistry,unifiedRepo
     found.incident_id!==incident||!plain(found.observation)||
     !plain(found.observation.watermark)||!plain(found.observation.report)||
     !validWatermark({...found.observation.watermark,...scope},org,incident)||
-    !validReport({...found.observation.report,
-     reason_code:'BLOCKED_EXTERNAL_HANDOFF_AND_TASK_REVIEW_REQUIREMENTS',
-     fixture_unified_report_consistent:true,
-     all_internal_tasks_reviewed:found.observation.report.remaining_count===0,
-     external_authority_verified:false,finance_authorized:false,academic_authorized:false,
-     handoff_allowed:false,compensation_write_allowed:false,release_eligible:false,
-     hold_active:true}))
+    !validFrozenReport(found.observation.report))
     return deny('FROZEN_SNAPSHOT_INVALID');
    if(verification.reason_code==='BLOCKED_CURRENT_FIXTURE_FREEZE_NO_EXTERNAL_AUTHORITY'&&
     verification.fixture_freeze_current===true)
