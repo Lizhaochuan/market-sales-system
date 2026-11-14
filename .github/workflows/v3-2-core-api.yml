@@ -175,6 +175,7 @@ jobs:
           node --check src/strict-auth-directory.mjs
           node --check src/server.mjs
           node --check src/cross-module-signature-preflight.mjs
+          node --check src/cross-module-compensation-preflight.mjs
           node --check src/cross-module-authority-contract.mjs
           node --check src/cross-module-fixture-source-verifier.mjs
           node --check src/integration-uat-blocker-report.mjs
