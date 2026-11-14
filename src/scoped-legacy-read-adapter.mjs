@@ -7,10 +7,17 @@ import {fail} from './auth.mjs';
 export const migratedLegacyReads=new Set([
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
   'getStudent','getLead','getOpportunity',
-  'listContactCustodyRequests','listContactCustodyStaff'
+  'listContactCustodyRequests','listContactCustodyStaff',
+  'listContactCustodyActive','listContactCustodyReviews','listRelatedStudents'
 ]);
 
 const listQueries={
+  listContactCustodyActive:
+    'SELECT assignment_id,contact_id,contact_name,assignee_id,granted_at FROM ms.scoped_contact_custody_active ORDER BY granted_at DESC LIMIT 100',
+  listContactCustodyReviews:
+    'SELECT review_id,assignment_id,kind,status,contact_name,created_at FROM ms.scoped_contact_custody_reviews ORDER BY created_at DESC LIMIT 100',
+  listRelatedStudents:
+    'SELECT student_id,student_name,contact_relation FROM ms.scoped_related_student_basic ORDER BY student_id LIMIT 100',
   listContactCustodyRequests:
     'SELECT request_id,contact_name,requester_name,target_name,requested_by,target_staff_id,status,created_at '+
     'FROM ms.scoped_contact_custody_requests ORDER BY created_at DESC,request_id LIMIT 100',
