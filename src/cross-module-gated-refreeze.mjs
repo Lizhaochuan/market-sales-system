@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const SHA=/^[a-f0-9]{64}$/;
 const IDENT=/^[a-z0-9][a-z0-9._:-]{15,127}$/;
+const ACTOR=/^[a-z0-9][a-z0-9._:-]{5,127}$/;
 const STEPS=Object.freeze([
  ['verify_updated_source_and_revocation_watermarks','sales'],
  ['rebuild_evidence_diff_and_all_item_reviews','sales'],
@@ -83,7 +84,7 @@ export function createIsolatedGatedRefreeze({invalidationPlanner,freezeRegistry,
   if(!exact(input,['reference','step','action','actor_id','idempotency_key'])||
    !validReference(input.reference)||!STEPS.some(x=>x[0]===input.step)||
    !['start','complete'].includes(input.action)||
-   typeof input.actor_id!=='string'||!IDENT.test(input.actor_id)||
+   typeof input.actor_id!=='string'||!ACTOR.test(input.actor_id)||
    typeof input.idempotency_key!=='string'||!IDENT.test(input.idempotency_key))
    error('INVALID_RECHECK_TASK_REQUEST');
   const p=await planFor(input.reference),fingerprint=planFingerprint(p);
