@@ -7,7 +7,8 @@ const org='20000000-0000-4000-8000-000000000001';
 const ids={
  A:'20000000-0000-4000-8000-000000000011',
  B:'20000000-0000-4000-8000-000000000012',
- M:'20000000-0000-4000-8000-000000000013'
+ M:'20000000-0000-4000-8000-000000000013',
+ M2:'20000000-0000-4000-8000-000000000014'
 };
 const reviewer='20000000-0000-4000-8000-000000000014';
 const issuer='https://fictional-browser-contact-custody.example.invalid';
@@ -16,29 +17,32 @@ const open=s=>new Promise(ok=>s.listen(0,'127.0.0.1',ok));
 const close=s=>new Promise(ok=>s.close(ok));
 
 test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管理权恢复 A',async({browser},testInfo)=>{
- test.setTimeout(180000); // V3.2-22 adds a separate true downstream case; all prior assertions remain.
+ test.setTimeout(240000); // V3.2-23 adds second real supervisor review, preserving all earlier checks.
  process.env.MS_STAGE='isolated-test';
  const owner=new pg.Pool({connectionString:process.env.DATABASE_URL,max:4});
  const directory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:3});
  const urls={
   readA:process.env.DATABASE_URL_ASSIGNEE_A,readB:process.env.DATABASE_URL_ASSIGNEE_B,
   readM:process.env.DATABASE_URL_ASSIGNEE_MANAGER,
+  readM2:process.env.DATABASE_URL_ASSIGNEE_MANAGER_2,
   writeA:process.env.DATABASE_URL_WRITE_A,writeB:process.env.DATABASE_URL_WRITE_B,
-  writeM:process.env.DATABASE_URL_WRITE_MANAGER
+  writeM:process.env.DATABASE_URL_WRITE_MANAGER,
+  writeM2:process.env.DATABASE_URL_WRITE_MANAGER_2
  };
  const pools=Object.fromEntries(Object.entries(urls)
   .map(([k,v])=>[k,new pg.Pool({connectionString:v,max:3})]));
  const kp=generateKeyPairSync('rsa',{modulusLength:2048});
  const jwk={...kp.publicKey.export({format:'jwk'}),kid:'custody-browser-test',alg:'RS256',use:'sig'};
  const subs={A:'browser-custody-a-'+randomUUID(),
-  B:'browser-custody-b-'+randomUUID(),M:'browser-custody-m-'+randomUUID()};
+  B:'browser-custody-b-'+randomUUID(),M:'browser-custody-m-'+randomUUID(),
+  M2:'browser-custody-m2-'+randomUUID()};
  let broadCalls=0;
  const app=createApp({connect(){broadCalls++;throw Error('broad SQL is forbidden');}},{
   secret:'browser-custody-test-secret-strong-enough-for-isolated',
   strictStaffMode:true,identityDirectoryPool:directory,
   externalIdentity:{issuer,audience,jwks:{keys:[jwk]}},
-  scopedReadPools:new Map([[ids.A,pools.readA],[ids.B,pools.readB],[ids.M,pools.readM]]),
-  scopedWritePools:new Map([[ids.A,pools.writeA],[ids.B,pools.writeB],[ids.M,pools.writeM]])
+  scopedReadPools:new Map([[ids.A,pools.readA],[ids.B,pools.readB],[ids.M,pools.readM],[ids.M2,pools.readM2]]),
+  scopedWritePools:new Map([[ids.A,pools.writeA],[ids.B,pools.writeB],[ids.M,pools.writeM],[ids.M2,pools.writeM2]])
  });
  const pages={};
  function sign(who){
@@ -52,6 +56,7 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
  }
  async function bind(who){
   const requester=who==='M'?ids.A:ids.M;
+  const evidenceReviewer=who==='M2'?ids.M:reviewer;
   const q=await owner.query(
    "INSERT INTO ms.identity_change_requests(organization_id,action,target_staff_id,"+
    "issuer,subject,requested_by,request_evidence_ref,request_reason_zh) "+
@@ -60,13 +65,13 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   await owner.query(
    "INSERT INTO ms.identity_change_decisions(request_id,reviewer_user_id,decision,"+
    "review_evidence_ref,reason_zh) VALUES($1,$2,'approved','双主管虚构证明','测试独立核实')",
-   [q.rows[0].id,reviewer]);
+   [q.rows[0].id,evidenceReviewer]);
   await owner.query(
    "UPDATE ms.identity_change_requests SET status='approved',decided_by=$2,decided_at=now() WHERE id=$1",
-   [q.rows[0].id,reviewer]);
+   [q.rows[0].id,evidenceReviewer]);
   await owner.query(
    "INSERT INTO ms.staff_identity_bindings(staff_user_id,issuer,subject,bound_by,approval_request_id) "+
-   "VALUES($1,$2,$3,$4,$5)",[ids[who],issuer,subs[who],reviewer,q.rows[0].id]);
+   "VALUES($1,$2,$3,$4,$5)",[ids[who],issuer,subs[who],evidenceReviewer,q.rows[0].id]);
  }
  async function login(who){
   const page=await browser.newPage();
@@ -82,7 +87,7 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
  }
  const name='独立交接联系人的虚构家长-'+randomUUID();
  try{
-  await bind('A');await bind('B');await bind('M');
+  await bind('A');await bind('B');await bind('M');await bind('M2');
   await open(app);
   const a=await login('A');
   await a.locator('#contact-form input[name="display_name"]').fill(name);
@@ -664,6 +669,50 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   await a.getByRole('button',{name:'刷新数据'}).click();
   await expect(a.locator('#downstream-correction-cases-list'))
     .toContainText('已批准隔离：下游纠错尚未完成');
+  // V3.2-23: an ACTUALLY wrong-student case with an order MUST keep hold;
+  // manager M records the evidence and independent manager M2 escalates.
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const firstReview=m.locator('#downstream-first-review-form');
+  await firstReview.locator('select[name="case_id"]').selectOption(downstreamCaseId);
+  await firstReview.locator('select[name="finding"]').selectOption('wrong_student_confirmed');
+  await firstReview.locator('input[name="student_evidence_ref"]')
+    .fill('虚构指定学生来源复核记录');
+  await firstReview.locator('input[name="opportunity_evidence_ref"]')
+    .fill('虚构下游商机归属对照记录');
+  await firstReview.locator('input[name="finance_evidence_ref"]')
+    .fill('虚构该商机已存在订单的财务核查清单');
+  await firstReview.locator('textarea[name="reason_zh"]')
+    .fill('证据表明这名学生关联有误，已有商机订单，不能释放销售隔离');
+  await firstReview.getByRole('button',{name:'登记第一主管独立核对'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT id FROM ms.downstream_student_reconciliation_findings WHERE case_id=$1',
+      [downstreamCaseId])).rows[0]?.id).toBeTruthy();
+  const secondSupervisor=await login('M2');
+  await secondSupervisor.locator('button[data-view="leads"]').click();
+  await secondSupervisor.getByRole('button',{name:'刷新数据'}).click();
+  const secondReview=secondSupervisor.locator('#downstream-second-review-form');
+  const found=await secondReview.locator('select[name="finding_id"] option')
+    .filter({hasText:downstreamName}).first().getAttribute('value');
+  expect(found).toBeTruthy();
+  await secondReview.locator('select[name="finding_id"]').selectOption(found);
+  await secondReview.locator('select[name="resolution"]').selectOption('escalate_manual');
+  await secondReview.locator('input[name="evidence_ref"]')
+    .fill('虚构第二主管检查了学生与订单风险');
+  await secondReview.locator('textarea[name="reason_zh"]')
+    .fill('确认有错误学生与既有订单，必须保留隔离转交跨模块人员');
+  await secondReview.getByRole('button',{name:'提交二次独立处置'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT resolution FROM ms.downstream_student_reconciliation_resolutions WHERE case_id=$1',
+      [downstreamCaseId])).rows[0]?.resolution).toBe('escalate_manual');
+  expect((await owner.query('SELECT status FROM ms.lead_student_downstream_correction_cases WHERE id=$1',
+    [downstreamCaseId])).rows[0].status).toBe('hold_active');
+  expect((await owner.query('SELECT student_id FROM ms.sales_orders WHERE id=$1',
+    [downstreamOrder])).rows[0].student_id).toBe(downstreamStudent);
+  await expect(owner.query("UPDATE ms.opportunities SET stage='qualified' WHERE id=$1",
+    [downstreamOpportunity])).rejects.toHaveProperty('code','23514');
+  await testInfo.attach('v3-2-23-two-supervisor-reconciliation',{
+    body:await secondSupervisor.screenshot({fullPage:true}),contentType:'image/png'
+  });
   await testInfo.attach('v3-2-22-downstream-hold-business-review',{
     body:await a.screenshot({fullPage:true}),contentType:'image/png'
   });
