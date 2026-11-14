@@ -290,6 +290,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
     .fill('销售侧仅补充材料索引，不代表财务部门签收或资金授权');
   await expect(staffPage.locator('#campaign-acceptance-list'))
     .toContainText('销售证据未齐，禁止进入跨部门验收');
+  await expect(staffPage.locator('#campaign-trust-failure-list'))
+    .toContainText('销售资料不完整，不能进入三方签名验收');
   await expect(staffPage.locator('#campaign-acceptance-list'))
     .toContainText('财务未签收');
   await expect(staffPage.locator('#campaign-evidence-list')).toContainText('缺少原报告人补充佐证');
@@ -301,6 +303,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-evidence-list')).toContainText('跨部门未通过');
   await expect(staffPage.locator('#campaign-acceptance-list')).toContainText('持续隔离');
   await expect(staffPage.locator('#campaign-acceptance-list')).toContainText('不可发布');
+  await expect(staffPage.locator('#campaign-trust-failure-list')).toContainText('不得执行补偿');
+  await expect(staffPage.locator('#campaign-trust-failure-list')).toContainText('持续隔离');
   await expect(staffPage.locator('#campaign-incident-history-list')).toContainText('人工升级后销售侧补充材料');
   await expect(staffPage.locator('#campaign-finance-list')).toContainText('交接资料存在异常');
   expect((await admin.query('SELECT status FROM ms.isolated_campaign_finance_incidents WHERE id=$1',
@@ -351,6 +355,34 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(staffPage.locator('#campaign-acceptance-list'))
     .toContainText('销售证据未齐');
+
+  // Spoofed signature/release success MUST fail the client-side strict projection.
+  await staffPage.route('**/api/v1/marketing-campaigns/finance-incidents/trust-failure-gates',
+    route=>route.fulfill({status:200,contentType:'application/json',
+     body:JSON.stringify({data:{items:[{
+      incident_id:escalationIncidentId,review_id:salesReviewId,
+      incident_status:'manual_escalated',sales_packet_complete:false,
+      trust_failure_code:'blocked_sales_packet_incomplete',
+      failure_disposition:'reject_preserve_originals_escalate_manually',
+      compensation_boundary:'append_only_compensation_requires_independent_authority',
+      external_signature_verified:true,signature_key_current_verified:false,
+      signer_role_separation_verified:false,signed_digest_bound_to_snapshot:false,
+      receipt_freshness_verified:false,signer_revocation_checked:false,
+      replay_nonce_registry_checked:false,finance_signed_receipt_verified:false,
+      academic_signed_attestation_verified:false,external_reconciliation_verified:false,
+      compensation_write_allowed:true,original_records_mutable:false,
+      three_party_acceptance_verified:false,hold_active:false,release_eligible:true,
+      finance_authorized:true,execution_allowed:true,activity_publish_allowed:true
+     }]}})
+    }));
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-trust-failure-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-trust-failure-status')).toContainText('数据失效');
+  await expect(staffPage.locator('#campaign-escalation-followup-panel')).toBeHidden();
+  await staffPage.unroute('**/api/v1/marketing-campaigns/finance-incidents/trust-failure-gates');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-trust-failure-list'))
+    .toContainText('销售资料不完整，不能进入三方签名验收');
 
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
     status:500,contentType:'application/json',
@@ -421,6 +453,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-escalation-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-evidence-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-acceptance-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-trust-failure-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{

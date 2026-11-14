@@ -78,6 +78,12 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const trustFailureGates=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/trust-failure-gates',
+    {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
  const acceptancePrerequisites=async staff=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
     '/api/v1/marketing-campaigns/finance-incidents/acceptance-prerequisites',
@@ -421,6 +427,34 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     await assert.rejects(pool.query('DELETE FROM ms.audit_events WHERE FALSE'),
       e=>e.code==='42501');
   }
+  // V3.2-67: external signature, revocation and replay checks are unavailable.
+  let trust=await trustFailureGates(A);
+  assert.equal(trust.status,200,JSON.stringify(trust));
+  assert.equal(trust.data.items.some(x=>x.incident_id===incident1),false);
+  assert.equal((await trustFailureGates(B)).status,401);
+  const checkTrust=(x,complete)=>{
+    assert.ok(x,'scoped manually escalated incident must remain visible');
+    assert.equal(x.incident_status,'manual_escalated');
+    assert.equal(x.sales_packet_complete,complete);
+    assert.equal(x.trust_failure_code,complete
+      ?'blocked_external_finance_trust_chain_unavailable'
+      :'blocked_sales_packet_incomplete');
+    assert.equal(x.failure_disposition,'reject_preserve_originals_escalate_manually');
+    assert.equal(x.compensation_boundary,'append_only_compensation_requires_independent_authority');
+    for(const k of ['external_signature_verified','signature_key_current_verified',
+     'signer_role_separation_verified','signed_digest_bound_to_snapshot',
+     'receipt_freshness_verified','signer_revocation_checked',
+     'replay_nonce_registry_checked','finance_signed_receipt_verified',
+     'academic_signed_attestation_verified','external_reconciliation_verified',
+     'compensation_write_allowed','original_records_mutable',
+     'three_party_acceptance_verified','release_eligible','finance_authorized',
+     'execution_allowed','activity_publish_allowed'])assert.equal(x[k],false,k);
+    assert.equal(x.hold_active,true);
+    for(const secret of ['organization_id','request_key','evidence_ref','reason_zh',
+      'after_business_json','principal_id','signature','private_key'])
+      assert.equal(Object.hasOwn(x,secret),false,'trust scope leaked '+secret);
+  };
+  checkTrust(trust.data.items.find(x=>x.incident_id===incident2),false);
   // V3.2-66: trustworthy finance and academic attestations are absent, regardless of sales readiness.
   let prerequisites=await acceptancePrerequisites(A);
   assert.equal(prerequisites.status,200,JSON.stringify(prerequisites));
@@ -522,6 +556,23 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     prerequisites=await acceptancePrerequisites(who);
     assert.equal(prerequisites.status,200,JSON.stringify(prerequisites));
     verifyNoRelease(prerequisites.data.items.find(x=>x.incident_id===incident2),true);
+    trust=await trustFailureGates(who);
+    assert.equal(trust.status,200,JSON.stringify(trust));
+    checkTrust(trust.data.items.find(x=>x.incident_id===incident2),true);
+  }
+  const unauthorizedTrustWrite=await fetch(
+    'http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/trust-failure-gates',{
+     method:'POST',headers:{Authorization:'Bearer '+sign(A),
+       'Content-Type':'application/json','Idempotency-Key':key()},
+     body:JSON.stringify({external_signature_verified:true,compensation_write_allowed:true,
+       finance_authorized:true,release_eligible:true})
+    });
+  assert.equal(unauthorizedTrustWrite.status,404,'no fake trust/compensation decision route');
+  for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+    await assert.rejects(
+     pool.query("UPDATE ms.scoped_isolated_campaign_cross_module_trust_failure_gates SET release_eligible=true WHERE FALSE"),
+     e=>['42501','55000','0A000'].includes(e.code));
   }
   const unauthorizedRelease=await fetch(
     'http://127.0.0.1:'+app.address().port+
@@ -650,6 +701,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     'revoked signed identity cannot enumerate evidence gates');
   assert.equal((await acceptancePrerequisites(A)).status,403,
     'revoked signed identity cannot claim cross-department acceptance');
+  assert.equal((await trustFailureGates(A)).status,403,
+    'revoked employee cannot read or bypass cross-party trust failure');
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));
