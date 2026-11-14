@@ -8,6 +8,7 @@ import { resolveStrictDirectoryContext } from './strict-auth-directory.mjs';
 import { migratedLegacyReads, readLegacyViaStaffPool } from './scoped-legacy-read-adapter.mjs';
 import { migratedLegacyWrites, writeLegacyViaStaffPool } from './scoped-legacy-write-adapter.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
+import {buildIsolatedChannelCatalog} from './marketing-channel-catalog.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY=/^[a-zA-Z0-9_-]{16,128}$/;
@@ -61,6 +62,7 @@ const routeDefs=[
   ['GET',/^\/api\/v1\/students$/,'listStudents'],
   ['GET',/^\/api\/v1\/contacts$/,'listContacts'],
   ['GET',/^\/api\/v1\/contact-events$/,'listEvents'],
+  ['GET',/^\/api\/v1\/marketing-channels$/,'listMarketingChannels'],
   ['GET',/^\/api\/v1\/leads$/,'listLeads'],
   ['GET',/^\/api\/v1\/opportunities$/,'listOpportunities'],
   ['GET',/^\/api\/v1\/family-groups$/,'listFamilyGroups'],
@@ -188,6 +190,16 @@ async function handle(c,ctx,op,p,body,requestUrl) {
         "ORDER BY e.occurred_at DESC,e.id LIMIT 100",
         [org,ctx.manager,actor]);
       return {items:r.rows};
+    }
+    case 'listMarketingChannels': {
+      // A first isolated M01 read route, NOT a strict employee/read-grant route.
+      // Strict mode's allowlist denies this operation rather than falling back
+      // to the old broad tenant connection.
+      const result=await c.query(
+        'SELECT id,organization_id,parent_id,name,channel_type,status '+
+        'FROM ms.marketing_channels WHERE organization_id=$1 '+
+        'ORDER BY id LIMIT 201',[org]);
+      return buildIsolatedChannelCatalog(result.rows,org);
     }
     case 'listLeads': {
       const r=await c.query(
