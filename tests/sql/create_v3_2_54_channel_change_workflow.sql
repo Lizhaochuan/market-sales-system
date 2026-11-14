@@ -40,7 +40,7 @@ CREATE FUNCTION ms.assert_isolated_channel_parent(
  p_org uuid,p_target uuid,p_parent uuid) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,ms
 AS $check_parent$
-DECLARE v_state text; v_loop boolean; v_depth integer;
+DECLARE v_state text; v_loop boolean; v_foreign boolean; v_depth integer;
 BEGIN
  IF p_parent IS NULL THEN RETURN; END IF;
  IF p_parent=p_target THEN
@@ -51,15 +51,16 @@ BEGIN
  IF v_state IS DISTINCT FROM 'active' THEN
   RAISE EXCEPTION '父渠道必须属于本机构且正常使用' USING ERRCODE='23514';
  END IF;
- WITH RECURSIVE ancestors(id,parent_id,depth) AS (
-  SELECT id,parent_id,1 FROM ms.marketing_channels WHERE id=p_parent
+ WITH RECURSIVE ancestors(id,parent_id,organization_id,depth) AS (
+  SELECT id,parent_id,organization_id,1 FROM ms.marketing_channels WHERE id=p_parent
   UNION ALL
-  SELECT c.id,c.parent_id,a.depth+1
+  SELECT c.id,c.parent_id,c.organization_id,a.depth+1
   FROM ancestors a JOIN ms.marketing_channels c ON c.id=a.parent_id
   WHERE a.depth<17
- ) SELECT coalesce(bool_or(id=p_target),false),coalesce(max(depth),0)
- INTO v_loop,v_depth FROM ancestors;
- IF v_loop OR v_depth>16 THEN
+ ) SELECT coalesce(bool_or(id=p_target),false),coalesce(max(depth),0),
+   coalesce(bool_or(organization_id IS DISTINCT FROM p_org),false)
+ INTO v_loop,v_depth,v_foreign FROM ancestors;
+ IF v_loop OR v_foreign OR v_depth>16 THEN
   RAISE EXCEPTION '渠道层级循环或过深' USING ERRCODE='23514';
  END IF;
 END $check_parent$;
@@ -193,7 +194,9 @@ BEGIN
  END IF;
  IF job.status<>'pending' THEN
   IF job.reviewed_by=actor AND job.review_key=p_key
-    AND job.review_decision=p_decision THEN
+    AND job.review_decision=p_decision
+    AND job.review_evidence_ref=trim(p_evidence)
+    AND job.review_reason=trim(p_reason) THEN
    RETURN jsonb_build_object('request_id',job.id,'status',job.status,
     'channel_id',job.result_channel_id,'action',job.action);
   END IF;
