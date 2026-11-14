@@ -4,6 +4,13 @@
 
 **项目定位：** 与现有教培 CRM 分离开发、分离数据库，通过经过授权的 API 集成。既有 CRM 的技术文档与本项目文档暂不融合。
 
+## 最新交付状态（V3.2-48 · 独立收敛审查）
+
+- **[市场销售模块交付收敛与 M01—M14 证据差距报告](docs/V3.2-48_MARKET_SALES_DELIVERY_CLOSURE.md)**：在已有隔离实现基础上逐模块区分设计、部分运行能力及真实外部权威阻断。
+- [机器可读 PR 主线及验收清单](spec/v3-2-48-delivery-closure-manifest.json)：当前主线 Draft PR #4—26、#28—36、#39—54；不选用并行 #27、#37、#38，避免误并入重复迁移 032/035。
+- 上游 **PR #54** 在自身最新 HEAD `9f438cdbb9ab85cb0a3ea2686b8d927c2e7bcb0a` 的 [隔离 CI #43586142266](https://github.com/Lizhaochuan/market-sales-system/actions/runs/43586142266) 已成功。**不代表主分支已合并、业务 M01—M14 全部完成或真实财务/CRM UAT 通过。**
+- PostgreSQL 迁移仍限于 001—038；生产对接、正式收退款/课时、补偿与真正错绑的 `hold_active` 解除继续阻断。旧 `edu-management-system` 不改动，技术文档不提前融合。
+
 ## 当前技术文档 · V3.0
 
 - [市场与销售系统技术规格说明书](docs/MARKET_SALES_TECHNICAL_SPEC_V3.0.md)：涵盖 M01—M14、数据模型、状态机、API 设计及验收。
