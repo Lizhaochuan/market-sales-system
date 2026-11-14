@@ -141,6 +141,29 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   // Manager signed in before the employee saved this draft; fetch fresh scope.
   await managerPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(managerPage.locator('#campaigns-list')).toContainText(name+'-活动');
+  // M02 versioned owner-only revision from the real Chinese form.
+  await expect(staffPage.locator('#campaign-revise-panel')).toBeVisible();
+  await staffPage.locator('#campaign-revise-choice').selectOption(campaignId);
+  await expect(staffPage.locator('#campaign-revise-version')).toContainText('版本 1');
+  await staffPage.locator('#campaign-revise-form input[name="name"]').fill(name+'-活动修订');
+  await staffPage.locator('#campaign-revise-form input[name="budget_yuan"]').fill('905.75');
+  await staffPage.getByRole('button',{name:'保存草稿修改'}).click();
+  await expect(staffPage.locator('#toast')).toContainText('版本 2');
+  await expect(staffPage.locator('#campaigns-list')).toContainText(name+'-活动修订');
+  await expect(staffPage.locator('#campaigns-list')).toContainText('v2');
+  const revisedCampaign=await admin.query(
+    'SELECT name,status,budget_cents,owner_user_id FROM ms.marketing_campaigns WHERE id=$1',
+    [campaignId]);
+  expect(revisedCampaign.rows[0].name).toBe(name+'-活动修订');
+  expect(revisedCampaign.rows[0].status).toBe('draft');
+  expect(Number(revisedCampaign.rows[0].budget_cents)).toBe(90575);
+  expect(revisedCampaign.rows[0].owner_user_id).toBe(A);
+  await managerPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(managerPage.locator('#campaigns-list')).toContainText(name+'-活动修订');
+  await expect(managerPage.locator('#campaigns-list')).toContainText('v2');
+  await expect(managerPage.locator('#campaign-revise-panel')).toBeHidden();
+  // Manager can edit only their own drafts; employee A's draft is absent.
+  await expect(managerPage.locator('#campaign-revise-choice option[value="'+campaignId+'"]')).toHaveCount(0);
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
     status:500,contentType:'application/json',
     body:JSON.stringify({code:'INTERNAL_ERROR',message:'隔离活动读取故障'})
@@ -211,6 +234,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   // Release only temporary CI fixture records in FK-safe order.
   if(campaignId){
    await admin.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign' AND target_id=$1",[campaignId]);
+   await admin.query('DELETE FROM ms.isolated_campaign_draft_revision_receipts WHERE campaign_id=$1',[campaignId]);
+   await admin.query('DELETE FROM ms.isolated_campaign_draft_versions WHERE campaign_id=$1',[campaignId]);
    await admin.query('DELETE FROM ms.isolated_campaign_draft_idempotency WHERE campaign_id=$1',[campaignId]);
    await admin.query('DELETE FROM ms.campaign_channels WHERE campaign_id=$1',[campaignId]);
    await admin.query('DELETE FROM ms.marketing_campaigns WHERE id=$1',[campaignId]);

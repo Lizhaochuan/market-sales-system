@@ -53,6 +53,14 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    body:JSON.stringify(body)});
   return {status:r.status,...await r.json()};
  };
+ const revise=async(staff,id,body,idempotency=key())=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/drafts/'+id+'/revisions',{
+    method:'POST',headers:{Authorization:'Bearer '+sign(staff),
+     'Content-Type':'application/json','Idempotency-Key':idempotency},
+    body:JSON.stringify(body)});
+  return {status:r.status,...await r.json()};
+ };
  const bind=async(staff,requester,reviewer)=>{
   const r=await owner.query(
    "INSERT INTO ms.identity_change_requests(organization_id,action,target_staff_id,"+
@@ -127,6 +135,58 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.equal(manager.data.owner_user_id,M,'cannot impersonate another campaign owner');
   assert.ok(!(await get(A)).data.items.some(x=>x.campaign_id===managerCampaign));
   assert.ok((await get(M)).data.items.some(x=>x.campaign_id===managerCampaign));
+
+  // V3.2-58: revision is own-draft only, version checked, and never activates.
+  const newBody={...payload(prefix+'-修改版'),expected_version:1,budget_cents:99500};
+  assert.equal((await get(A)).data.items.find(x=>x.campaign_id===ownCampaign).version,1);
+  const revisionKey=key();
+  const revised=await revise(A,ownCampaign,newBody,revisionKey);
+  assert.equal(revised.status,200,JSON.stringify(revised));
+  assert.equal(revised.data.version,2);
+  assert.equal(revised.data.status,'draft');
+  const same=await revise(A,ownCampaign,newBody,revisionKey);
+  assert.equal(same.status,200);
+  assert.equal(same.data.version,2);
+  assert.equal(same.data.already_exists,true);
+  assert.equal((await revise(A,ownCampaign,{...newBody,budget_cents:22},revisionKey)).status,409);
+  const stale=await revise(A,ownCampaign,{...newBody,name:prefix+'-旧版本再写'});
+  assert.equal(stale.status,409,'stale version must not overwrite approved current draft');
+  assert.equal((await revise(M,ownCampaign,{...newBody,expected_version:2})).status,403,
+   'same organization manager cannot edit employee-owned draft');
+  for(const [reason,change] of [
+   ['wrong institution',{channel_ids:[channels.foreign]}],
+   ['inactive parent',{channel_ids:[channels.inactiveChild]}],
+   ['inactive channel',{channel_ids:[channels.parent]}],
+   ['negative planned budget',{budget_cents:-1}],
+   ['invalid dates',{ends_at:'2027-02-20T00:00:00Z'}],
+   ['unsupported status',{status:'active'}]
+  ]){
+   const outcome=await revise(A,ownCampaign,{
+    ...newBody,expected_version:2,...change
+   });
+   assert.equal(outcome.status,422,reason+': '+JSON.stringify(outcome));
+  }
+  const v2=(await get(A)).data.items.find(x=>x.campaign_id===ownCampaign);
+  assert.equal(v2.version,2);
+  assert.equal(v2.name,newBody.name);
+  assert.equal(Number(v2.budget_cents),99500);
+  const saved=await owner.query(
+   'SELECT name,status,budget_cents,owner_user_id FROM ms.marketing_campaigns WHERE id=$1',
+   [ownCampaign]);
+  assert.equal(saved.rows[0].name,newBody.name);
+  assert.equal(saved.rows[0].status,'draft');
+  assert.equal(saved.rows[0].owner_user_id,A);
+  assert.equal(Number(saved.rows[0].budget_cents),99500);
+  const history=await owner.query(
+   "SELECT event_name,before_business_json,after_business_json FROM ms.audit_events "+
+   "WHERE target_type='marketing_campaign' AND target_id=$1 ORDER BY happened_at",[ownCampaign]);
+  assert.equal(history.rows.filter(x=>x.event_name==='CAMPAIGN_DRAFT_CREATED').length,1);
+  const revisionEvents=history.rows.filter(x=>x.event_name==='CAMPAIGN_DRAFT_REVISED');
+  assert.equal(revisionEvents.length,1);
+  assert.equal(revisionEvents[0].before_business_json.version,1);
+  assert.equal(revisionEvents[0].after_business_json.version,2);
+  assert.equal(Number(revisionEvents[0].before_business_json.budget_cents),125000);
+  assert.equal(Number(revisionEvents[0].after_business_json.budget_cents),99500);
   assert.equal(broadCalls,0);
   assert.equal((await owner.query(
    'SELECT count(*)::int n FROM ms.marketing_costs WHERE cost_type=$1',
@@ -155,6 +215,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   if(app?.listening)await new Promise(ok=>app.close(ok));
   for(const id of [ownCampaign,managerCampaign].filter(Boolean)){
    await owner.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign' AND target_id=$1",[id]);
+   await owner.query('DELETE FROM ms.isolated_campaign_draft_revision_receipts WHERE campaign_id=$1',[id]);
+   await owner.query('DELETE FROM ms.isolated_campaign_draft_versions WHERE campaign_id=$1',[id]);
    await owner.query('DELETE FROM ms.isolated_campaign_draft_idempotency WHERE campaign_id=$1',[id]);
    await owner.query('DELETE FROM ms.campaign_channels WHERE campaign_id=$1',[id]);
    await owner.query('DELETE FROM ms.marketing_campaigns WHERE id=$1',[id]);

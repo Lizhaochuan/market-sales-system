@@ -17,6 +17,7 @@
 - [V3.2-55 M01 中文渠道维护申请与主管审批工作台](docs/V3.2-55_M01_CHANNEL_REVIEW_WORKBENCH.md)：在原获客渠道页面接入严格签名员工申请与另一名销售主管审批表单；通过只读受限视图展示本人记录及同机构可审待办，退出与接口失败后清空数据，不开放真实渠道、生产权限或财务联调。
 - [V3.2-56 M01 渠道变更审计时间线与权限隔离](docs/V3.2-56_M01_CHANNEL_AUDIT_HISTORY.md)：复用原 audit_events 的只读最小投影，只允许本人申请、本人已审核及当期可审事件；不暴露原审计 JSON/证据，读取异常禁用渠道写入 UI，CI 验证无原始表权限。
 - [V3.2-57 M02 市场活动草稿与计划预算隔离](docs/V3.2-57_M02_ISOLATED_CAMPAIGN_DRAFTS.md)：隔离签名员工可登记本人负责的虚构活动草稿、计划时间与预算，关联1—20个本机构有效渠道；仅通过受限 SQL 函数创建 draft，不批准营销支出、不生成渠道/学生归因，不开放正式活动发布。
+- [V3.2-58 M02 市场活动草稿版本化修改](docs/V3.2-58_M02_VERSIONED_CAMPAIGN_REVISIONS.md)：仅原负责人通过签名员工函数修改草稿，按当前版本拒绝旧编辑，以独立审计事件保留修改前后快照；不能发布活动、审批预算或产生真实成本。
 - 上游 **PR #54** 在自身最新 HEAD `9f438cdbb9ab85cb0a3ea2686b8d927c2e7bcb0a` 的 [隔离 CI #43586142266](https://github.com/Lizhaochuan/market-sales-system/actions/runs/43586142266) 已成功。**不代表主分支已合并、业务 M01—M14 全部完成或真实财务/CRM UAT 通过。**
 - PostgreSQL 迁移仍限于 001—038；生产对接、正式收退款/课时、补偿与真正错绑的 `hold_active` 解除继续阻断。旧 `edu-management-system` 不改动，技术文档不提前融合。
 

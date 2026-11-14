@@ -231,6 +231,34 @@ function renderChannelMaintenance(){
     !active.length&&$('channel-request-form').elements.action.value!=='create';
   channelFormFields();
 }
+function setCampaignRevisionChoice(){
+  const form=$('campaign-revise-form');
+  const own=state.campaignDrafts.filter(x=>x.owner_user_id===state.user?.staff_id);
+  const selector=$('campaign-revise-choice');
+  setSelect(selector,own,'campaign_id',x=>x.name+' · 版本 '+x.version);
+  const active=state.channels.filter(x=>x.effective_status==='active');
+  setSelect($('campaign-revise-channel-choice'),active,'channel_id',x=>x.name);
+  const selected=own.find(x=>x.campaign_id===selector.value);
+  $('campaign-revise-panel').hidden=!selected||state.campaignLoadError||state.channelLoadError;
+  form.querySelector('button[type="submit"]').disabled=!selected||!active.length;
+  if(!selected){
+    $('campaign-revise-version').textContent='暂无本人可修改的活动草稿';
+    return;
+  }
+  form.elements.name.value=selected.name;
+  form.elements.budget_yuan.value=(Number(selected.budget_cents)/100).toFixed(2);
+  for(const key of ['starts_at','ends_at']){
+    const d=selected[key]&&new Date(selected[key]);
+    if(d&&!Number.isNaN(d.getTime())){
+      const local=new Date(d.getTime()-d.getTimezoneOffset()*60000);
+      form.elements[key].value=local.toISOString().slice(0,16);
+    }else form.elements[key].value='';
+  }
+  const selectedChannels=new Set(selected.channel_ids);
+  for(const option of $('campaign-revise-channel-choice').options)
+    option.selected=selectedChannels.has(option.value);
+  $('campaign-revise-version').textContent='当前草稿版本 '+selected.version+'；保存时需与数据库版本一致';
+}
 function render(){
   $('stat-students').textContent=state.students.length;
   $('stat-contacts').textContent=state.contacts.length;
@@ -264,6 +292,9 @@ function render(){
   if(!state.strict||state.campaignLoadError||state.channelLoadError){
     $('campaigns-list').replaceChildren();
     $('campaign-channel-choice').replaceChildren();
+    $('campaign-revise-choice').replaceChildren();
+    $('campaign-revise-channel-choice').replaceChildren();
+    $('campaign-revise-panel').hidden=true;
     $('campaign-create-panel').hidden=true;
   }else{
     $('campaign-create-panel').hidden=false;
@@ -273,10 +304,11 @@ function render(){
        ' · 关联渠道：'+x.channel_ids.length+' 个'+
        ' · 计划开始：'+formatDate(x.starts_at)+
        ' · 计划结束：'+formatDate(x.ends_at),
-      '草稿 · 计划预算 '+yuan(x.budget_cents)+'（未审批）','活'));
+      '草稿 v'+x.version+' · 计划预算 '+yuan(x.budget_cents)+'（未审批）','活'));
     const active=state.channels.filter(x=>x.effective_status==='active');
     setSelect($('campaign-channel-choice'),active,'channel_id',x=>x.name);
     $('campaign-draft-form').querySelector('button[type="submit"]').disabled=!active.length;
+    setCampaignRevisionChoice();
   }
   paint('students-list',state.students,x=>record(
     x.display_name,'年级：'+(x.grade_label||'未填写')+' · 负责人：'+(x.owner_display_name||'待确认'),'独立档案','学'));
@@ -479,7 +511,8 @@ async function refresh(){
       const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
         x&&typeof x.campaign_id==='string'&&
         typeof x.name==='string'&&x.name.length<=100&&
-        x.status==='draft'&&typeof x.owner_user_id==='string'&&
+        x.status==='draft'&&Number.isSafeInteger(x.version)&&x.version>=1&&
+        typeof x.owner_user_id==='string'&&
         Array.isArray(x.channel_ids)&&x.channel_ids.length>=1&&
         x.channel_ids.length<=20&&
         x.channel_ids.every(v=>typeof v==='string')&&
@@ -545,6 +578,10 @@ function logout(notice=true){
   $('campaign-workbench').hidden=true;
   $('campaigns-list').replaceChildren();
   $('campaign-channel-choice').replaceChildren();
+  $('campaign-revise-choice').replaceChildren();
+  $('campaign-revise-channel-choice').replaceChildren();
+  $('campaign-revise-panel').hidden=true;
+  $('campaign-revise-version').textContent='未登录，草稿版本已清空';
   $('campaigns-total').textContent='0 条';
   $('campaigns-status').textContent='未登录，市场活动草稿已清空。';
   state.channelRequests=[];state.channelRequestLoadError=false;
@@ -655,6 +692,33 @@ $('channel-target-choice').addEventListener('change',()=>{
   setSelect($('channel-parent-choice'),state.channels.filter(c=>
     c.effective_status==='active'&&c.channel_id!==current),
     'channel_id',c=>c.name,true);
+});
+$('campaign-revise-choice').addEventListener('change',setCampaignRevisionChoice);
+register('campaign-revise-form',async d=>{
+  if(!state.strict||state.campaignLoadError||state.channelLoadError||
+    state.capabilities.revise_own_campaign_draft!==true)
+    throw Error('当前活动资料或修改权限未经核实');
+  const own=state.campaignDrafts.find(x=>
+    x.campaign_id===d.campaign_id&&x.owner_user_id===state.user?.staff_id&&
+    x.status==='draft'&&Number.isSafeInteger(x.version));
+  if(!own)throw Error('只有草稿原负责人可以修改，需刷新重新核实');
+  const ids=[...$('campaign-revise-channel-choice').selectedOptions].map(x=>x.value);
+  if(ids.length<1||ids.length>20||new Set(ids).size!==ids.length||
+    ids.some(id=>!state.channels.some(c=>
+      c.channel_id===id&&c.effective_status==='active')))
+    throw Error('修改必须使用本机构有效且不重复的渠道');
+  const budget=cents(d.budget_yuan);
+  if(budget>100000000000)throw Error('计划预算超出范围');
+  const starts_at=d.starts_at?localIso(d.starts_at):null;
+  const ends_at=d.ends_at?localIso(d.ends_at):null;
+  if(starts_at&&ends_at&&new Date(ends_at)<new Date(starts_at))
+    throw Error('活动结束时间不能早于开始时间');
+  const response=await api('/api/v1/marketing-campaigns/drafts/'+
+    encodeURIComponent(own.campaign_id)+'/revisions',{
+    method:'POST',body:{expected_version:own.version,name:d.name.trim(),
+      starts_at,ends_at,budget_cents:budget,channel_ids:ids}
+  });
+  return '草稿修改已保存至版本 '+response.version+'；计划预算仍未审批';
 });
 register('campaign-draft-form',async d=>{
   if(!state.strict||state.campaignLoadError||state.channelLoadError||
