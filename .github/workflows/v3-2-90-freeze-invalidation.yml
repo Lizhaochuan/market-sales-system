@@ -1,0 +1,22 @@
+name: V3.2-90 isolated frozen report invalidation classification
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-freeze-invalidation-plan.mjs'
+      - 'tests/security/v3-2-90-m02-freeze-invalidation-plan.test.mjs'
+      - '.github/workflows/v3-2-90-freeze-invalidation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-invalidation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check read-only invalidation classifier
+        run: node --check src/cross-module-freeze-invalidation-plan.mjs
+      - name: Run invalidation and original freeze tests
+        run: node --test tests/security/v3-2-90-m02-freeze-invalidation-plan.test.mjs tests/security/v3-2-89-m02-unified-report-freeze.test.mjs
