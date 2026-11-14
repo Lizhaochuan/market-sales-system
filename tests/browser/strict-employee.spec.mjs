@@ -87,7 +87,8 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
     await page.locator('nav button[data-view="channels"]').click();
     await expect(page.locator('#channels-list')).toContainText(channelName);
     await expect(page.locator('#channels-status')).toContainText('仅供虚构数据演示');
-    await expect(page.locator('[data-panel="channels"] button')).toHaveCount(0);
+    await expect(page.locator('#channel-request-form button[type="submit"]')).toBeVisible();
+    await expect(page.locator('#channel-review-card')).toBeHidden();
     await page.locator('nav button[data-view="overview"]').click();
     // Consultation is migrated, but lead creation itself must remain closed.
     await page.locator('nav button[data-view="leads"]').click();
