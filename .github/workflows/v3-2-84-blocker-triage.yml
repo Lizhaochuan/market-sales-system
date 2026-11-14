@@ -1,0 +1,22 @@
+name: V3.2-84 isolated blocker incident triage
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-blocker-triage.mjs'
+      - 'tests/security/v3-2-84-m02-blocker-triage.test.mjs'
+      - '.github/workflows/v3-2-84-blocker-triage.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-triage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check isolated triage source
+        run: node --check src/cross-module-blocker-triage.mjs
+      - name: Run incident triage and blocker audit regressions
+        run: node --test tests/security/v3-2-84-m02-blocker-triage.test.mjs tests/security/v3-2-83-m02-unified-blocker-audit.test.mjs
