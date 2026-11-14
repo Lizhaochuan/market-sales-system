@@ -39,7 +39,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   name,starts_at:'2027-03-01T00:00:00.000Z',ends_at:'2027-03-30T00:00:00.000Z',
   budget_cents:125000,channel_ids:[channels.ok]
  });
- let app,broadCalls=0,ownCampaign,managerCampaign;
+ let app,broadCalls=0,ownCampaign,managerCampaign,reviewId;
  const get=async(staff)=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
    '/api/v1/marketing-campaigns/drafts',{headers:{Authorization:'Bearer '+sign(staff)}});
@@ -51,6 +51,30 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    method:'POST',headers:{Authorization:'Bearer '+sign(staff),
     'Content-Type':'application/json','Idempotency-Key':idempotency},
    body:JSON.stringify(body)});
+  return {status:r.status,...await r.json()};
+ };
+ const reviews=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/sales-reviews',
+    {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
+ const submitSales=async(staff,id,version,requestKey=key())=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/drafts/'+id+'/sales-review-requests',{
+    method:'POST',headers:{Authorization:'Bearer '+sign(staff),
+      'Content-Type':'application/json','Idempotency-Key':requestKey},
+    body:JSON.stringify({expected_version:version,evidence_ref:'模拟活动方案索引',
+      reason_zh:'等待独立销售主管核实活动计划'})});
+  return {status:r.status,...await r.json()};
+ };
+ const decideSales=async(staff,id,decision='approved',reviewKey=key())=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/sales-reviews/'+id+'/decision',{
+    method:'POST',headers:{Authorization:'Bearer '+sign(staff),
+      'Content-Type':'application/json','Idempotency-Key':reviewKey},
+    body:JSON.stringify({decision,evidence_ref:'独立销售主管核验材料',
+      reason_zh:'业务审核与财务拨付许可独立隔离'})});
   return {status:r.status,...await r.json()};
  };
  const revise=async(staff,id,body,idempotency=key())=>{
@@ -187,6 +211,58 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.equal(revisionEvents[0].after_business_json.version,2);
   assert.equal(Number(revisionEvents[0].before_business_json.budget_cents),125000);
   assert.equal(Number(revisionEvents[0].after_business_json.budget_cents),99500);
+
+  // V3.2-59: sales and finance are different authority boundaries.
+  const salesKey=key();
+  const pending=await submitSales(A,ownCampaign,2,salesKey);
+  assert.equal(pending.status,200,JSON.stringify(pending));
+  assert.equal(pending.data.status,'pending_sales');
+  reviewId=pending.data.review_id;
+  assert.equal((await submitSales(A,ownCampaign,2,salesKey)).data.review_id,reviewId);
+  assert.equal((await submitSales(A,ownCampaign,2)).status,409,'one live review per campaign');
+  assert.equal((await submitSales(A,ownCampaign,1)).status,409,'stale draft version denied');
+  assert.equal((await decideSales(A,reviewId)).status,403,'requester cannot approve own budget proposal');
+  assert.equal((await revise(A,ownCampaign,{...newBody,expected_version:2,
+    name:prefix+'-attempt-during-review'})).status,409,
+    'pending sales review freezes the exact draft version');
+  const ownQueue=await reviews(A);
+  assert.equal(ownQueue.status,200);
+  assert.equal(ownQueue.data.items.find(x=>x.review_id===reviewId).can_sales_review,false);
+  const managerQueue=await reviews(M);
+  assert.equal(managerQueue.status,200);
+  assert.equal(managerQueue.data.items.find(x=>x.review_id===reviewId).can_sales_review,true);
+  const decisionKey=key();
+  const approved=await decideSales(M,reviewId,'approved',decisionKey);
+  assert.equal(approved.status,200,JSON.stringify(approved));
+  assert.equal(approved.data.status,'sales_approved_pending_finance');
+  assert.equal(approved.data.finance_authorized,false);
+  assert.equal((await decideSales(M,reviewId,'approved',decisionKey)).data.status,
+   'sales_approved_pending_finance');
+  assert.equal((await decideSales(M,reviewId,'approved')).status,409);
+  assert.equal((await submitSales(A,ownCampaign,2)).status,409);
+  assert.equal((await revise(A,ownCampaign,{...newBody,expected_version:2,
+   name:prefix+'-attempt-after-sales'})).status,409);
+  const finalized=(await owner.query(
+   'SELECT name,status,budget_cents,owner_user_id FROM ms.marketing_campaigns WHERE id=$1',
+   [ownCampaign])).rows[0];
+  assert.equal(finalized.status,'draft','sales approval never publishes a campaign');
+  assert.equal(Number(finalized.budget_cents),99500,'sales approval never alters planned budget');
+  assert.equal(finalized.owner_user_id,A);
+  const salesEvents=await owner.query(
+   "SELECT event_name FROM ms.audit_events WHERE target_type='marketing_campaign_sales_review' AND target_id=$1",
+   [reviewId]);
+  assert.deepEqual(salesEvents.rows.map(x=>x.event_name).sort(),
+   ['CAMPAIGN_SALES_APPROVED_FINANCE_HOLD','CAMPAIGN_SALES_REVIEW_REQUESTED']);
+  const forbiddenMoney=await owner.query(
+   "SELECT count(*)::int AS n FROM ms.marketing_costs WHERE evidence_ref=$1",
+   ['模拟活动方案索引']);
+  assert.equal(forbiddenMoney.rows[0].n,0,'no marketing cost authorization or ledger entry');
+  for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+   await assert.rejects(pool.query('SELECT * FROM ms.isolated_campaign_sales_reviews'),
+    e=>e.code==='42501');
+   await assert.rejects(pool.query("UPDATE ms.marketing_campaigns SET status='active' WHERE FALSE"),
+    e=>e.code==='42501');
+  }
   assert.equal(broadCalls,0);
   assert.equal((await owner.query(
    'SELECT count(*)::int n FROM ms.marketing_costs WHERE cost_type=$1',
@@ -213,6 +289,10 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));
+  if(reviewId){
+   await owner.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign_sales_review' AND target_id=$1",[reviewId]);
+   await owner.query('DELETE FROM ms.isolated_campaign_sales_reviews WHERE id=$1',[reviewId]);
+  }
   for(const id of [ownCampaign,managerCampaign].filter(Boolean)){
    await owner.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign' AND target_id=$1",[id]);
    await owner.query('DELETE FROM ms.isolated_campaign_draft_revision_receipts WHERE campaign_id=$1',[id]);
