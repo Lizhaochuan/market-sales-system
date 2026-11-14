@@ -1,0 +1,182 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "M01 隔离渠道目录 GET 接口",
+    "version": "v3.2-51-isolated",
+    "description": "仅本机虚构账号测试；严格员工模式仍拒绝，正式 CRM/财务及生产接口尚未授权。"
+  },
+  "x-contract-status": "isolated-implemented",
+  "x-strict-employee-mode-enabled": false,
+  "x-production-integration-allowed": false,
+  "x-write-operations-allowed": false,
+  "servers": [
+    {
+      "url": "http://127.0.0.1",
+      "description": "隔离演示服务（实际端口由测试分配）"
+    }
+  ],
+  "paths": {
+    "/api/v1/marketing-channels": {
+      "get": {
+        "summary": "读取当前虚构机构的渠道树",
+        "description": "只能访问经过验证的员工所在机构的营销渠道。父渠道跨机构、循环、过深或数据不完整则拒绝。返回渠道目录但不包含归因金额、学生或家庭信息。",
+        "operationId": "listIsolatedMarketingChannels",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前机构只读渠道目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "OK"
+                      ]
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "schema_version",
+                        "count",
+                        "root_count",
+                        "effective_active_count",
+                        "channels",
+                        "production_integration_allowed",
+                        "status"
+                      ],
+                      "properties": {
+                        "schema_version": {
+                          "type": "string",
+                          "enum": [
+                            "m01-isolated-channel-catalog-v1"
+                          ]
+                        },
+                        "count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 200
+                        },
+                        "root_count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 200
+                        },
+                        "effective_active_count": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 200
+                        },
+                        "channels": {
+                          "type": "array",
+                          "maxItems": 200,
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "channel_id",
+                              "parent_channel_id",
+                              "name",
+                              "channel_type",
+                              "status",
+                              "effective_status",
+                              "depth"
+                            ],
+                            "properties": {
+                              "channel_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "parent_channel_id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "nullable": true
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "channel_type": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "active",
+                                  "inactive"
+                                ]
+                              },
+                              "effective_status": {
+                                "type": "string",
+                                "enum": [
+                                  "active",
+                                  "inactive_inherited"
+                                ]
+                              },
+                              "depth": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 16
+                              }
+                            }
+                          }
+                        },
+                        "production_integration_allowed": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "isolated_readonly_not_production"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "无有效虚构签名员工令牌"
+          },
+          "403": {
+            "description": "错机构身份或严格员工模式尚未迁移，拒绝访问"
+          },
+          "500": {
+            "description": "渠道层级未通过一致性验证；通用错误不泄漏内部数据"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}
