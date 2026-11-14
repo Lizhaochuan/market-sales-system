@@ -1,6 +1,6 @@
 // V3.2-92: CI-only frozen-report succession ledger, not a production handoff.
 import {createHash} from 'node:crypto';
-const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA=/^[0-9a-f]{64}$/;
 const NONCE=/^[a-z0-9][a-z0-9._:-]{15,127}$/;
 const plain=x=>x!==null&&typeof x==='object'&&!Array.isArray(x)&&
