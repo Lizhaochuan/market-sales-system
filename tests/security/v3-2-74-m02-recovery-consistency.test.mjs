@@ -67,7 +67,7 @@ test('V3.2-74 absence, exception and unknown client approval fail closed',async(
  const bad=await f.gate.check({organization_id:org,incident_id:incident,
   afterFirstRead:async()=>{},finance_authorized:true});noRelease(bad);
  // Unknown values never become authorization even for a stable fixture check.
- assert.equal(bad.handoff_allowed,false);
+ assert.equal(bad.reason_code,'INVALID_RECOVERY_CHECK_INPUT');
  const thrown=await f.run(async()=>{throw Error('interrupted')});noRelease(thrown);
  assert.equal(thrown.reason_code,'RECOVERY_CHECK_INTERRUPTED');
  const missing=createIsolatedThreePartyRecoveryCheck({getFixtureSnapshot:async()=>{throw Error('offline')}});
