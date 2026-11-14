@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,41 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='requestLeadStudentAssociation'){
+    only(body,['lead_id','student_id','evidence_ref','reason_zh']);
+    return {params:[uuid(body.lead_id,'本人正式线索'),
+      uuid(body.student_id,'指定学生'),
+      approvalText(body.evidence_ref,'学生待核实关联依据',200),
+      approvalText(body.reason_zh,'学生关联申请理由',400)]};
+  }
+  if(op==='decideLeadStudentAssociation'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['approved_pending','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择登记待核实或驳回学生关联');
+    return {params:[uuid(routeParams?.[0],'学生关联申请'),body.decision,
+      approvalText(body.evidence_ref,'独立学生审核依据',200),
+      approvalText(body.reason_zh,'审核理由',400)]};
+  }
+  if(op==='requestLeadAdjustment'){
+    only(body,['lead_id','action','proposed_note','evidence_ref','reason_zh']);
+    if(!['invalidate','correct_note'].includes(body.action))
+      fail(422,'VALIDATION_ERROR','请选择线索作废或更正说明');
+    if(body.action==='invalidate'&&body.proposed_note!==undefined&&body.proposed_note!==null&&body.proposed_note!=='')
+      fail(422,'VALIDATION_ERROR','作废不能填写新的业务说明');
+    const note=body.action==='correct_note'?
+      approvalText(body.proposed_note,'更正业务说明',200):null;
+    return {params:[uuid(body.lead_id,'本人正式线索'),body.action,note,
+      approvalText(body.evidence_ref,'更正或作废依据',200),
+      approvalText(body.reason_zh,'申请理由',400)]};
+  }
+  if(op==='decideLeadAdjustment'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['approved','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择批准或驳回调整');
+    return {params:[uuid(routeParams?.[0],'线索调整申请'),body.decision,
+      approvalText(body.evidence_ref,'独立审核材料',200),
+      approvalText(body.reason_zh,'审核理由',400)]};
+  }
   if(op==='requestFinalLeadConversion'){
     only(body,['readiness_id','evidence_ref','reason_zh']);
     return {params:[uuid(body.readiness_id,'已通过的转换预审'),
@@ -216,6 +251,22 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'requestLeadStudentAssociation':
+        result=await client.query(
+          'SELECT ms.request_lead_student_association($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideLeadStudentAssociation':
+        result=await client.query(
+          'SELECT ms.decide_lead_student_association($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'requestLeadAdjustment':
+        result=await client.query(
+          'SELECT ms.request_lead_adjustment($1,$2,$3,$4,$5,$6) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideLeadAdjustment':
+        result=await client.query(
+          'SELECT ms.decide_lead_adjustment($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'requestFinalLeadConversion':
         result=await client.query(
           'SELECT ms.request_final_lead_conversion($1,$2,$3,$4) AS result',

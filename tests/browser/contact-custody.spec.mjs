@@ -16,6 +16,7 @@ const open=s=>new Promise(ok=>s.listen(0,'127.0.0.1',ok));
 const close=s=>new Promise(ok=>s.close(ok));
 
 test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管理权恢复 A',async({browser},testInfo)=>{
+ test.setTimeout(120000); // V3.2-20 extends the real full-browser flow; assertions unchanged.
  process.env.MS_STAGE='isolated-test';
  const owner=new pg.Pool({connectionString:process.env.DATABASE_URL,max:4});
  const directory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:3});
@@ -397,6 +398,115 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
     [finalLeads.rows[0].id])).rows[0].n).toBe(0);
   await expect(a.locator('#final-lead-conversions-list'))
     .toContainText('已创建一条正式销售线索');
+  // V3.2-20: one named student only; guardian/family/sibling never inferred.
+  const linkedStudentName='单学生虚构关联-'+randomUUID();
+  const unlinkedSiblingName='未自动关联的另一学生-'+randomUUID();
+  await a.locator('button[data-view="students"]').click();
+  await a.locator('#student-form input[name="display_name"]').fill(linkedStudentName);
+  await a.getByRole('button',{name:'保存学生档案'}).click();
+  await expect(a.locator('#students-list')).toContainText(linkedStudentName);
+  await a.locator('#student-form input[name="display_name"]').fill(unlinkedSiblingName);
+  await a.getByRole('button',{name:'保存学生档案'}).click();
+  await expect(a.locator('#students-list')).toContainText(unlinkedSiblingName);
+  const namedStudentId=(await owner.query('SELECT id FROM ms.students WHERE display_name=$1 AND organization_id=$2',
+    [linkedStudentName,org])).rows[0].id;
+  const siblingStudentId=(await owner.query('SELECT id FROM ms.students WHERE display_name=$1 AND organization_id=$2',
+    [unlinkedSiblingName,org])).rows[0].id;
+  await a.locator('button[data-view="leads"]').click();
+  await expect(a.locator('#lead-governance-workbench')).toBeVisible();
+  const linkForm=a.locator('#lead-student-link-request-form');
+  await linkForm.locator('select[name="lead_id"]').selectOption(finalLeads.rows[0].id);
+  await linkForm.locator('select[name="student_id"]').selectOption(namedStudentId);
+  await linkForm.locator('textarea[name="reason_zh"]')
+    .fill('该次线索可能涉及单名学生，仍需单独核实');
+  await linkForm.locator('input[name="evidence_ref"]')
+    .fill('虚构指定学生来源核验材料');
+  await linkForm.getByRole('button',{name:'提交单学生待核实关联'}).click();
+  await expect(a.locator('#lead-student-associations-list'))
+    .toContainText('待主管审核');
+  await m.locator('button[data-view="leads"]').click();
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const decideLink=m.locator('#lead-student-link-decision-form');
+  const linkRequestId=await decideLink.locator('select[name="request_id"] option')
+    .filter({hasText:linkedStudentName}).first().getAttribute('value');
+  expect(linkRequestId).toBeTruthy();
+  await decideLink.locator('select[name="request_id"]').selectOption(linkRequestId);
+  await decideLink.locator('textarea[name="reason_zh"]')
+    .fill('只同意登记该单名学生的待核实关系，没有确认监护身份');
+  await decideLink.locator('input[name="evidence_ref"]')
+    .fill('虚构独立单学生待核实检查');
+  await decideLink.getByRole('button',{name:'保存单学生关联审核'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.lead_student_association_requests WHERE id=$1',
+      [linkRequestId])
+  ).rows[0]?.status).toBe('approved_pending');
+  const onlyOne=(await owner.query('SELECT student_id,confirmation_state FROM ms.lead_students WHERE lead_id=$1',
+    [finalLeads.rows[0].id])).rows;
+  expect(onlyOne).toHaveLength(1);
+  expect(onlyOne[0].student_id).toBe(namedStudentId);
+  expect(onlyOne[0].confirmation_state).toBe('pending_review');
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
+    [finalLeads.rows[0].id,siblingStudentId])).rows[0].n).toBe(0);
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  const correction=a.locator('#lead-adjustment-request-form');
+  await correction.locator('select[name="lead_id"]').selectOption(finalLeads.rows[0].id);
+  await correction.locator('select[name="action"]').selectOption('correct_note');
+  await correction.locator('textarea[name="proposed_note"]')
+    .fill('本次补充说明只针对该名学生的学习咨询');
+  await correction.locator('textarea[name="reason_zh"]')
+    .fill('历史业务说明需要补充，但原咨询来源不变');
+  await correction.locator('input[name="evidence_ref"]')
+    .fill('虚构书面补充依据');
+  await correction.getByRole('button',{name:'提交线索调整审核'}).click();
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const decideAdjustment=m.locator('#lead-adjustment-decision-form');
+  let adjustId=await decideAdjustment.locator('select[name="request_id"] option')
+    .filter({hasText:'申请更正业务说明'}).first().getAttribute('value');
+  expect(adjustId).toBeTruthy();
+  await decideAdjustment.locator('select[name="request_id"]').selectOption(adjustId);
+  await decideAdjustment.locator('textarea[name="reason_zh"]')
+    .fill('独立主管确认仅追加业务说明，不更改来源');
+  await decideAdjustment.locator('input[name="evidence_ref"]')
+    .fill('虚构更正复核证明');
+  await decideAdjustment.getByRole('button',{name:'保存线索调整独立审批'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.lead_adjustment_requests WHERE id=$1',[adjustId])
+  ).rows[0]?.status).toBe('approved');
+  expect((await owner.query(
+    'SELECT source_event_id FROM ms.leads WHERE id=$1',[finalLeads.rows[0].id]
+  )).rows[0].source_event_id).toBe(newEventId);
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  await expect(a.locator('#lead-correction-notes-list'))
+    .toContainText('本次补充说明只针对该名学生的学习咨询');
+  await correction.locator('select[name="lead_id"]').selectOption(finalLeads.rows[0].id);
+  await correction.locator('select[name="action"]').selectOption('invalidate');
+  await correction.locator('textarea[name="proposed_note"]').fill('');
+  await correction.locator('textarea[name="reason_zh"]')
+    .fill('测试线索当前无商机，申请作废并保留审计');
+  await correction.locator('input[name="evidence_ref"]')
+    .fill('虚构不再有效的线索业务记录');
+  await correction.getByRole('button',{name:'提交线索调整审核'}).click();
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  adjustId=await decideAdjustment.locator('select[name="request_id"] option')
+    .filter({hasText:'申请作废线索'}).first().getAttribute('value');
+  expect(adjustId).toBeTruthy();
+  await decideAdjustment.locator('select[name="request_id"]').selectOption(adjustId);
+  await decideAdjustment.locator('textarea[name="reason_zh"]')
+    .fill('独立主管查验没有下游商机，允许作废但保留历史');
+  await decideAdjustment.locator('input[name="evidence_ref"]')
+    .fill('虚构无下游商机的核查记录');
+  await decideAdjustment.getByRole('button',{name:'保存线索调整独立审批'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT lead_state FROM ms.leads WHERE id=$1',[finalLeads.rows[0].id])
+  ).rows[0]?.lead_state).toBe('invalid');
+  expect((await owner.query(
+    'SELECT COUNT(*)::int AS n FROM ms.lead_students WHERE lead_id=$1',[finalLeads.rows[0].id]
+  )).rows[0].n).toBe(1);
+  expect((await owner.query('SELECT count(*)::int AS n FROM ms.lead_conversion_executions WHERE lead_id=$1',
+    [finalLeads.rows[0].id])).rows[0].n).toBe(1);
+  await testInfo.attach('v3-2-20-student-lead-governance',{
+    body:await a.screenshot({fullPage:true}),contentType:'image/png'
+  });
   await testInfo.attach('v3-2-19-final-approved-lead-conversion',{
     body:await a.screenshot({fullPage:true}),contentType:'image/png'
   });

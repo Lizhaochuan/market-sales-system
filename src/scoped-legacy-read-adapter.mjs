@@ -11,10 +11,16 @@ export const migratedLegacyReads=new Set([
   'listContactCustodyActive','listContactCustodyReviews','listRelatedStudents',
   'listCandidateConsultations','listLeadCandidates',
   'listConversionReadiness','listAttributionDisputes','listAttributionDisputable',
-  'listFinalLeadConversions'
+  'listFinalLeadConversions','listLeadStudentAssociations','listLeadAdjustments','listLeadCorrectionNotes'
 ]);
 
 const listQueries={
+  listLeadStudentAssociations:
+    'SELECT request_id,lead_id,student_id,student_name,status,created_at,requested_by FROM ms.scoped_lead_student_associations ORDER BY created_at DESC,request_id LIMIT 100',
+  listLeadAdjustments:
+    'SELECT request_id,lead_id,action,action_name,status,created_at,requested_by FROM ms.scoped_lead_adjustment_requests ORDER BY created_at DESC,request_id LIMIT 100',
+  listLeadCorrectionNotes:
+    'SELECT lead_id,corrected_note,applied_at FROM ms.scoped_lead_correction_notes ORDER BY applied_at DESC,lead_id LIMIT 100',
   listFinalLeadConversions:
     'SELECT authorization_id,readiness_id,candidate_id,status,created_at,contact_name,lead_id,executed_at,requested_by FROM ms.scoped_final_lead_conversion_requests ORDER BY created_at DESC,authorization_id LIMIT 100',
   listConversionReadiness:

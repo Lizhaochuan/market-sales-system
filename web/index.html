@@ -367,6 +367,74 @@
           </article>
         </div>
       </div>
+      <div id="lead-governance-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>正式线索：单名学生待核实关联、作废与更正</h2>
+          <p>学生是主要管理单位。同一位家长可能有多个孩子，但绝不据此自动关联；主管批准的关联仍是“待核实”，没有确认监护关系。</p>
+        </div>
+        <div class="two-col">
+          <article class="panel"><h3>申请关联指定的一名学生</h3>
+            <form id="lead-student-link-request-form" class="field-stack">
+              <label>本人已执行的正式线索
+                <select name="lead_id" data-options="ownedExecutedLeads" required></select></label>
+              <label>本人负责的指定学生
+                <select name="student_id" data-options="ownedStudentChoices" required></select></label>
+              <label>为什么需要登记待核实关联
+                <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构学生关联依据 <input name="evidence_ref" maxlength="200" required></label>
+              <p class="form-hint">申请不会自动创建或核实兄弟姐妹、家庭成员，也不会确认法定监护人。</p>
+              <button class="primary" type="submit">提交单学生待核实关联</button>
+            </form>
+          </article>
+          <article class="panel" id="lead-student-link-decision-card" hidden>
+            <h3>主管独立审核单学生关联</h3>
+            <form id="lead-student-link-decision-form" class="field-stack">
+              <label>待审学生关联 <select name="request_id" data-options="pendingLinkRequests" required></select></label>
+              <label>结论 <select name="decision">
+                <option value="approved_pending">允许登记待核实（并非已确认）</option>
+                <option value="rejected">驳回该学生关联</option></select></label>
+              <label>审核理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构独立证据 <input name="evidence_ref" maxlength="200" required></label>
+              <button class="primary" type="submit">保存单学生关联审核</button>
+            </form>
+          </article>
+        </div>
+        <div class="two-col space-top">
+          <article class="panel"><h3>申请作废线索或更正业务说明</h3>
+            <form id="lead-adjustment-request-form" class="field-stack">
+              <label>本人已执行的正式线索
+                <select name="lead_id" data-options="ownedExecutedLeads" required></select></label>
+              <label>选择调整 <select name="action">
+                <option value="correct_note">补充更正业务说明（历史保留）</option>
+                <option value="invalidate">申请作废线索（需检查下游商机）</option></select></label>
+              <label>更正后的业务说明（仅选择说明更正时必填）
+                <textarea name="proposed_note" maxlength="200" rows="2" placeholder="请勿写入电话、证件或真实客户信息"></textarea></label>
+              <label>申请理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构更正依据 <input name="evidence_ref" maxlength="200" required></label>
+              <p class="form-hint">更正只追加说明，不修改来源、负责人、原始咨询或资金。线索已有商机时，不能通过作废申请。</p>
+              <button class="secondary" type="submit">提交线索调整审核</button>
+            </form>
+          </article>
+          <article class="panel" id="lead-adjustment-decision-card" hidden>
+            <h3>主管独立审核线索调整</h3>
+            <form id="lead-adjustment-decision-form" class="field-stack">
+              <label>待审调整 <select name="request_id" data-options="pendingAdjustmentRequests" required></select></label>
+              <label>结论 <select name="decision">
+                <option value="approved">批准本次调整</option>
+                <option value="rejected">驳回本次调整</option></select></label>
+              <label>审核理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构独立证据 <input name="evidence_ref" maxlength="200" required></label>
+              <button class="primary" type="submit">保存线索调整独立审批</button>
+            </form>
+          </article>
+        </div>
+        <div class="two-col space-top">
+          <article class="panel"><h3>每位学生的待核实关联记录</h3><div id="lead-student-associations-list" class="record-list"></div></article>
+          <article class="panel"><h3>线索调整审核状态</h3><div id="lead-adjustments-list" class="record-list"></div></article>
+        </div>
+        <article class="panel space-top"><h3>追加更正后的最新业务说明</h3>
+          <div id="lead-correction-notes-list" class="record-list"></div>
+        </article>
+      </div>
       <article class="panel space-top" id="strict-consultation-card" hidden>
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>
