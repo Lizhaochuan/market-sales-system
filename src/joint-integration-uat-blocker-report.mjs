@@ -3,7 +3,7 @@
 // No production authority, source registration, financial/lesson writes or hold release.
 import {buildBlockedUatTasks,UAT_CHECKS} from './integration-uat-blocker-report.mjs';
 
-const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const expected=Object.keys(UAT_CHECKS).sort();
 function invalid(){throw new TypeError('Joint UAT must use two valid, blocked and independently scoped fixture reports');}
 const safe=v=>String(v).replaceAll('\\','\\\\').replaceAll('|','\\|')
