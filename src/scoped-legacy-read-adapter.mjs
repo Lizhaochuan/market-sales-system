@@ -11,10 +11,14 @@ export const migratedLegacyReads=new Set([
   'listContactCustodyActive','listContactCustodyReviews','listRelatedStudents',
   'listCandidateConsultations','listLeadCandidates',
   'listConversionReadiness','listAttributionDisputes','listAttributionDisputable',
-  'listFinalLeadConversions','listLeadStudentAssociations','listLeadStudentLinkReviews','listCurrentLeadStudentLinks','listLeadAdjustments','listLeadCorrectionNotes'
+  'listFinalLeadConversions','listLeadStudentAssociations','listLeadStudentLinkReviews','listCurrentLeadStudentLinks','listDownstreamStudentCorrections','listDownstreamCorrectionEligible','listLeadAdjustments','listLeadCorrectionNotes'
 ]);
 
 const listQueries={
+  listDownstreamStudentCorrections:
+    'SELECT case_id,association_request_id,lead_id,student_id,student_name,status,created_at,requested_by,opportunity_count,quote_count,order_count,allocation_count,refund_allocation_count,trial_count,sale_event_count,entitlement_count FROM ms.scoped_downstream_student_correction_cases ORDER BY created_at DESC,case_id LIMIT 100',
+  listDownstreamCorrectionEligible:
+    'SELECT association_request_id,lead_id,student_id,student_name,current_state,opportunity_count FROM ms.scoped_downstream_student_correction_eligible ORDER BY student_name,association_request_id LIMIT 100',
   listLeadStudentLinkReviews:
     'SELECT review_id,association_request_id,lead_id,student_id,student_name,action,status,created_at,requested_by,current_state FROM ms.scoped_lead_student_link_review_requests ORDER BY created_at DESC,review_id LIMIT 100',
   listCurrentLeadStudentLinks:
