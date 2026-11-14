@@ -1,0 +1,22 @@
+name: V3.2-88 isolated unified pending review report
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-unified-pending-review-report.mjs'
+      - 'tests/security/v3-2-88-m02-unified-pending-review-report.test.mjs'
+      - '.github/workflows/v3-2-88-unified-pending-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-pending-review:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check combined reporter syntax
+        run: node --check src/cross-module-unified-pending-review-report.mjs
+      - name: Run unified task and upstream safety tests
+        run: node --test tests/security/v3-2-88-m02-unified-pending-review-report.test.mjs tests/security/v3-2-87-m02-diff-review-tasks.test.mjs tests/security/v3-2-82-m02-unified-handoff-blocker.test.mjs
