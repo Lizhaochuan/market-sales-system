@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -180,21 +180,35 @@ function channelFormFields(){
 }
 function renderChannelMaintenance(){
   const strict=state.strict;
-  const ok=strict&&!state.channelRequestLoadError&&!state.channelLoadError;
+  const ok=strict&&!state.channelRequestLoadError&&!state.channelLoadError&&!state.channelAuditLoadError;
   $('channel-maintenance-workbench').hidden=!strict;
   $('channel-request-card').hidden=!ok;
   $('channel-review-card').hidden=!ok||state.capabilities.review_channel_change!==true;
   $('channel-requests-total').textContent=state.channelRequests.length+' 条';
+  $('channel-audit-total').textContent=state.channelAuditHistory.length+' 条';
+  $('channel-audit-status').textContent=state.channelAuditLoadError
+    ?'审计时间线未能验证，已清空旧记录并关闭渠道变更操作。'
+    :'只显示本人申请、本人曾审核及当前有权复核的渠道变更事件；不包含原始审计数据。';
   $('channel-requests-status').textContent=state.channelRequestLoadError
     ?'无法确认申请及审批状态，旧记录已清空，禁止使用旧待办。'
     :'只显示本人的维护记录，以及本机构有效销售主管有权查看的待审批申请。';
   if(!ok){
     $('channel-requests-list').replaceChildren();
+    $('channel-audit-list').replaceChildren();
     $('channel-target-choice').replaceChildren();
     $('channel-parent-choice').replaceChildren();
     $('channel-review-choice').replaceChildren();
     return;
   }
+  paint('channel-audit-list',state.channelAuditHistory,x=>record(
+    ({CHANNEL_CHANGE_REQUESTED:'提交渠道变更申请',
+      CHANNEL_CHANGE_APPLIED:'独立主管批准并执行',
+      CHANNEL_CHANGE_REJECTED:'独立主管驳回申请'})[x.event_name]||'未知审计事件',
+    '事件时间：'+formatDate(x.happened_at)+
+      ' · 申请类型：'+({create:'新增',edit:'编辑',deactivate:'停用'})[x.action],
+    x.event_name==='CHANNEL_CHANGE_REQUESTED'?'仅申请，渠道尚未修改':
+      x.event_name==='CHANNEL_CHANGE_APPLIED'?'独立审批后在隔离环境执行':'审批驳回，渠道未改',
+    '审'));
   paint('channel-requests-list',state.channelRequests,x=>record(
     ({create:'新增渠道',edit:'编辑渠道',deactivate:'停用渠道'})[x.action]||'渠道申请',
     (x.proposed_name||state.channels.find(c=>c.channel_id===x.channel_id)?.name||'指定渠道')+
@@ -399,6 +413,7 @@ async function refresh(){
   const endpoints=state.strict?[
     ['channels','/api/v1/marketing-channels'],
     ['channelRequests','/api/v1/marketing-channels/change-requests'],
+    ['channelAuditHistory','/api/v1/marketing-channels/change-requests/audit-history'],
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],
     ['custodyRequests','/api/v1/contact-custody/requests'],
@@ -431,7 +446,8 @@ async function refresh(){
     for(const key of ['leads','opportunities','families'])state[key]=[];
   }
   else {
-    state.channelRequests=[];state.channelRequestLoadError=false;state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
+    state.channelRequests=[];state.channelRequestLoadError=false;
+    state.channelAuditHistory=[];state.channelAuditLoadError=false;state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     if(key==='channels'){
@@ -443,6 +459,19 @@ async function refresh(){
       state.channelCatalog=valid?data:null;
       state.channels=valid?data.channels:[];
       state.channelLoadError=!valid;
+    }else if(key==='channelAuditHistory'){
+      const items=r.status==='fulfilled'?r.value?.items:null;
+      const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
+        x&&typeof x.audit_id==='string'&&typeof x.request_id==='string'&&
+        typeof x.happened_at==='string'&&
+        ['CHANNEL_CHANGE_REQUESTED','CHANNEL_CHANGE_APPLIED','CHANNEL_CHANGE_REJECTED'].includes(x.event_name)&&
+        ['create','edit','deactivate'].includes(x.action)&&
+        ['pending','applied','rejected'].includes(x.status)&&
+        typeof x.actor_user_id==='string'&&typeof x.requested_by==='string'&&
+        Object.keys(x).every(k=>['audit_id','request_id','event_name','actor_user_id',
+        'happened_at','action','status','requested_by'].includes(k)));
+      state.channelAuditHistory=valid?items:[];
+      state.channelAuditLoadError=!valid;
     }else if(key==='channelRequests'){
       const items=r.status==='fulfilled'?r.value?.items:null;
       const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
@@ -473,6 +502,10 @@ function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
   state.channelRequests=[];state.channelRequestLoadError=false;
+  state.channelAuditHistory=[];state.channelAuditLoadError=false;
+  $('channel-audit-list').replaceChildren();
+  $('channel-audit-total').textContent='0 条';
+  $('channel-audit-status').textContent='未登录，审计历史已清空。';
   $('channel-maintenance-workbench').hidden=true;
   $('channel-requests-list').replaceChildren();
   $('channel-review-choice').replaceChildren();
@@ -577,7 +610,7 @@ $('channel-target-choice').addEventListener('change',()=>{
     'channel_id',c=>c.name,true);
 });
 register('channel-request-form',async d=>{
-  if(!state.strict||state.channelLoadError||state.channelRequestLoadError)
+  if(!state.strict||state.channelLoadError||state.channelRequestLoadError||state.channelAuditLoadError)
     throw Error('渠道请求状态无法确认，禁止提交');
   const action=d.action;
   const data={action,evidence_ref:d.evidence_ref.trim(),reason_zh:d.reason_zh.trim()};
@@ -598,7 +631,7 @@ register('channel-request-form',async d=>{
     '已找到相同申请，当前状态：'+result.status;
 });
 register('channel-review-form',async d=>{
-  if(!state.strict||state.channelLoadError||state.channelRequestLoadError||
+  if(!state.strict||state.channelLoadError||state.channelRequestLoadError||state.channelAuditLoadError||
       state.capabilities.review_channel_change!==true)
     throw Error('当前没有经过核实的渠道审批权限');
   const selected=state.channelRequests.find(x=>x.request_id===d.request_id&&

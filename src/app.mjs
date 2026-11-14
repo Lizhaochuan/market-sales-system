@@ -64,6 +64,7 @@ const routeDefs=[
   ['GET',/^\/api\/v1\/contact-events$/,'listEvents'],
   ['GET',/^\/api\/v1\/marketing-channels$/,'listMarketingChannels'],
   ['GET',/^\/api\/v1\/marketing-channels\/change-requests$/,'listChannelChangeRequests'],
+  ['GET',/^\/api\/v1\/marketing-channels\/change-requests\/audit-history$/,'listChannelAuditHistory'],
   ['POST',/^\/api\/v1\/marketing-channels\/change-requests$/,'requestChannelChange'],
   ['POST',/^\/api\/v1\/marketing-channels\/change-requests\/([0-9a-f-]+)\/decision$/,'reviewChannelChange'],
   ['GET',/^\/api\/v1\/leads$/,'listLeads'],
@@ -558,7 +559,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
       // Channel maintenance is CI-only and requires approved strict staff logins.
       // Never run this through the broad tenant-level demo connection.
-      if(!strictStaffMode&&['listChannelChangeRequests','requestChannelChange','reviewChannelChange'].includes(route.op))
+      if(!strictStaffMode&&['listChannelChangeRequests','listChannelAuditHistory','requestChannelChange','reviewChannelChange'].includes(route.op))
         fail(403,'STAFF_ROUTE_UNMIGRATED','渠道维护只能通过隔离员工独立审批流程');
       // Strict mode deliberately blocks every old non-migrated broad write.
       // Also blocks old manager-level family, identity, audit and other reads

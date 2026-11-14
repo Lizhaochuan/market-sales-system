@@ -99,6 +99,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await staffPage.getByRole('button',{name:'提交渠道维护申请'}).click();
   await expect(staffPage.locator('#toast')).toContainText('尚未修改渠道');
   await expect(staffPage.locator('#channel-requests-list')).toContainText(name);
+  await expect(staffPage.locator('#channel-audit-list')).toContainText('提交渠道变更申请');
+  await expect(staffPage.locator('#channel-audit-list')).not.toContainText('审计原文');
   {
    const count=await admin.query('SELECT count(*)::int n FROM ms.marketing_channels WHERE name=$1',[name]);
    expect(count.rows[0].n).toBe(0);
@@ -106,10 +108,14 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   managerPage=await login(M);
   await expect(managerPage.locator('#channel-review-card')).toBeVisible();
   await expect(managerPage.locator('#channel-requests-list')).toContainText(name);
+  await expect(managerPage.locator('#channel-audit-list')).toContainText('提交渠道变更申请');
   await reviewRequest(managerPage,name);
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(staffPage.locator('#channels-list')).toContainText(name);
   await expect(staffPage.locator('#channel-requests-list')).toContainText('审批通过');
+  await expect(staffPage.locator('#channel-audit-list')).toContainText('独立主管批准并执行');
+  await managerPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(managerPage.locator('#channel-audit-list')).toContainText('独立主管批准并执行');
   createdId=(await admin.query('SELECT id FROM ms.marketing_channels WHERE name=$1',[name])).rows[0]?.id;
   expect(createdId).toBeTruthy();
 
@@ -140,12 +146,26 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
    .rows[0].status).toBe('inactive');
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(staffPage.locator('#channels-list')).toContainText('本渠道已停用');
+  // Audit failure must discard previously rendered events, hide both write
+  // actions and never recycle old authorization until a healthy refresh.
+  await staffPage.route('**/api/v1/marketing-channels/change-requests/audit-history',
+   route=>route.fulfill({status:500,contentType:'application/json',
+    body:JSON.stringify({code:'INTERNAL_ERROR',message:'虚构审计投影故障'})}));
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#channel-audit-list')).toBeEmpty();
+  await expect(staffPage.locator('#channel-audit-status')).toContainText('已清空旧记录');
+  await expect(staffPage.locator('#channel-request-card')).toBeHidden();
+  await staffPage.unroute('**/api/v1/marketing-channels/change-requests/audit-history');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#channel-audit-list')).toContainText('独立主管批准并执行');
+  await expect(staffPage.locator('#channel-request-card')).toBeVisible();
 
   await testInfo.attach('m01-approval-workbench',{
    body:await staffPage.screenshot({fullPage:true}),contentType:'image/png'});
   await staffPage.getByRole('button',{name:'退出演示账号'}).click();
   await expect(staffPage.locator('#workspace')).toBeHidden();
   await expect(staffPage.locator('#channel-requests-list')).toBeEmpty();
+  await expect(staffPage.locator('#channel-audit-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{
