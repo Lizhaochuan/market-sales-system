@@ -1,0 +1,38 @@
+{
+  "schema_version": "v3.2-41-preview-login-boundary-v1",
+  "parent_pr": 47,
+  "scope": "isolated-fixture-postgresql-role-regression",
+  "migration_count_expected": 38,
+  "new_migration": false,
+  "source_roles": [
+    "ms_uat_preview_a",
+    "ms_uat_preview_b"
+  ],
+  "forbidden_set_role": [
+    "ms_integration_gap_writer",
+    "ms_source_readiness_writer",
+    "ms_fixture_uat_freeze_writer"
+  ],
+  "forbidden_direct_tables": [
+    "ms.sales_orders",
+    "ms.payment_allocations",
+    "ms.crm_entitlement_links",
+    "ms.integration_missing_evidence_events"
+  ],
+  "forbidden_function_signatures": [
+    "ms.record_integration_missing_evidence(uuid,text,text,text,text,text)",
+    "ms.freeze_fixture_uat_source(uuid,text,text,text)"
+  ],
+  "new_test_status": "ADDED_REQUIRES_LATEST_HEAD_CI",
+  "real_service_revocation_proven": false,
+  "production_integration_allowed": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "real_uat_completed": false,
+  "downstream_wrong_student_hold_active_required": true,
+  "student_primary": true,
+  "family_optional": true,
+  "financial_crm_source_status": "proposed-unimplemented"
+}
