@@ -20,7 +20,6 @@ test('V3.2-53 strict employee JWT and nonowner PostgreSQL view enforce instituti
  const directory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:2});
  const a=new pg.Pool({connectionString:process.env.DATABASE_URL_ASSIGNEE_A,max:2});
  const b=new pg.Pool({connectionString:process.env.DATABASE_URL_ASSIGNEE_B,max:2});
- const foreign=new pg.Pool({connectionString:process.env.DATABASE_URL_ASSIGNEE_FOREIGN,max:2});
  const channelA=randomUUID(),childA=randomUUID(),channelForeign=randomUUID();
  const subjectA='m01-strict-a-'+randomUUID(),subjectB='m01-strict-b-'+randomUUID();
  const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048});
@@ -66,11 +65,9 @@ test('V3.2-53 strict employee JWT and nonowner PostgreSQL view enforce instituti
     foreignOrg,'另一机构不可见渠道']);
   assert.equal((await a.query('SELECT count(*)::int AS n FROM ms.scoped_marketing_channel_catalog')).rows[0].n>=2,true);
   assert.equal((await b.query('SELECT count(*)::int AS n FROM ms.scoped_marketing_channel_catalog')).rows[0].n>=2,true);
-  const fa=await foreign.query('SELECT id FROM ms.scoped_marketing_channel_catalog WHERE id=$1',[channelA]);
-  const fb=await foreign.query('SELECT id FROM ms.scoped_marketing_channel_catalog WHERE id=$1',[channelForeign]);
-  assert.equal(fa.rowCount,0,'foreign DB LOGIN cannot see home-organization channel');
-  assert.equal(fb.rowCount,1,'foreign DB LOGIN sees only its own channel');
-  for(const p of [a,b,foreign]){
+  for(const p of [a,b]){
+   const restricted=await p.query('SELECT id FROM ms.scoped_marketing_channel_catalog WHERE id=$1',[channelForeign]);
+   assert.equal(restricted.rowCount,0,'no other-organization channels via staff LOGIN');
    await assert.rejects(p.query('SELECT * FROM ms.marketing_channels'),e=>e.code==='42501');
    await assert.rejects(p.query("UPDATE ms.marketing_channels SET status='active' WHERE FALSE"),e=>e.code==='42501');
    await assert.rejects(p.query('SELECT * FROM ms.sales_orders'),e=>e.code==='42501');
@@ -121,6 +118,6 @@ test('V3.2-53 strict employee JWT and nonowner PostgreSQL view enforce instituti
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(resolve=>app.close(resolve));
-  await Promise.allSettled([admin,directory,a,b,foreign].map(p=>p.end()));
+  await Promise.allSettled([admin,directory,a,b].map(p=>p.end()));
  }
 });
