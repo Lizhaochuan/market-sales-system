@@ -122,6 +122,7 @@ JOIN ms.contacts c ON c.id=r.contact_id AND c.organization_id=r.organization_id
 WHERE r.organization_id=ms.current_scoped_organization_id()
  AND ms.current_scoped_staff_id() IS NOT NULL
  AND (r.requested_by=ms.current_scoped_staff_id()
+ OR r.reviewed_by=ms.current_scoped_staff_id()
  OR (r.status='pending' AND EXISTS(
   SELECT 1 FROM ms.user_role_grants g
   JOIN ms.role_templates t ON t.id=g.role_id
@@ -140,6 +141,7 @@ WHERE d.organization_id=ms.current_scoped_organization_id()
  AND ms.current_scoped_staff_id() IS NOT NULL
  AND (d.claimant_id=ms.current_scoped_staff_id()
   OR x.requested_by=ms.current_scoped_staff_id()
+  OR d.reviewed_by=ms.current_scoped_staff_id()
   OR (d.status='pending' AND EXISTS(
    SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates t ON t.id=g.role_id
    WHERE g.user_id=ms.current_scoped_staff_id() AND g.revoked_at IS NULL
