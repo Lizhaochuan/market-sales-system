@@ -16,6 +16,7 @@ const open=s=>new Promise(ok=>s.listen(0,'127.0.0.1',ok));
 const close=s=>new Promise(ok=>s.close(ok));
 
 test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管理权恢复 A',async({browser},testInfo)=>{
+ test.setTimeout(120000); // V3.2-20 extends the real full-browser flow; assertions unchanged.
  process.env.MS_STAGE='isolated-test';
  const owner=new pg.Pool({connectionString:process.env.DATABASE_URL,max:4});
  const directory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:3});
