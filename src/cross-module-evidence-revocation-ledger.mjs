@@ -51,7 +51,7 @@ export function createIsolatedRevocationLedger({getFixtureSourceEpoch}={}){
   nonces.set(idempotency_key,{fingerprint,record});
   const revoked=new Map(previous?.revoked||[]);
   const prior=revoked.get(event_id);
-  if(prior&&prior!==event_sha256)throw Error('REVOKED_EVENT_DIGEST_CONFLICT');
+  if(prior)throw Error('ALREADY_REVOKED_EVENT');
   revoked.set(event_id,event_sha256);
   store.set(key,{epoch:source_epoch,sequence:revocation_sequence,nonces,revoked,
    fingerprint:checksum([...revoked].sort(([a],[b])=>a.localeCompare(b,'en')))});
@@ -59,7 +59,8 @@ export function createIsolatedRevocationLedger({getFixtureSourceEpoch}={}){
  }
  function checkHistoricalPacket({organization_id,incident_id,
    source_epoch,revocation_sequence,revocation_digest,evidence_event_ids}={}){
-  if(!uuid.test(organization_id)||!uuid.test(incident_id)||
+  if(!exact(arguments[0],['organization_id','incident_id','source_epoch','revocation_sequence','revocation_digest','evidence_event_ids'])||
+    !uuid.test(organization_id)||!uuid.test(incident_id)||
     !positive(source_epoch)||!Number.isSafeInteger(revocation_sequence)||
     revocation_sequence<0||!Array.isArray(evidence_event_ids)||
     evidence_event_ids.length<1||evidence_event_ids.length>100||
