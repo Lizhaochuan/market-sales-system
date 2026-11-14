@@ -15,7 +15,7 @@ const audience='isolated-custody-chinese-workbench';
 const open=s=>new Promise(ok=>s.listen(0,'127.0.0.1',ok));
 const close=s=>new Promise(ok=>s.close(ok));
 
-test('真实 Chromium：销售 A 申请单联系人交接，主管独立批准，B 才获得当前管理权',async({browser},testInfo)=>{
+test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管理权恢复 A',async({browser},testInfo)=>{
  process.env.MS_STAGE='isolated-test';
  const owner=new pg.Pool({connectionString:process.env.DATABASE_URL,max:4});
  const directory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:3});
@@ -111,12 +111,18 @@ test('真实 Chromium：销售 A 申请单联系人交接，主管独立批准�
   const m=await login('M');
   await expect(m.locator('#custody-decision-card')).toBeVisible();
   await expect(m.locator('#custody-requests-list')).toContainText(name);
+  const approvalChoice=m.locator('#custody-decision-form select[name="request_id"]');
+  const approvalId=await approvalChoice.locator('option').filter({hasText:name}).first().getAttribute('value');
+  expect(approvalId).toBeTruthy();
+  await approvalChoice.selectOption(approvalId);
   await m.locator('#custody-decision-form textarea[name="reason_zh"]')
    .fill('独立主管核实当前联系人管理人和接收员工后批准');
   await m.locator('#custody-decision-form input[name="evidence_ref"]')
    .fill('虚构独立审核材料说明');
   await m.getByRole('button',{name:'保存联系人交接审核'}).click();
-  await expect(m.locator('#custody-requests-list')).toContainText('已批准');
+  await expect.poll(async()=>(
+    await owner.query('SELECT assignee_id FROM ms.contact_custody_assignments WHERE contact_id=$1 AND revoked_at IS NULL',[contact.id])
+  ).rows[0]?.assignee_id).toBe(ids.B);
   await b.getByRole('button',{name:'刷新数据'}).click();
   await expect(b.locator('#contacts-list')).toContainText(name);
   const rows=await owner.query(
@@ -127,6 +133,40 @@ test('真实 Chromium：销售 A 申请单联系人交接，主管独立批准�
   expect(rows.rows[0].created_by).toBe(ids.A);
   expect(rows.rows[0].assignee_id).toBe(ids.B);
   expect(broadCalls).toBe(0);
+  // V3.2-16: the recipient initiates a withdrawal; M independently reviews.
+  const requestReview=b.locator('#custody-review-request-form');
+  await requestReview.locator('select[name="assignment_id"]').selectOption({label:name});
+  await requestReview.locator('select[name="kind"]').selectOption('withdrawal');
+  await requestReview.locator('textarea[name="reason_zh"]')
+   .fill('客户要求撤回当前管理权，等待独立审核');
+  await requestReview.locator('input[name="evidence_ref"]')
+   .fill('虚构客户撤回要求与独立复核依据');
+  await requestReview.getByRole('button',{name:'提交撤回或复核申请'}).click();
+  await expect(b.locator('#custody-reviews-list')).toContainText(name);
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  await expect(m.locator('#custody-review-decision-card')).toBeVisible();
+  const decideReview=m.locator('#custody-review-decision-form');
+  const reviewChoice=decideReview.locator('select[name="review_id"]');
+  const reviewId=await reviewChoice.locator('option').filter({hasText:name}).first().getAttribute('value');
+  expect(reviewId).toBeTruthy();
+  await reviewChoice.selectOption(reviewId);
+  await decideReview.locator('select[name="result"]').selectOption('reversed');
+  await decideReview.locator('textarea[name="reason_zh"]')
+   .fill('独立复核确认管理权需要恢复原任员工');
+  await decideReview.locator('input[name="evidence_ref"]')
+   .fill('虚构独立复核证据记录');
+  await decideReview.getByRole('button',{name:'保存独立复核决定'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT assignee_id FROM ms.contact_custody_assignments WHERE contact_id=$1 AND revoked_at IS NULL',[contact.id])
+  ).rows[0]?.assignee_id).toBe(ids.A);
+  await expect.poll(async()=>(
+    await pools.readB.query('SELECT COUNT(*)::int AS n FROM ms.scoped_contacts_directory WHERE contact_id=$1',[contact.id])
+  ).rows[0]?.n).toBe(0);
+  await b.getByRole('button',{name:'刷新数据'}).click();
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  await expect(b.locator('#contacts-list')).not.toContainText(name);
+  await expect(a.locator('#contacts-list')).toContainText(name);
+  expect((await owner.query('SELECT assignee_id FROM ms.contact_custody_assignments WHERE contact_id=$1 AND revoked_at IS NULL',[contact.id])).rows[0].assignee_id).toBe(ids.A);
   await m.setViewportSize({width:390,height:844});
   await expect(m.locator('#custody-decision-card')).toBeVisible();
   const overflow=await m.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);

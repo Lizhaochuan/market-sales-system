@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,22 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='requestCustodyReview'){
+    only(body,['assignment_id','kind','evidence_ref','reason_zh']);
+    if(!['withdrawal','dispute'].includes(body.kind))
+      fail(422,'VALIDATION_ERROR','请选择撤回或争议复核');
+    return {params:[uuid(body.assignment_id,'交接管理权'),body.kind,
+      approvalText(body.evidence_ref,'虚构材料说明',200),
+      approvalText(body.reason_zh,'申请理由',400)]};
+  }
+  if(op==='decideCustodyReview'){
+    only(body,['result','evidence_ref','reason_zh']);
+    if(!['upheld','reversed','rejected'].includes(body.result))
+      fail(422,'VALIDATION_ERROR','请选择维持、撤回或驳回复核');
+    return {params:[uuid(routeParams?.[0],'复核申请'),body.result,
+      approvalText(body.evidence_ref,'复核证据',200),
+      approvalText(body.reason_zh,'复核理由',400)]};
+  }
   if(op==='requestContactCustody'){
     only(body,['contact_id','target_staff_id','evidence_ref','reason_zh']);
     return {params:[
@@ -148,6 +164,14 @@ export async function writeLegacyViaStaffPool({
       case 'createEvent':
         result=await client.query(
           'SELECT ms.create_scoped_contact_consultation($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'requestCustodyReview':
+        result=await client.query(
+          'SELECT ms.request_custody_review($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideCustodyReview':
+        result=await client.query(
+          'SELECT ms.decide_custody_review($1,$2,$3,$4,$5) AS result',
           [...parsed.params,idempotencyKey]);break;
       case 'requestContactCustody':
         result=await client.query(

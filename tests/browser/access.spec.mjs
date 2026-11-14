@@ -123,9 +123,11 @@ test('真实 Chromium：中文独立授权页面完成学生共享→双主管�
       .fill('被授权员工不再需要查看该学生');
     await pageB.getByRole('button',{name:'立即撤销这项查看权限'}).click();
     await expect(pageB.locator('#grants-list')).toContainText('已撤销');
-    const visibility=await readB.query(
-      'SELECT student_id FROM ms.student_directory_assigned');
-    expect(visibility.rows.some(x=>x.student_id===studentId)).toBe(false);
+    await expect.poll(async()=>{
+      const visibility=await readB.query(
+        'SELECT student_id FROM ms.student_directory_assigned');
+      return visibility.rows.some(x=>x.student_id===studentId);
+    }).toBe(false);
 
     await pageA.getByRole('button',{name:'提出授权申请'}).click();
     await pageA.locator('#action-type').selectOption('transfer');

@@ -71,7 +71,7 @@
       <div class="topbar-actions"><span class="status-pill"><span class="status-dot"></span>本机测试环境</span><button id="refresh-button" class="secondary" type="button">刷新数据</button></div>
     </header>
 
-    <p id="strict-scope-note" class="strict-scope-note" hidden>严格员工权限测试模式：本人学生/联系人、待核实关联和真实咨询可操作；联系人交接须独立主管批准，绝不改变原学生负责人及已有咨询。线索、商机、家庭审核和收款仍关闭。</p>
+    <p id="strict-scope-note" class="strict-scope-note" hidden>严格员工权限测试模式：本人学生/联系人、待核实关联和真实咨询可操作；联系人交接、撤回、争议均须独立主管批准；只读已核实学生关系的最小信息，不改变学生负责人及已有咨询。线索、商机、家庭审核和收款仍关闭。</p>
     <section class="view active" data-panel="overview">
       <div class="welcome"><div><p class="eyebrow">STUDENT-FIRST CRM</p><h2>每位学生独立管理，家庭关系按需关联</h2><p>营销咨询、学生、联系人和销售商机分开记录，避免重复统计。</p></div><span class="welcome-mark" aria-hidden="true">MS</span></div>
       <div class="stats">
@@ -162,6 +162,40 @@
             </form>
           </article>
         </div>
+        <div class="two-col space-top">
+          <article class="panel">
+            <h3>交接后申请撤回或争议复核</h3>
+            <form id="custody-review-request-form" class="field-stack">
+              <label>当前交接记录 <select name="assignment_id" data-options="custodyActive" required></select></label>
+              <label>申请类型 <select name="kind"><option value="withdrawal">撤回交接</option><option value="dispute">争议复核</option></select></label>
+              <label>申请原因 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构证据说明 <input name="evidence_ref" maxlength="200" required placeholder="禁止输入真实敏感资料"></label>
+              <div class="form-hint">撤回及复核不会立即转移管理权，需另一名无利益冲突的主管审核。</div>
+              <button class="primary" type="submit">提交撤回或复核申请</button>
+            </form>
+          </article>
+          <article class="panel" id="custody-review-decision-card" hidden>
+            <h3>独立主管复核结论</h3>
+            <form id="custody-review-decision-form" class="field-stack">
+              <label>待审核复核 <select name="review_id" data-options="custodyReviewPending" required></select></label>
+              <label>决定 <select name="result">
+                <option value="upheld">维持现管理权</option>
+                <option value="reversed">撤回并恢复前任管理人</option>
+                <option value="rejected">驳回复核</option>
+              </select></label>
+              <label>审核原因 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构证据说明 <input name="evidence_ref" maxlength="200" required></label>
+              <button class="primary" type="submit">保存独立复核决定</button>
+            </form>
+          </article>
+        </div>
+        <article class="panel space-top"><h3>交接撤回与争议复核历史</h3>
+          <div id="custody-reviews-list" class="record-list"></div>
+        </article>
+        <article class="panel space-top"><h3>已核实学生关系的最小信息查看</h3>
+          <p class="form-hint">仅有当前联系人管理权且关系已核实才显示姓名及关系；不授予年级、学校、财务、历史咨询或兄弟姐妹资料。</p>
+          <div id="related-students-list" class="record-list"></div>
+        </article>
         <article class="panel space-top">
           <h3>我参与或有权审核的交接记录</h3>
           <div id="custody-requests-list" class="record-list"></div>
