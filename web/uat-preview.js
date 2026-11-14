@@ -174,20 +174,23 @@ $('login-form').addEventListener('submit',async event=>{
 });
 $('disconnect').addEventListener('click',disconnect);
 $('refresh').addEventListener('click',async event=>{
- event.currentTarget.disabled=true;
+ const control=event.currentTarget;
+ control.disabled=true;
  try{await refresh();status('已重新读取当前账号有权查看的来源；原预览已清除。');}
  catch(error){clearReport();status(error.message,true);}
- finally{event.currentTarget.disabled=false;}
+ finally{control.disabled=false;}
 });
 $('request-choice').addEventListener('change',()=>{clearReport();status('来源已切换，请重新核验并查看报告。');});
 $('view-report').addEventListener('click',async event=>{
- event.currentTarget.disabled=true;
+ const control=event.currentTarget;
+ control.disabled=true;
  try{await viewReport();}
  catch(error){clearReport();status(error.message,true);}
- finally{event.currentTarget.disabled=state.requests.length===0;}
+ finally{control.disabled=state.requests.length===0;}
 });
 $('download-report').addEventListener('click',async event=>{
- event.currentTarget.disabled=true;
+ const control=event.currentTarget;
+ control.disabled=true;
  try{
   if(!state.requestId||!state.markdown||
    !state.requests.some(x=>x.request_id===state.requestId))
@@ -204,11 +207,12 @@ $('download-report').addEventListener('click',async event=>{
   }finally{setTimeout(()=>URL.revokeObjectURL(href),1000);}
   status('已生成当前权限范围内的 Markdown 待办副本；不代表验收通过。');
  }catch(error){clearReport();status(error.message,true);}
- finally{event.currentTarget.disabled=false;}
+ finally{control.disabled=false;}
 });
 
 $('compare-history').addEventListener('click',async event=>{
- event.currentTarget.disabled=true;
+ const control=event.currentTarget;
+ control.disabled=true;
  try{
   if(!state.requestId||!state.history)throw Error('请先查看当前来源报告');
   const {from,to}=chosenVersionRange();
@@ -217,10 +221,11 @@ $('compare-history').addEventListener('click',async event=>{
   renderHistory(response.history);
   status('仅对比虚构引用版本差异，所有真实联调和补偿仍处于阻断。');
  }catch(error){state.history=null;$('history-panel').hidden=true;status(error.message,true);}
- finally{event.currentTarget.disabled=false;}
+ finally{control.disabled=false;}
 });
 $('export-history').addEventListener('click',async event=>{
- event.currentTarget.disabled=true;
+ const control=event.currentTarget;
+ control.disabled=true;
  try{
   if(!state.requestId||!state.history||
    !state.requests.some(x=>x.request_id===state.requestId))
@@ -248,5 +253,5 @@ $('export-history').addEventListener('click',async event=>{
   }finally{setTimeout(()=>URL.revokeObjectURL(href),1000);}
   status('已重新核对身份、机构和最新历史水位；仅导出虚构证据差异。');
  }catch(error){status(error.message,true);}
- finally{event.currentTarget.disabled=false;}
+ finally{control.disabled=false;}
 });
