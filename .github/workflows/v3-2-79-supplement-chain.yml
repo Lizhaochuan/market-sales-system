@@ -1,0 +1,22 @@
+name: V3.2-79 isolated supplement version chain
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-supplement-version-chain.mjs'
+      - 'tests/security/v3-2-79-m02-supplement-version-chain.test.mjs'
+      - '.github/workflows/v3-2-79-supplement-chain.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-supplement:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate supplement module syntax
+        run: node --check src/cross-module-supplement-version-chain.mjs
+      - name: Run supplement and parent preparation regression
+        run: node --test tests/security/v3-2-79-m02-supplement-version-chain.test.mjs tests/security/v3-2-78-m02-manual-acceptance-preparation.test.mjs
