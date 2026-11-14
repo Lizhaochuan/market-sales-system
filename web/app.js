@@ -342,6 +342,7 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
 }
 async function refresh(){
   const endpoints=state.strict?[
+    ['channels','/api/v1/marketing-channels'],
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],
     ['custodyRequests','/api/v1/contact-custody/requests'],
@@ -372,7 +373,6 @@ async function refresh(){
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
   if(state.strict){
     for(const key of ['leads','opportunities','families'])state[key]=[];
-    state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
   }
   else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
@@ -417,7 +417,7 @@ function logout(notice=true){
   if(notice)toast('已退出演示账号');
 }
 function applyStrictLayout(){
-  const allowed=new Set(['overview','students','contacts','leads']);
+  const allowed=new Set(['overview','students','contacts','leads','channels']);
   for(const nav of document.querySelectorAll('button[data-view]')){
     nav.hidden=state.strict&&!allowed.has(nav.dataset.view);
   }
