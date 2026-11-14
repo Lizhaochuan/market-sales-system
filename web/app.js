@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,campaignFinanceHandoffs:[],campaignFinanceLoadError:false,campaignFinanceIncidents:[],campaignIncidentLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,campaignFinanceHandoffs:[],campaignFinanceLoadError:false,campaignFinanceIncidents:[],campaignIncidentLoadError:false,campaignIncidentHistory:[],campaignIncidentHistoryLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],campaigns:['获客管理','市场活动'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -261,8 +261,27 @@ function setCampaignRevisionChoice(){
     option.selected=selectedChannels.has(option.value);
   $('campaign-revise-version').textContent='当前草稿版本 '+selected.version+'；保存时需与数据库版本一致';
 }
+function renderCampaignIncidentHistory(){
+  const healthy=state.strict&&!state.campaignIncidentHistoryLoadError&&
+    !state.campaignIncidentLoadError&&!state.campaignFinanceLoadError;
+  $('campaign-incident-history-total').textContent=healthy?
+    state.campaignIncidentHistory.length+' 条':'0 条';
+  $('campaign-incident-history-status').textContent=healthy
+    ?'只读销售侧异常事件记录。保留历史状态，不等于真实财务审批或放行。'
+    :'审计记录无法核实，已清空历史并禁止异常登记或复核。';
+  if(!healthy){$('campaign-incident-history-list').replaceChildren();return;}
+  paint('campaign-incident-history-list',state.campaignIncidentHistory,x=>record(
+    ({CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED:'资料异常登记',
+      CAMPAIGN_FINANCE_ISSUE_ESCALATED:'独立销售主管人工升级',
+      CAMPAIGN_FINANCE_ISSUE_RECHECK_REQUESTED:'独立销售主管要求再次核查'})[x.event_name],
+    '异常编号 '+x.incident_id.slice(0,8)+' · 时间 '+formatDate(x.happened_at),
+    '事件后状态：'+({open:'待复核',manual_escalated:'人工升级持续阻断',
+      closed_for_recheck:'资料核查结束，仍待财务核验'})[x.event_status]+
+    ' · 未获财务或支出许可','审'));
+}
 function renderCampaignIncidents(){
   const healthy=state.strict&&!state.campaignIncidentLoadError&&
+    !state.campaignIncidentHistoryLoadError&&
     !state.campaignFinanceLoadError&&!state.campaignSalesLoadError;
   const available=state.campaignFinanceHandoffs;
   const pending=state.campaignFinanceIncidents.filter(x=>x.status==='open'&&
@@ -376,6 +395,7 @@ function render(){
   renderCampaignSalesReview();
   renderCampaignFinanceHandoffs();
   renderCampaignIncidents();
+  renderCampaignIncidentHistory();
   $('campaigns-status').textContent=state.campaignLoadError||state.channelLoadError
     ?'活动草稿或渠道目录读取失败，旧数据已清空，禁止新建。'
     :'只显示本人负责的草稿和主管有权查看的本机构草稿。预算均为未审批的计划金额。';
@@ -559,6 +579,7 @@ async function refresh(){
     ['campaignSalesReviews','/api/v1/marketing-campaigns/sales-reviews'],
     ['campaignFinanceHandoffs','/api/v1/marketing-campaigns/finance-handoffs'],
     ['campaignFinanceIncidents','/api/v1/marketing-campaigns/finance-incidents'],
+    ['campaignIncidentHistory','/api/v1/marketing-campaigns/finance-incidents/audit-history'],
     ['channels','/api/v1/marketing-channels'],
     ['channelRequests','/api/v1/marketing-channels/change-requests'],
     ['channelAuditHistory','/api/v1/marketing-channels/change-requests/audit-history'],
@@ -598,11 +619,34 @@ async function refresh(){
     state.campaignSalesReviews=[];state.campaignSalesLoadError=false;
     state.campaignFinanceHandoffs=[];state.campaignFinanceLoadError=false;
     state.campaignFinanceIncidents=[];state.campaignIncidentLoadError=false;
+    state.campaignIncidentHistory=[];state.campaignIncidentHistoryLoadError=false;
     state.channelRequests=[];state.channelRequestLoadError=false;
     state.channelAuditHistory=[];state.channelAuditLoadError=false;state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
-    if(key==='campaignFinanceIncidents'){
+    if(key==='campaignIncidentHistory'){
+      const items=r.status==='fulfilled'?r.value?.items:null;
+      const fields=['audit_id','incident_id','review_id','issue_kind','event_name',
+        'actor_user_id','happened_at','event_status','current_incident_status',
+        'finance_authorized','execution_allowed'];
+      const expectedStatus={
+        CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED:'open',
+        CAMPAIGN_FINANCE_ISSUE_ESCALATED:'manual_escalated',
+        CAMPAIGN_FINANCE_ISSUE_RECHECK_REQUESTED:'closed_for_recheck'
+      };
+      const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
+        x&&Object.keys(x).every(k=>fields.includes(k))&&
+        fields.every(k=>Object.hasOwn(x,k))&&
+        ['audit_id','incident_id','review_id','actor_user_id','happened_at']
+         .every(k=>typeof x[k]==='string')&&
+        ['integrity_mismatch','supporting_materials_gap'].includes(x.issue_kind)&&
+        Object.hasOwn(expectedStatus,x.event_name)&&
+        x.event_status===expectedStatus[x.event_name]&&
+        ['open','manual_escalated','closed_for_recheck'].includes(x.current_incident_status)&&
+        x.finance_authorized===false&&x.execution_allowed===false);
+      state.campaignIncidentHistory=valid?items:[];
+      state.campaignIncidentHistoryLoadError=!valid;
+    }else if(key==='campaignFinanceIncidents'){
       const items=r.status==='fulfilled'?r.value?.items:null;
       const fields=['incident_id','review_id','campaign_id','reported_by','issue_kind',
         'observed_readiness','status','created_at','reviewed_at','reviewed_by','can_triage'];
@@ -724,6 +768,10 @@ function logout(notice=true){
   state.campaignSalesReviews=[];state.campaignSalesLoadError=false;
   state.campaignFinanceHandoffs=[];state.campaignFinanceLoadError=false;
   state.campaignFinanceIncidents=[];state.campaignIncidentLoadError=false;
+  state.campaignIncidentHistory=[];state.campaignIncidentHistoryLoadError=false;
+  $('campaign-incident-history-list').replaceChildren();
+  $('campaign-incident-history-total').textContent='0 条';
+  $('campaign-incident-history-status').textContent='未登录，异常审计时间线已清空。';
   $('campaign-incident-list').replaceChildren();
   $('campaign-incident-report-choice').replaceChildren();
   $('campaign-incident-triage-choice').replaceChildren();

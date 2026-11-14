@@ -72,6 +72,12 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const auditHistory=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+   '/api/v1/marketing-campaigns/finance-incidents/audit-history',
+   {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
  const reportIncident=async(staff,id,kind,requestKey=key(),reason='虚构资料需独立复核')=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
    '/api/v1/marketing-campaigns/finance-handoffs/'+id+'/incidents',{
@@ -292,13 +298,33 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   }
   assert.equal((await handoffs(B)).status,401,'unbound employee cannot enumerate finance handoffs');
   // V3.2-62: sales-side exception reporting, independent triage, and ongoing finance hold.
+  assert.equal((await auditHistory(A)).status,200);
+  assert.equal((await auditHistory(A)).data.items.filter(x=>x.review_id===reviewId).length,0,
+    'there is no fabricated incident audit entry before reporting');
   const firstIncidentKey=key();
   const first=await reportIncident(A,reviewId,'supporting_materials_gap',firstIncidentKey);
   assert.equal(first.status,200,JSON.stringify(first));
   assert.equal(first.data.status,'open');
   assert.equal(first.data.finance_authorized,false);
   const incident1=first.data.incident_id;incidentIds.push(incident1);
+  let audit=(await auditHistory(A));
+  assert.equal(audit.status,200,JSON.stringify(audit));
+  let eventRows=audit.data.items.filter(x=>x.incident_id===incident1);
+  assert.equal(eventRows.length,1,'first reporting creates exactly one audit event');
+  assert.equal(eventRows[0].event_name,'CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED');
+  assert.equal(eventRows[0].event_status,'open');
+  assert.equal(eventRows[0].current_incident_status,'open');
+  assert.equal(eventRows[0].finance_authorized,false);
+  assert.equal(eventRows[0].execution_allowed,false);
+  for(const key of ['before_business_json','after_business_json','evidence_ref',
+   'report_reason','review_reason','reason_zh','request_key','organization_id']){
+    assert.equal(Object.hasOwn(eventRows[0],key),false,
+     'incident audit must hide sensitive field '+key);
+  }
+  assert.equal((await auditHistory(B)).status,401,'unbound employee cannot read incident audit');
   assert.equal((await reportIncident(A,reviewId,'supporting_materials_gap',firstIncidentKey)).data.incident_id,incident1);
+  assert.equal((await auditHistory(A)).data.items.filter(x=>x.incident_id===incident1).length,1,
+    'idempotent report must not append another event');
   assert.equal((await reportIncident(A,reviewId,'integrity_mismatch',firstIncidentKey)).status,409);
   assert.equal((await reportIncident(A,reviewId,'supporting_materials_gap')).status,409,
     'at most one active incident per handoff');
@@ -323,6 +349,16 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.equal(closure.data.finance_authorized,false);
   assert.equal((await triageIncident(M,incident1,'close_for_recheck',closeKey)).data.status,
     'closed_for_recheck');
+  audit=(await auditHistory(M));
+  assert.equal(audit.status,200,JSON.stringify(audit));
+  eventRows=audit.data.items.filter(x=>x.incident_id===incident1);
+  assert.equal(eventRows.length,2,'report + independent recheck decision are append-only');
+  assert.deepEqual(eventRows.map(x=>x.event_status).sort(),['closed_for_recheck','open'].sort());
+  assert.ok(eventRows.every(x=>x.current_incident_status==='closed_for_recheck'),
+    'current status does not rewrite historical event status');
+  assert.ok(eventRows.every(x=>x.finance_authorized===false&&x.execution_allowed===false));
+  assert.equal((await auditHistory(A)).data.items.filter(x=>x.incident_id===incident1).length,2,
+    'the original reporter can read minimal independent review history');
   assert.equal((await triageIncident(M,incident1,'escalate_manual')).status,409);
   assert.equal((await handoffs(A)).data.items.find(x=>x.review_id===reviewId).readiness_status,
     'ready_for_external_manual_check','incident closure only resumes technical readiness');
@@ -337,11 +373,27 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   const escalated=await triageIncident(M,incident2,'escalate_manual');
   assert.equal(escalated.status,200,JSON.stringify(escalated));
   assert.equal(escalated.data.status,'manual_escalated');
+  audit=(await auditHistory(A));
+  assert.equal(audit.status,200,JSON.stringify(audit));
+  eventRows=audit.data.items.filter(x=>x.incident_id===incident2);
+  assert.equal(eventRows.length,2);
+  assert.deepEqual(eventRows.map(x=>x.event_status).sort(),['manual_escalated','open'].sort());
+  assert.ok(eventRows.every(x=>x.current_incident_status==='manual_escalated'));
+  assert.ok(eventRows.every(x=>x.finance_authorized===false&&x.execution_allowed===false));
   await owner.query('UPDATE ms.marketing_campaigns SET budget_cents=99500 WHERE id=$1',[ownCampaign]);
   assert.equal((await handoffs(A)).data.items.find(x=>x.review_id===reviewId).readiness_status,
     'blocked_active_incident','manual escalation remains blocked even after snapshot restored');
   assert.equal((await reportIncident(A,reviewId,'supporting_materials_gap')).status,409,
     'escalated incident cannot be silently superseded');
+  assert.equal((await auditHistory(A)).data.items.filter(x=>x.incident_id===incident2).length,2,
+    'escalated history persists even after restoring matching campaign plan');
+  for(const pool of [aRead,bRead,mRead]){
+    await assert.rejects(pool.query('SELECT * FROM ms.audit_events'),e=>e.code==='42501');
+    await assert.rejects(pool.query("UPDATE ms.audit_events SET event_name=event_name WHERE FALSE"),
+      e=>e.code==='42501');
+    await assert.rejects(pool.query('DELETE FROM ms.audit_events WHERE FALSE'),
+      e=>e.code==='42501');
+  }
   const eventNames=(await owner.query(
     "SELECT event_name FROM ms.audit_events WHERE target_type='marketing_campaign_finance_incident' AND target_id=ANY($1::uuid[])",
     [incidentIds])).rows.map(x=>x.event_name).sort();
@@ -407,6 +459,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.equal((await get(A)).status,403);
   assert.equal((await handoffs(A)).status,403);
   assert.equal((await post(A,payload(prefix+'-revoked'))).status,403);
+  assert.equal((await auditHistory(A)).status,403,
+    'revoked external signed identity cannot read prior incident audit');
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));

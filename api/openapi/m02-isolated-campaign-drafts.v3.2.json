@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-62",
+    "version": "v3.2-63",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -594,6 +594,28 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/audit-history": {
+      "get": {
+        "operationId": "listScopedFinanceIncidentAuditHistory",
+        "summary": "Read-only scoped incident chronology, immutable sales-side events only",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100 scoped incident events: registration, escalation and recheck, no raw JSON or evidence"
+          },
+          "403": {
+            "description": "Approved strict staff-only read"
+          },
+          "500": {
+            "description": "Fail closed on overlimit or invalid projection"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
@@ -602,5 +624,7 @@
   "x-finance-handoff-readonly": true,
   "x-finance-handoff-execution-allowed": false,
   "x-finance-readiness-does-not-authorize-spend": true,
-  "x-finance-incidents-never-authorize-spend": true
+  "x-finance-incidents-never-authorize-spend": true,
+  "x-finance-incident-audit-readonly": true,
+  "x-finance-incident-history-allows-spend": false
 }

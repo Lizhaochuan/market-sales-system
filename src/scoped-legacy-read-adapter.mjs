@@ -11,6 +11,7 @@ export const migratedLegacyReads=new Set([
   'listCampaignSalesReviews',
   'listCampaignFinanceHandoffs',
   'listCampaignFinanceIncidents',
+  'listCampaignFinanceIncidentHistory',
   'listChannelChangeRequests',
   'listChannelAuditHistory',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
@@ -23,6 +24,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listCampaignFinanceIncidentHistory:
+    'SELECT audit_id,incident_id,review_id,issue_kind,event_name,actor_user_id,happened_at,event_status,current_incident_status,finance_authorized,execution_allowed FROM ms.scoped_isolated_campaign_finance_incident_audit_history ORDER BY happened_at DESC,audit_id LIMIT 101',
   listCampaignFinanceIncidents:
     'SELECT incident_id,review_id,campaign_id,reported_by,issue_kind,observed_readiness,status,created_at,reviewed_at,reviewed_by,can_triage FROM ms.scoped_isolated_campaign_finance_incidents ORDER BY created_at DESC,incident_id LIMIT 101',
   listCampaignFinanceHandoffs:
@@ -148,7 +151,7 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents'].includes(operation)&&r.rows.length>100)
+      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)
