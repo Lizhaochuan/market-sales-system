@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],downstreamReconciliationEligible:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -74,6 +74,12 @@ function fillOptions(){
       'lead_id',v=>'本人已创建线索 · '+v.contact_name],
     ownedStudentChoices:[state.students.filter(v=>v.owner_user_id===state.user?.staff_id),
       'student_id',v=>v.display_name+' · 仅本学生'],
+    downstreamReconciliationCandidates:[state.downstreamReconciliationEligible,
+      'case_id',v=>v.student_name+' · '+v.opportunity_count+'项商机'+
+        (v.order_count>0?' · 含'+v.order_count+'笔订单':'')],
+    pendingDownstreamReconciliations:[state.downstreamReconciliations.filter(v=>v.status==='pending'),
+      'reconciliation_id',v=>v.student_name+' · '+
+        (v.resolution==='original_student_valid'?'申请核对误报并解除隔离':'申请交由跨部门人工处理')],
     downstreamCorrectionCandidates:[state.downstreamCorrectionEligible,
       'association_request_id',v=>v.student_name+' · 涉及'+v.opportunity_count+'项商机'],
     pendingDownstreamCorrections:[state.downstreamCorrectionCases.filter(v=>v.status==='pending'),
@@ -200,6 +206,19 @@ function render(){
     x.contact_name+' · '+x.event_type,
     '咨询时间：'+formatDate(x.occurred_at)+' · 申请时间：'+formatDate(x.created_at),
     ({pending:'待主管审核',reviewed_eligible:'候选核查通过（未生成线索）',rejected:'已驳回'})[x.status]||'状态待核对','候'));
+  $('downstream-reconciliation-workbench').hidden=!state.strict;
+  $('downstream-reconciliation-decision-card').hidden=!state.strict||
+    state.capabilities.review_downstream_reconciliation!==true;
+  if(state.strict){
+    paint('downstream-reconciliation-list',state.downstreamReconciliations,x=>record(
+      x.student_name,
+      '申请方向：'+(x.resolution==='original_student_valid'?'核实原学生关联是否正确':'真实错误需跨部门人工纠正')+
+      ' · '+x.opportunity_count+'项商机、'+x.order_count+'笔订单、'+x.trial_count+'项试课',
+      ({pending:'等待第二名独立主管审核，隔离保持',
+        released:'已核实误报，且无下游业务负担，隔离解除',
+        external_action_required:'已登记跨部门人工处理，隔离继续保持',
+        rejected:'第二轮核查被驳回，隔离继续保持'})[x.status]||'待核实','审'));
+  }
   $('downstream-correction-workbench').hidden=!state.strict;
   $('downstream-correction-decision-card').hidden=!state.strict||
     state.capabilities.review_downstream_student_correction!==true;
@@ -330,7 +349,9 @@ async function refresh(){
     ['studentLinkReviews','/api/v1/lead-student-link-reviews'],
     ['currentStudentLinks','/api/v1/lead-student-links/current'],
     ['downstreamCorrectionCases','/api/v1/downstream-student-corrections'],
-    ['downstreamCorrectionEligible','/api/v1/downstream-student-corrections/eligible']
+    ['downstreamCorrectionEligible','/api/v1/downstream-student-corrections/eligible'],
+    ['downstreamReconciliations','/api/v1/downstream-reconciliations'],
+    ['downstreamReconciliationEligible','/api/v1/downstream-reconciliations/eligible']
   ]:[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],['leads','/api/v1/leads'],
@@ -338,7 +359,7 @@ async function refresh(){
   ];
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
   if(state.strict)for(const key of ['leads','opportunities','families'])state[key]=[];
-  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];}
+  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];state.downstreamReconciliationEligible=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     state[key]=r.status==='fulfilled'?r.value.items||[]:[];
@@ -361,7 +382,7 @@ function setView(view){
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   applyStrictLayout();
-  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions','leadStudentRequests','leadAdjustmentRequests','leadCorrectionNotes','studentLinkReviews','currentStudentLinks','downstreamCorrectionCases','downstreamCorrectionEligible'])state[key]=[];
+  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions','leadStudentRequests','leadAdjustmentRequests','leadCorrectionNotes','studentLinkReviews','currentStudentLinks','downstreamCorrectionCases','downstreamCorrectionEligible','downstreamReconciliations','downstreamReconciliationEligible'])state[key]=[];
   document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
   $('workspace').hidden=true;$('login-screen').hidden=false;
   $('login-form').reset();$('external-login-form').reset();$('audit-list').replaceChildren();
@@ -646,6 +667,23 @@ register('downstream-correction-decision-form',async d=>{
   return d.decision==='hold_active'?
     '已独立确认继续保护相关下游商机；错误学生关联尚未更正，财务和合同未变':
     '该次隔离保护申请已驳回，原业务记录未改变';
+});
+register('downstream-reconciliation-request-form',async d=>{
+  await api('/api/v1/downstream-reconciliations',{method:'POST',body:{
+    case_id:d.case_id,resolution:d.resolution,
+    evidence_ref:d.evidence_ref.trim(),
+    independent_basis_ref:d.independent_basis_ref.trim(),reason_zh:d.reason_zh.trim()
+  }});
+  return '跨模块核实申请已提交；必须由不同于第一位主管的第二位主管审核，现有隔离继续有效';
+});
+register('downstream-reconciliation-decision-form',async d=>{
+  await api('/api/v1/downstream-reconciliations/'+encodeURIComponent(d.reconciliation_id)+
+    '/decision',{method:'POST',body:{
+      decision:d.decision,evidence_ref:d.evidence_ref.trim(),reason_zh:d.reason_zh.trim()
+    }});
+  return d.decision==='rejected'?
+    '第二轮核查已驳回，销售隔离继续保持':
+    '第二轮独立核查已完成；只有原关联经确认正确且不存在下游负担，才会解除销售隔离';
 });
 register('event-form',async d=>{
   const created=await api('/api/v1/contact-events',{method:'POST',body:{
