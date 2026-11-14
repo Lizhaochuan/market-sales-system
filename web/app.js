@@ -572,7 +572,8 @@ function logout(notice=true){
 function applyStrictLayout(){
   const allowed=new Set(['overview','students','contacts','leads','channels','campaigns']);
   for(const nav of document.querySelectorAll('button[data-view]')){
-    nav.hidden=state.strict&&!allowed.has(nav.dataset.view);
+    nav.hidden=(state.strict&&!allowed.has(nav.dataset.view))||
+      (!state.strict&&nav.dataset.view==='campaigns');
   }
   const contactLink=$('contact-link-form');
   if(contactLink)contactLink.closest('.panel').hidden=false;
