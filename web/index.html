@@ -268,6 +268,62 @@
           <div id="lead-candidates-list" class="record-list"></div>
         </article>
       </div>
+      <div id="conversion-readiness-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>正式转换预审与跨员工归因争议</h2>
+          <p>只记录审批条件；预审通过仍不创建正式销售线索、不更改学生、跟进归属、合同或财务。</p></div>
+        <div class="two-col">
+          <article class="panel"><h3>申请正式转换前的条件核查</h3>
+            <form id="conversion-readiness-request-form" class="field-stack">
+              <label>本人已核查候选 <select name="candidate_id" data-options="eligibleLeadCandidates" required></select></label>
+              <label>申请原因 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构预审证据 <input name="evidence_ref" maxlength="200" required></label>
+              <p class="form-hint">拒绝联系、重复线索、管理权变更或待决归因争议会阻止预审通过。</p>
+              <button class="primary" type="submit">提交转换预审申请</button>
+            </form>
+          </article>
+          <article class="panel" id="readiness-decision-card" hidden><h3>独立主管审核转换条件</h3>
+            <form id="conversion-readiness-decision-form" class="field-stack">
+              <label>待审申请 <select name="review_id" data-options="pendingReadiness" required></select></label>
+              <label>结论 <select name="decision"><option value="cleared">通过条件核查（不生成线索）</option><option value="rejected">驳回预审</option></select></label>
+              <label>审核原因 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构审核材料 <input name="evidence_ref" maxlength="200" required></label>
+              <button class="primary" type="submit">保存独立预审结论</button>
+            </form>
+          </article>
+        </div>
+        <div class="two-col space-top">
+          <article class="panel"><h3>登记跨员工咨询归因争议</h3>
+            <form id="attribution-dispute-request-form" class="field-stack">
+              <label>本人真实咨询与候选 <select name="choice_key" data-options="disputableCandidates" required></select></label>
+              <label>争议原因 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构本人咨询证明 <input name="evidence_ref" maxlength="200" required></label>
+              <p class="form-hint">只有自己真实登记过的同一联系人咨询可以发起争议，不能自动转移归因。</p>
+              <button class="secondary" type="submit">提交归因争议</button>
+            </form>
+          </article>
+          <article class="panel" id="attribution-decision-card" hidden><h3>独立主管裁决归因争议</h3>
+            <form id="attribution-dispute-decision-form" class="field-stack">
+              <label>待裁决争议 <select name="dispute_id" data-options="pendingAttributionDisputes" required></select></label>
+              <label>裁决 <select name="decision"><option value="upheld">支持异议，阻止原归因通过</option><option value="rejected">驳回异议，另行预审</option></select></label>
+              <label>裁决理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构独立证据 <input name="evidence_ref" maxlength="200" required></label>
+              <button class="primary" type="submit">保存独立争议裁决</button>
+            </form>
+          </article>
+        </div>
+        <div class="two-col space-top">
+          <article class="panel"><h3>转换预审记录与当前有效状态</h3><div id="readiness-list" class="record-list"></div></article>
+          <article class="panel"><h3>我的归因争议及待审案件</h3><div id="attribution-disputes-list" class="record-list"></div></article>
+        </div>
+        <article class="panel space-top" id="readiness-revoke-card" hidden><h3>主管撤销已通过的转换预审</h3>
+          <form id="conversion-readiness-revoke-form" class="field-stack">
+            <label>已通过预审 <select name="review_id" data-options="clearedReadiness" required></select></label>
+            <label>撤销原因 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+            <label>虚构证据 <input name="evidence_ref" maxlength="200" required></label>
+            <button class="secondary" type="submit">撤销预审并保留不可变决定</button>
+          </form>
+        </article>
+      </div>
       <article class="panel space-top" id="strict-consultation-card" hidden>
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>
