@@ -15,6 +15,7 @@ export const migratedLegacyReads=new Set([
   'listCampaignFinanceEscalationFollowups',
   'listCampaignFinanceEscalationEvidenceGates',
   'listCampaignCrossModuleAcceptancePrerequisites',
+  'listCampaignCrossModuleTrustFailureGates',
   'listChannelChangeRequests',
   'listChannelAuditHistory',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
@@ -27,6 +28,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listCampaignCrossModuleTrustFailureGates:
+    'SELECT incident_id,review_id,incident_status,sales_packet_complete,trust_failure_code,failure_disposition,compensation_boundary,external_signature_verified,signature_key_current_verified,signer_role_separation_verified,signed_digest_bound_to_snapshot,receipt_freshness_verified,signer_revocation_checked,replay_nonce_registry_checked,finance_signed_receipt_verified,academic_signed_attestation_verified,external_reconciliation_verified,compensation_write_allowed,original_records_mutable,three_party_acceptance_verified,hold_active,release_eligible,finance_authorized,execution_allowed,activity_publish_allowed FROM ms.scoped_isolated_campaign_cross_module_trust_failure_gates ORDER BY incident_id LIMIT 101',
   listCampaignCrossModuleAcceptancePrerequisites:
     'SELECT incident_id,review_id,incident_status,sales_packet_complete,prerequisite_status,finance_principal_verified,finance_signed_receipt_verified,finance_budget_decision_verified,academic_principal_verified,academic_student_impact_reconciled,academic_signed_attestation_verified,cross_module_evidence_reconciled,three_party_acceptance_verified,compensation_history_verified,hold_active,release_eligible,finance_authorized,execution_allowed,activity_publish_allowed FROM ms.scoped_isolated_campaign_cross_module_acceptance_prerequisites ORDER BY incident_id LIMIT 101',
   listCampaignFinanceEscalationEvidenceGates:
@@ -160,7 +163,7 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites'].includes(operation)&&r.rows.length>100)
+      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)

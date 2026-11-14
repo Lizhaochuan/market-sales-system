@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-66",
+    "version": "v3.2-67",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -756,6 +756,28 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/trust-failure-gates": {
+      "get": {
+        "operationId": "listScopedCrossModuleTrustFailureGates",
+        "summary": "Read-only external trust failures and compensation hard hold; not a signature verifier",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100 scoped blocked records. All signature, revocation, compensation and release flags false."
+          },
+          "403": {
+            "description": "Strict staff and dedicated reader principal required"
+          },
+          "500": {
+            "description": "Projection/overflow failure, fail closed"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
@@ -776,5 +798,8 @@
   "x-escalation-evidence-allows-hold-release": false,
   "x-cross-module-acceptance-protocol-status": "proposed-not-authorized",
   "x-finance-and-academic-trust-chains-established": false,
-  "x-three-party-release-endpoint-implemented": false
+  "x-three-party-release-endpoint-implemented": false,
+  "x-external-signature-verification-implemented": false,
+  "x-incident-compensation-write-implemented": false,
+  "x-trust-failure-default-disposition": "reject_preserve_originals_escalate_manually"
 }
