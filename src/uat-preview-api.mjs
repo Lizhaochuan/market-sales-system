@@ -102,7 +102,7 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
    const match=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})(\/markdown)?$/.exec(url.pathname);
    const historyMatch=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})\/history$/.exec(url.pathname);
    const diffMatch=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})\/diff\/([0-9]{1,8})\/([0-9]{1,8})(\/markdown)?$/.exec(url.pathname);
-   const freezeMatch=/^\\/api\\/v1\\/uat-preview\\/reports\\/([0-9a-f-]{36})\\/freeze-state$/.exec(url.pathname);
+   const freezeMatch=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})\/freeze-state$/.exec(url.pathname);
    if(!isList&&!match&&!historyMatch&&!diffMatch&&!freezeMatch){
     send(res,404,'NOT_FOUND','没有开放该只读操作',trace);return;
    }
