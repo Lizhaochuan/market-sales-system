@@ -206,3 +206,47 @@ $('download-report').addEventListener('click',async event=>{
  }catch(error){clearReport();status(error.message,true);}
  finally{event.currentTarget.disabled=false;}
 });
+
+$('compare-history').addEventListener('click',async event=>{
+ event.currentTarget.disabled=true;
+ try{
+  if(!state.requestId||!state.history)throw Error('请先查看当前来源报告');
+  const {from,to}=chosenVersionRange();
+  const response=await api('/api/v1/uat-preview/reports/'+state.requestId+
+   '/diff/'+from+'/'+to);
+  renderHistory(response.history);
+  status('仅对比虚构引用版本差异，所有真实联调和补偿仍处于阻断。');
+ }catch(error){state.history=null;$('history-panel').hidden=true;status(error.message,true);}
+ finally{event.currentTarget.disabled=false;}
+});
+$('export-history').addEventListener('click',async event=>{
+ event.currentTarget.disabled=true;
+ try{
+  if(!state.requestId||!state.history||
+   !state.requests.some(x=>x.request_id===state.requestId))
+   throw Error('必须重新核对当前机构的来源报告');
+  const {from,to}=chosenVersionRange();
+  if(from!==state.history.from||to!==state.history.to)
+   throw Error('请先点击「核对版本差异」，再导出当前选择的版本');
+  const id=state.requestId;
+  // Re-check signed employee, scoped DB identity and the latest
+  // fictional-only revision before attempting export.
+  const latest=await api('/api/v1/uat-preview/reports/'+id+'/history');
+  if(latest.history?.current!==state.history.current)
+   throw Error('发现较新虚构证据历史，请重新查看报告后再导出');
+  const markdown=await api('/api/v1/uat-preview/reports/'+id+
+   '/diff/'+from+'/'+to+'/markdown',{raw:true});
+  if(!markdown.includes('禁止真实联调')||
+   !markdown.includes('禁止解除学生错误关联隔离'))
+   throw Error('导出内容缺失安全隔离声明');
+  const blob=new Blob([markdown],{type:'text/markdown;charset=utf-8'});
+  const href=URL.createObjectURL(blob);
+  try{
+   const link=document.createElement('a');
+   link.href=href;link.download='uat-audit-'+id+'-'+from+'-'+to+'.md';
+   document.body.append(link);link.click();link.remove();
+  }finally{setTimeout(()=>URL.revokeObjectURL(href),1000);}
+  status('已重新核对身份、机构和最新历史水位；仅导出虚构证据差异。');
+ }catch(error){status(error.message,true);}
+ finally{event.currentTarget.disabled=false;}
+});
