@@ -39,18 +39,18 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
    "INSERT INTO ms.identity_change_requests(organization_id,action,target_staff_id,"+
    "issuer,subject,requested_by,request_evidence_ref,request_reason_zh) "+
    "VALUES($1,'bind',$2,$3,$4,$5,'本机员工测试资料','独立主管核验') RETURNING id",
-   [org,target,issuer,subjects.get(target),reviewer]);
+   [org,target,issuer,subjects.get(target),target===M?A:reviewer]);
   await admin.query(
    "INSERT INTO ms.identity_change_decisions(request_id,reviewer_user_id,decision,"+
    "review_evidence_ref,reason_zh) VALUES($1,$2,'approved','独立核实凭据','虚构员工核验')",
-   [q.rows[0].id,reviewer===M?M2:M]);
+   [q.rows[0].id,M2]);
   await admin.query(
    "UPDATE ms.identity_change_requests SET status='approved',decided_by=$2,decided_at=now() WHERE id=$1",
-   [q.rows[0].id,reviewer===M?M2:M]);
+   [q.rows[0].id,M2]);
   await admin.query(
    "INSERT INTO ms.staff_identity_bindings(staff_user_id,issuer,subject,bound_by,approval_request_id) "+
    "VALUES($1,$2,$3,$4,$5)",
-   [target,issuer,subjects.get(target),reviewer===M?M2:M,q.rows[0].id]);
+   [target,issuer,subjects.get(target),M2,q.rows[0].id]);
  }
  let app,staffPage,managerPage,createdId;
  const name='隔离界面渠道-'+randomUUID();
