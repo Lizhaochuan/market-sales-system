@@ -264,7 +264,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     assert.equal(Object.hasOwn(item,sensitive),false,sensitive+' should not leak');
    }
   }
-  assert.equal((await handoffs(B)).status,403,'unbound employee cannot enumerate finance handoffs');
+  assert.equal((await handoffs(B)).status,401,'unbound employee cannot enumerate finance handoffs');
   assert.equal((await decideSales(M,reviewId,'approved',decisionKey)).data.status,
    'sales_approved_pending_finance');
   assert.equal((await decideSales(M,reviewId,'approved')).status,409);
