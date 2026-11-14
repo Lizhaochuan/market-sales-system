@@ -96,9 +96,35 @@ export function renderBlockedJointUatMarkdown(report){
     report.fixture_sources_only!==true||report.production_integration_allowed!==false||
     report.execution_allowed!==false||report.release_allowed!==false||
     report.real_owner_approval_complete!==false||
+    report.real_finance_source_connected!==false||
+    report.real_crm_source_connected!==false||
+    report.technical_ci_is_business_approval!==false||
+    report.finance_check_count!==12||report.academic_check_count!==12||
+    !Number.isSafeInteger(report.recorded_missing_events)||
+    report.recorded_missing_events<0||
     !Array.isArray(report.tasks)||report.tasks.length!==16||
     !UUID.test(report.finance_request_id||'')||
-    !UUID.test(report.academic_request_id||''))invalid();
+    !UUID.test(report.academic_request_id||'')||
+    report.finance_request_id===report.academic_request_id)invalid();
+ const seen=new Set();
+ let sum=0;
+ for(const t of report.tasks){
+  if(!t||typeof t!=='object'||!expected.includes(t.code)||seen.has(t.code)||
+    t.department!==t.code.split('_')[0]||
+    t.status!=='待真实业务证据／禁止联调'||
+    typeof t.label!=='string'||typeof t.evidence!=='string'||
+    !t.sources||typeof t.sources!=='object'||
+    !Number.isSafeInteger(t.missing_events)||t.missing_events<0)invalid();
+  const f=t.sources.finance,a=t.sources.academic;
+  const validCount=n=>n===null||(Number.isSafeInteger(n)&&n>=0);
+  if(!validCount(f)||!validCount(a)||
+    (t.department==='finance'&&(f===null||a!==null))||
+    (t.department==='academic'&&(a===null||f!==null))||
+    (['sales','security'].includes(t.department)&&(f===null||a===null))||
+    (f===null?0:f)+(a===null?0:a)!==t.missing_events)invalid();
+  seen.add(t.code);sum+=t.missing_events;
+ }
+ if(seen.size!==16||sum!==report.recorded_missing_events)invalid();
  const lines=[
   '# V3.2-50｜财务＋教务联合真实准入待办（虚构只读）','',
   '> 本文件来自同机构虚构来源的隔离安全账号；不是审批、授权或执行通知。','',
