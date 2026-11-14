@@ -1,0 +1,59 @@
+{
+  "schema_version": "v3.2-37-preflight-v1",
+  "baseline_pr": 43,
+  "baseline_sha": "3ad9d96afab9c860fb0eccd88b130aba0a1a38c7",
+  "scope": "documentation-only",
+  "primary_pr_chain": [
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    39,
+    40,
+    41,
+    42,
+    43
+  ],
+  "alternate_prs": [
+    {
+      "number": 37,
+      "version": "V3.2-29",
+      "decision": "NOT_SELECTED_REVIEW_REQUIRED"
+    },
+    {
+      "number": 38,
+      "version": "V3.2-32",
+      "decision": "NOT_SELECTED_REVIEW_REQUIRED"
+    }
+  ],
+  "migration_first": "001",
+  "migration_last": "038",
+  "migration_count": 38,
+  "new_migration": false,
+  "required_approvals": [
+    "AUTH-FIN",
+    "AUTH-CRM",
+    "AUTH-CONTRACT",
+    "AUTH-SEC"
+  ],
+  "status": "BLOCKED_NOT_AUTHORIZED",
+  "production_integration_allowed": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "real_business_uat_completed": false,
+  "wrong_student_downstream_hold_required": true,
+  "review_tasks": [
+    "compare_primary_and_alternate_pr_files",
+    "review_migration_objects_and_rollback",
+    "confirm_rls_and_tenant_isolation",
+    "obtain_real_external_authority_contracts",
+    "obtain_independent_uat_signatures"
+  ],
+  "all_review_tasks_complete": false
+}
