@@ -66,6 +66,9 @@ const routeDefs=[
   ['GET',/^\/api\/v1\/marketing-campaigns\/drafts$/,'listCampaignDrafts'],
   ['POST',/^\/api\/v1\/marketing-campaigns\/drafts$/,'createCampaignDraft'],
   ['POST',/^\/api\/v1\/marketing-campaigns\/drafts\/([0-9a-f-]+)\/revisions$/,'reviseCampaignDraft'],
+  ['GET',/^\/api\/v1\/marketing-campaigns\/sales-reviews$/,'listCampaignSalesReviews'],
+  ['POST',/^\/api\/v1\/marketing-campaigns\/drafts\/([0-9a-f-]+)\/sales-review-requests$/,'requestCampaignSalesReview'],
+  ['POST',/^\/api\/v1\/marketing-campaigns\/sales-reviews\/([0-9a-f-]+)\/decision$/,'decideCampaignSalesReview'],
   ['GET',/^\/api\/v1\/marketing-channels\/change-requests$/,'listChannelChangeRequests'],
   ['GET',/^\/api\/v1\/marketing-channels\/change-requests\/audit-history$/,'listChannelAuditHistory'],
   ['POST',/^\/api\/v1\/marketing-channels\/change-requests$/,'requestChannelChange'],
@@ -562,7 +565,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
       // Channel maintenance is CI-only and requires approved strict staff logins.
       // Never run this through the broad tenant-level demo connection.
-      if(!strictStaffMode&&route.op==='reviseCampaignDraft')
+      if(!strictStaffMode&&['listCampaignSalesReviews','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft'].includes(route.op))
         fail(403,'STAFF_ROUTE_UNMIGRATED','仅已核实员工可修改隔离活动草稿');
       if(!strictStaffMode&&['listCampaignDrafts','createCampaignDraft','listChannelChangeRequests','listChannelAuditHistory','requestChannelChange','reviewChannelChange'].includes(route.op))
         fail(403,'STAFF_ROUTE_UNMIGRATED','渠道维护只能通过隔离员工独立审批流程');
@@ -660,6 +663,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
               request_lead_adjustment:true,review_lead_adjustment:ctx.manager,
               propose_channel_change:true,review_channel_change:ctx.manager,
               create_campaign_draft:true,revise_own_campaign_draft:true,
+              request_campaign_sales_review:true,review_campaign_sales:ctx.manager,
             manage_own_leads:false,propose_family_review:false,
             decide_other_person_family_review:false,review_family_audit:false,
             manage_identity_requests:false,
