@@ -188,7 +188,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
     body:JSON.stringify({code:'INTERNAL_ERROR',message:'虚构审计投影故障'})}));
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(staffPage.locator('#channel-audit-list')).toBeEmpty();
-  await expect(staffPage.locator('#campaigns-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaigns-list')).toContainText(name+'-活动');
   await expect(staffPage.locator('#channel-audit-status')).toContainText('已清空旧记录');
   await expect(staffPage.locator('#channel-request-card')).toBeHidden();
   await staffPage.unroute('**/api/v1/marketing-channels/change-requests/audit-history');
@@ -202,6 +202,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#workspace')).toBeHidden();
   await expect(staffPage.locator('#channel-requests-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-audit-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaigns-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{
