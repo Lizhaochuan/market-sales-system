@@ -151,8 +151,17 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
     send(res,200,'OK','历史冻结状态仅供只读审计',trace,{freeze_state:state});return;
    }
    if(historyMatch||diffMatch){
-    const from=diffMatch?Number(diffMatch[2]):0;
-    const to=diffMatch?Number(diffMatch[3]):null;
+    let from=diffMatch?Number(diffMatch[2]):0;
+    let to=diffMatch?Number(diffMatch[3]):null;
+    if(historyMatch){
+     const head=await client.query(
+      'SELECT ms.readonly_fixture_uat_freeze_state($1) AS result',[reportId]);
+     const seq=head.rows[0]?.result?.current_sequence;
+     if(!Number.isSafeInteger(seq)||seq<0)throw Error('Invalid history watermark');
+     // Bound this preview to the newest 200 events. Older records remain
+     // available through explicit version-window requests, never truncated.
+     from=Math.max(0,seq-200);to=seq;
+    }
     const exportAudit=Boolean(diffMatch?.[4]);
     let result;
     if(exportAudit){
