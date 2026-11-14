@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -69,6 +69,15 @@ function fillOptions(){
     clearedForFinal:[state.readinessReviews.filter(v=>
       v.status==='cleared'&&v.effective_status==='转换预审已通过（未创建线索）'),
       'review_id',v=>v.contact_name+' · 预审已通过'],
+    ownedExecutedLeads:[state.finalLeadConversions.filter(v=>
+      v.status==='executed'&&v.lead_id&&v.requested_by===state.user?.staff_id),
+      'lead_id',v=>'本人已创建线索 · '+v.contact_name],
+    ownedStudentChoices:[state.students.filter(v=>v.owner_user_id===state.user?.staff_id),
+      'student_id',v=>v.display_name+' · 仅本学生'],
+    pendingLinkRequests:[state.leadStudentRequests.filter(v=>v.status==='pending'),
+      'request_id',v=>v.student_name+' · 单学生待核实'],
+    pendingAdjustmentRequests:[state.leadAdjustmentRequests.filter(v=>v.status==='pending'),
+      'request_id',v=>v.action_name+' · 线索变更待审'],
     pendingFinalConversions:[state.finalLeadConversions.filter(v=>v.status==='pending'),
       'authorization_id',v=>v.contact_name+' · 等待最终授权'],
     approvedFinalConversions:[state.finalLeadConversions.filter(v=>v.status==='approved'),
@@ -181,6 +190,23 @@ function render(){
     x.contact_name+' · '+x.event_type,
     '咨询时间：'+formatDate(x.occurred_at)+' · 申请时间：'+formatDate(x.created_at),
     ({pending:'待主管审核',reviewed_eligible:'候选核查通过（未生成线索）',rejected:'已驳回'})[x.status]||'状态待核对','候'));
+  $('lead-governance-workbench').hidden=!state.strict;
+  $('lead-student-link-decision-card').hidden=!state.strict||
+    state.capabilities.review_student_lead_link!==true;
+  $('lead-adjustment-decision-card').hidden=!state.strict||
+    state.capabilities.review_lead_adjustment!==true;
+  if(state.strict){
+    paint('lead-student-associations-list',state.leadStudentRequests,x=>record(
+      x.student_name,'对应指定学生 · '+formatDate(x.created_at),
+      ({pending:'待主管审核',approved_pending:'已登记待核实（未确认）',
+        rejected:'已驳回'})[x.status]||'待核实','学'));
+    paint('lead-adjustments-list',state.leadAdjustmentRequests,x=>record(
+      x.action_name,'申请时间：'+formatDate(x.created_at),
+      ({pending:'待主管审核',approved:'已批准并留存记录',
+        rejected:'已驳回'})[x.status]||'待核实','改'));
+    paint('lead-correction-notes-list',state.leadCorrectionNotes,x=>record(
+      '线索业务说明更正',x.corrected_note,'更正时间：'+formatDate(x.applied_at),'注'));
+  }
   $('final-lead-conversion-workbench').hidden=!state.strict;
   $('final-lead-conversion-decision-card').hidden=!state.strict||
     state.capabilities.approve_final_lead_conversion!==true;
@@ -261,7 +287,10 @@ async function refresh(){
     ['readinessReviews','/api/v1/conversion-readiness'],
     ['attributionDisputes','/api/v1/attribution-disputes'],
     ['disputableCandidates','/api/v1/attribution-disputes/eligible'],
-    ['finalLeadConversions','/api/v1/lead-conversions']
+    ['finalLeadConversions','/api/v1/lead-conversions'],
+    ['leadStudentRequests','/api/v1/lead-student-associations'],
+    ['leadAdjustmentRequests','/api/v1/lead-adjustments'],
+    ['leadCorrectionNotes','/api/v1/lead-correction-notes']
   ]:[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],['leads','/api/v1/leads'],
@@ -269,7 +298,7 @@ async function refresh(){
   ];
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
   if(state.strict)for(const key of ['leads','opportunities','families'])state[key]=[];
-  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];}
+  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     state[key]=r.status==='fulfilled'?r.value.items||[]:[];
@@ -292,7 +321,7 @@ function setView(view){
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   applyStrictLayout();
-  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions'])state[key]=[];
+  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions','leadStudentRequests','leadAdjustmentRequests','leadCorrectionNotes'])state[key]=[];
   document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
   $('workspace').hidden=true;$('login-screen').hidden=false;
   $('login-form').reset();$('external-login-form').reset();$('audit-list').replaceChildren();
@@ -499,6 +528,43 @@ register('final-lead-conversion-execute-form',async d=>{
     encodeURIComponent(d.authorization_id)+'/execute',{method:'POST',body:{}});
   if(!out?.lead_id)throw Error('没有返回已创建的正式线索，请核实实际业务状态');
   return '已原子创建一条正式销售线索；仍未自动关联学生、合同、收款或课时';
+});
+register('lead-student-link-request-form',async d=>{
+  await api('/api/v1/lead-student-associations',{method:'POST',body:{
+    lead_id:d.lead_id,student_id:d.student_id,
+    reason_zh:d.reason_zh.trim(),evidence_ref:d.evidence_ref.trim()
+  }});
+  return '已提出与这一名学生的待核实关联；不会自动确认家庭或监护关系';
+});
+register('lead-student-link-decision-form',async d=>{
+  await api('/api/v1/lead-student-associations/'+encodeURIComponent(d.request_id)+
+    '/decision',{method:'POST',body:{
+      decision:d.decision,reason_zh:d.reason_zh.trim(),
+      evidence_ref:d.evidence_ref.trim()
+    }});
+  return d.decision==='approved_pending'?
+    '已登记单名学生待核实关联，不代表监护身份或学生关系已确认':
+    '已驳回指定学生的待核实关联';
+});
+register('lead-adjustment-request-form',async d=>{
+  await api('/api/v1/lead-adjustments',{method:'POST',body:{
+    lead_id:d.lead_id,action:d.action,
+    ...(d.action==='correct_note'?{proposed_note:d.proposed_note.trim()}:{}),
+    reason_zh:d.reason_zh.trim(),evidence_ref:d.evidence_ref.trim()
+  }});
+  return d.action==='invalidate'?
+    '线索作废申请已提交，尚未作废，等待独立主管核查':
+    '业务说明更正申请已提交，原始咨询和归因保持不变';
+});
+register('lead-adjustment-decision-form',async d=>{
+  await api('/api/v1/lead-adjustments/'+encodeURIComponent(d.request_id)+
+    '/decision',{method:'POST',body:{
+      decision:d.decision,reason_zh:d.reason_zh.trim(),
+      evidence_ref:d.evidence_ref.trim()
+    }});
+  return d.decision==='approved'?
+    '独立主管已审核，线索状态或补充说明已留存不可改写记录':
+    '已驳回该次线索调整申请';
 });
 register('event-form',async d=>{
   const created=await api('/api/v1/contact-events',{method:'POST',body:{
