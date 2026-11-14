@@ -177,7 +177,7 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
    const historyCross=await get('/api/v1/uat-preview/reports/'+sourceB+'/history',jwt());
    assert.equal(historyCross.status,403);
    const exportCross=await get(
-    '/api/v1/uat-preview/reports/'+sourceB+'/diff/0/0/markdown',jwt());
+    '/api/v1/uat-preview/reports/'+sourceB+'/diff/0/0/markdown',jwt(),0);
    assert.equal(exportCross.status,403);
    const cross=await get('/api/v1/uat-preview/reports/'+sourceB,jwt());
    assert.equal(cross.status,403);
