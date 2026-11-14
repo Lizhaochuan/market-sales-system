@@ -8,6 +8,7 @@ import {buildIsolatedChannelCatalog} from './marketing-channel-catalog.mjs';
 export const migratedLegacyReads=new Set([
   'listMarketingChannels',
   'listChannelChangeRequests',
+  'listChannelAuditHistory',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
   'getStudent','getLead','getOpportunity',
   'listContactCustodyRequests','listContactCustodyStaff',
@@ -18,6 +19,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listChannelAuditHistory:
+    'SELECT audit_id,request_id,event_name,actor_user_id,happened_at,action,status,requested_by FROM ms.scoped_isolated_channel_audit_history ORDER BY happened_at DESC,audit_id LIMIT 101',
   listChannelChangeRequests:
     'SELECT request_id,action,channel_id,proposed_name,proposed_parent_id,proposed_type,status,created_at,requested_by,can_review FROM ms.scoped_isolated_channel_change_requests ORDER BY created_at DESC,request_id LIMIT 101',
   listMarketingChannels:
@@ -133,7 +136,7 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      if(operation==='listChannelChangeRequests'&&r.rows.length>100)
+      if(['listChannelChangeRequests','listChannelAuditHistory'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)
