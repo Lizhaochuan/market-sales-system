@@ -21,9 +21,9 @@ test('V3.2-52 channels render as isolated Chinese text, fail closed and clear on
   "['channels','/api/v1/marketing-channels']"])
   assert.ok(js.includes(marker),'M01 data lifecycle missing: '+marker);
  assert.ok(js.includes("state.strict&&!allowed.has(nav.dataset.view)"));
- assert.ok(!js.slice(js.indexOf('const endpoints=state.strict?['),
+ assert.ok(js.slice(js.indexOf('const endpoints=state.strict?['),
   js.indexOf('  ]:[')).includes("['channels'"),
-  'strict-mode refresh must never query blocked channel endpoint');
+  'V3.2-53 strict mode must use the approved CI-only DB view, not the broad pool');
  for(const marker of ["<img src=x onerror=alert(1)>",
   "not.toContainText('上级停用的虚构子渠道')",
   "await page.unroute('**/api/v1/marketing-channels')",
@@ -41,7 +41,7 @@ test('V3.2-52 explicit-vs-inherited inactive semantics agree with isolated OpenA
   .content['application/json'].schema.properties.data.properties.channels
   .items.properties.effective_status.enum,m.channel_status_enum);
  assert.equal(o['x-production-integration-allowed'],false);
- assert.equal(o['x-strict-employee-mode-enabled'],false);
+ assert.equal(o['x-strict-employee-mode-enabled'],true);
  assert.ok(!o.paths['/api/v1/marketing-channels'].post);
 });
 test('V3.2-52 remains Draft-only partial UI and preserves immutable cross-module history',()=>{

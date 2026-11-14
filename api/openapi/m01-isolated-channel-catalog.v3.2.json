@@ -2,11 +2,11 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M01 隔离渠道目录 GET 接口",
-    "version": "v3.2-51-isolated",
-    "description": "仅本机虚构账号测试；严格员工模式仍拒绝，正式 CRM/财务及生产接口尚未授权。"
+    "version": "v3.2-53-isolated",
+    "description": "仅本机虚构账号测试：隔离演示及已通过双重身份检查的严格员工只读模式；生产无授权。严格员工数据库视图由 CI-only SQL 安装，未批准任何正式数据库迁移。"
   },
   "x-contract-status": "isolated-implemented",
-  "x-strict-employee-mode-enabled": false,
+  "x-strict-employee-mode-enabled": true,
   "x-production-integration-allowed": false,
   "x-write-operations-allowed": false,
   "servers": [
@@ -19,7 +19,7 @@
     "/api/v1/marketing-channels": {
       "get": {
         "summary": "读取当前虚构机构的渠道树",
-        "description": "只能访问经过验证的员工所在机构的营销渠道。父渠道跨机构、循环、过深或数据不完整则拒绝。返回渠道目录但不包含归因金额、学生或家庭信息。",
+        "description": "按已验证员工的数据库 SESSION_USER 绑定机构，受限账号仅能查 CI 安装的只读安全视图；演示模式仍使用独立旧查询。父渠道跨机构、层级环路或数据损坏均拒绝，不允许渠道写入。",
         "operationId": "listIsolatedMarketingChannels",
         "security": [
           {
@@ -162,7 +162,7 @@
             "description": "无有效虚构签名员工令牌"
           },
           "403": {
-            "description": "错机构身份或严格员工模式尚未迁移，拒绝访问"
+            "description": "未批准签名身份、错误/缺失员工数据库登录，或缺少严格数据库视图的访问权限"
           },
           "500": {
             "description": "渠道层级未通过一致性验证；通用错误不泄漏内部数据"
@@ -179,5 +179,6 @@
         "bearerFormat": "JWT"
       }
     }
-  }
+  },
+  "x-strict-employee-db-access": "CI_ONLY_SECURITY_BARRIER_VIEW"
 }

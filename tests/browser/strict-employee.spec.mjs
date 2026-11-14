@@ -48,6 +48,7 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
   const pages={};
   const name='严格员工中文学生-'+randomUUID();
   const contactName='严格员工中文家长-'+randomUUID();
+  const channelId=randomUUID(),channelName='严格员工只读渠道-'+randomUUID();
   async function approved(target,subject){
     const r=await owner.query(
       "INSERT INTO ms.identity_change_requests(organization_id,action,target_staff_id,"+
@@ -82,6 +83,12 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
     await expect(page.locator('nav button[data-view="opportunities"]')).toBeHidden();
     await expect(page.locator('nav button[data-view="families"]')).toBeHidden();
     await expect(page.locator('nav button[data-view="leads"]')).toBeVisible();
+    await expect(page.locator('nav button[data-view="channels"]')).toBeVisible();
+    await page.locator('nav button[data-view="channels"]').click();
+    await expect(page.locator('#channels-list')).toContainText(channelName);
+    await expect(page.locator('#channels-status')).toContainText('仅供虚构数据演示');
+    await expect(page.locator('[data-panel="channels"] button')).toHaveCount(0);
+    await page.locator('nav button[data-view="overview"]').click();
     // Consultation is migrated, but lead creation itself must remain closed.
     await page.locator('nav button[data-view="leads"]').click();
     await expect(page.locator('#event-form')).toBeVisible();
@@ -90,6 +97,8 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
     return page;
   }
   try{
+    await owner.query('INSERT INTO ms.marketing_channels(id,organization_id,name,channel_type,status) VALUES($1,$2,$3,$4,$5)',
+      [channelId,org,channelName,'web','active']);
     await approved(A,subA);await approved(B,subB);
     await open(app);
     const a=await login('A',subA);
@@ -171,6 +180,7 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
   }finally{
     await Promise.allSettled(Object.values(pages).map(x=>x.close()));
     await Promise.allSettled([app].filter(s=>s.listening).map(close));
+    await owner.query('DELETE FROM ms.marketing_channels WHERE id=$1',[channelId]);
     await Promise.all([owner.end(),identityDirectory.end(),aRead.end(),bRead.end(),aWrite.end(),bWrite.end()]);
   }
 });
