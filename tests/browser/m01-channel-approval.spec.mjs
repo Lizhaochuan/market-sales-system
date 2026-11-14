@@ -213,6 +213,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await staffPage.getByRole('button',{name:'登记销售侧交接异常'}).click();
   await expect(staffPage.locator('#toast')).toContainText('活动及预算仍未获授权');
   await expect(staffPage.locator('#campaign-incident-list')).toContainText('待独立复核');
+  await expect(staffPage.locator('#campaign-incident-history-list')).toContainText('资料异常登记');
+  await expect(staffPage.locator('#campaign-incident-history-list')).toContainText('未获财务或支出许可');
   await expect(staffPage.locator('#campaign-finance-list')).toContainText('交接资料存在异常');
   financeIncidentId=(await admin.query(
    "SELECT id FROM ms.isolated_campaign_finance_incidents WHERE review_id=$1 AND status='open'",
@@ -229,10 +231,26 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
     .fill('仅销售侧资料核对，不开放预算付款');
   await managerPage.getByRole('button',{name:'保存独立销售侧处理'}).click();
   await expect(managerPage.locator('#toast')).toContainText('没有财务审批或支出权限');
+  await expect(managerPage.locator('#campaign-incident-history-list'))
+    .toContainText('独立销售主管要求再次核查');
   expect((await admin.query('SELECT status FROM ms.isolated_campaign_finance_incidents WHERE id=$1',
     [financeIncidentId])).rows[0].status).toBe('closed_for_recheck');
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(staffPage.locator('#campaign-finance-list')).toContainText('资料一致');
+  await expect(staffPage.locator('#campaign-incident-history-list'))
+    .toContainText('独立销售主管要求再次核查');
+  // Audit endpoint failure must clear stale history and close every incident mutation.
+  await staffPage.route('**/api/v1/marketing-campaigns/finance-incidents/audit-history',
+    route=>route.fulfill({status:500,contentType:'application/json',
+      body:JSON.stringify({code:'INTERNAL_ERROR',message:'模拟审计读取故障'})}));
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-incident-history-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-incident-report-panel')).toBeHidden();
+  await expect(staffPage.locator('#campaign-incident-triage-panel')).toBeHidden();
+  await staffPage.unroute('**/api/v1/marketing-campaigns/finance-incidents/audit-history');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-incident-history-list'))
+    .toContainText('独立销售主管要求再次核查');
   expect((await admin.query('SELECT status FROM ms.marketing_campaigns WHERE id=$1',
     [campaignId])).rows[0].status).toBe('draft');
 
@@ -301,6 +319,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#channel-audit-list')).toBeEmpty();
   await expect(staffPage.locator('#campaigns-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-incident-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-incident-history-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{
