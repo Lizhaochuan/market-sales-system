@@ -1,0 +1,22 @@
+name: V3.2-74 isolated three-domain recovery regression
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-recovery-consistency.mjs'
+      - 'tests/security/v3-2-74-m02-recovery-consistency.test.mjs'
+      - '.github/workflows/v3-2-74-recovery-consistency.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-recovery:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check three-domain recovery syntax
+        run: node --check src/cross-module-recovery-consistency.mjs
+      - name: Run isolated three-domain recovery tests
+        run: node --test tests/security/v3-2-74-m02-recovery-consistency.test.mjs
