@@ -39,6 +39,10 @@ function signatureMaterial(envelope){
  for(const key of SIGNED_FIELDS)input[key]=envelope[key];
  return Buffer.from(DOMAIN+JSON.stringify(input),'utf8');
 }
+// Signing bytes are exposed solely to the in-memory fixture generator.
+export function fixtureReadOnlySigningBytes(envelope){
+ return signatureMaterial(envelope);
+}
 function reject(reason){
  const e=new Error('隔离来源校验拒绝：'+reason);
  e.code='SOURCE_FIXTURE_REJECTED';
