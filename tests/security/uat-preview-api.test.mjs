@@ -184,6 +184,53 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
    const crossDownload=await get('/api/v1/uat-preview/reports/'+sourceB+'/markdown',jwt());
    assert.equal(crossDownload.status,403);
   });
+  await t.test('all six protected success paths fail closed when final DB identity recheck fails',async()=>{
+   // Simulate a DB transport failure only on the second identity validation
+   // inside an individual HTTP request: initial approval succeeds; final
+   // post-read recheck fails. This changes no DB privileges or stored facts.
+   const originalConnect=A.connect;
+   let intercepted=0;
+   A.connect=async(...args)=>{
+    const underlying=await originalConnect.apply(A,args);
+    let identityChecks=0;
+    return {
+     query:async(...queryArgs)=>{
+      const sql=queryArgs[0];
+      if(typeof sql==='string'&&sql.includes('ms.scoped_employee_identity_valid(')){
+       identityChecks++;
+       if(identityChecks===2){
+        intercepted++;
+        throw Object.assign(Error('fictional final identity check unavailable'),{code:'08006'});
+       }
+      }
+      return underlying.query(...queryArgs);
+     },
+     release:()=>underlying.release()
+    };
+   };
+   try{
+    const targets=[
+     ['/api/v1/uat-preview/requests',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA,undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/markdown',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/freeze-state',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown',2]
+    ];
+    for(const [path,revision] of targets){
+     const response=await get(path,jwt(),revision);
+     assert.equal(response.status,500,'failed late recheck must deny '+path);
+     assert.equal(response.headers.get('cache-control'),'no-store, max-age=0');
+     const message=await response.text();
+     assert.doesNotMatch(message,new RegExp(sourceA,'i'));
+     assert.doesNotMatch(message,/fictional_api_history01|AUTH_HMAC_SECRET|fictional final identity check unavailable/);
+    }
+    assert.equal(intercepted,targets.length,'every protected response needs final recheck');
+   }finally{A.connect=originalConnect;}
+   // The temporary fault injection is gone; authorized behavior must recover.
+   const recovered=await get('/api/v1/uat-preview/reports/'+sourceA,jwt());
+   assert.equal(recovered.status,200);
+  });
   await t.test('signed identity revocation invalidates pinned DB session and concurrent next reads',async()=>{
    // An already checked-out, nonowner DB connection must re-evaluate the
    // issuer+subject binding after a committed revocation (no cached allow).
