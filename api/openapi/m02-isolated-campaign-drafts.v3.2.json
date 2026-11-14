@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-68",
+    "version": "v3.2-69",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -800,6 +800,28 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/compensation-checklist": {
+      "get": {
+        "operationId": "listIsolatedCampaignCompensationEvidenceApprovalGates",
+        "summary": "Read-only independent approval checklist; no compensation, finance authority or isolation release",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100 scoped checklist rows; all four approval stages pending, immutable original history preserved by requirement only"
+          },
+          "403": {
+            "description": "Verified strict employee and isolated read-only principal required"
+          },
+          "500": {
+            "description": "Fail closed on projection errors or overlimit"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
@@ -826,5 +848,8 @@
   "x-trust-failure-default-disposition": "reject_preserve_originals_escalate_manually",
   "x-cross-module-compensation-execution-implemented": false,
   "x-original-business-history-verification-implemented": false,
-  "x-independent-three-party-compensation-approval-implemented": false
+  "x-independent-three-party-compensation-approval-implemented": false,
+  "x-compensation-independent-approval-implemented": false,
+  "x-compensation-originals-verified": false,
+  "x-compensation-isolation-release-implemented": false
 }
