@@ -440,6 +440,10 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
     await owner.query('SELECT status FROM ms.lead_student_association_requests WHERE id=$1',
       [linkRequestId])
   ).rows[0]?.status).toBe('approved_pending');
+  expect((await owner.query(
+    'SELECT confirmation_state FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
+    [finalLeads.rows[0].id,namedStudentId]
+  )).rows[0].confirmation_state).toBe('pending_review');
   // V3.2-21: explicit human verification of this ONE student, then wrong-link withdrawal.
   await a.getByRole('button',{name:'刷新数据'}).click();
   await expect(a.locator('#student-link-verification-workbench')).toBeVisible();
@@ -507,7 +511,7 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
     [finalLeads.rows[0].id])).rows;
   expect(onlyOne).toHaveLength(1);
   expect(onlyOne[0].student_id).toBe(namedStudentId);
-  expect(onlyOne[0].confirmation_state).toBe('pending_review');
+  expect(onlyOne[0].confirmation_state).toBe('withdrawn');
   expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
     [finalLeads.rows[0].id,siblingStudentId])).rows[0].n).toBe(0);
   await a.getByRole('button',{name:'刷新数据'}).click();
