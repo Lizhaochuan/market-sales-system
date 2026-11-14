@@ -1,0 +1,41 @@
+{
+  "schema_version": "v3.2-65-m02-escalation-evidence-gates-v1",
+  "module": "M02",
+  "parent_pr": 71,
+  "parent_head": "6d90c667a83bbe3cd7a58338285fc8c98b2af320",
+  "parent_ci": 43615508209,
+  "parent_ci_conclusion": "success",
+  "scope": "CI_ONLY_SALES_PACKET_COMPLETENESS_NO_EXTERNAL_ACCEPTANCE",
+  "sql": "tests/sql/create_v3_2_65_escalation_evidence_gates.sql",
+  "endpoint": "GET /api/v1/marketing-campaigns/finance-incidents/evidence-gates",
+  "max_items": 100,
+  "packet_requirements": [
+    "sales_reporter_addendum",
+    "independent_sales_reviewer_addendum",
+    "independent_finance_requirements_note"
+  ],
+  "packet_statuses": [
+    "blocked_missing_reporter_evidence",
+    "blocked_missing_independent_sales_evidence",
+    "blocked_missing_finance_requirements_note",
+    "sales_packet_collected_external_acceptance_pending"
+  ],
+  "finance_acceptance_implemented": false,
+  "academic_acceptance_implemented": false,
+  "cross_department_acceptance_implemented": false,
+  "finance_authorized": false,
+  "execution_allowed": false,
+  "escalation_hold_release_allowed": false,
+  "production_integration_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "new_production_migration": false,
+  "migration_count": 38,
+  "student_primary": true,
+  "family_optional": true,
+  "downstream_wrong_student_hold_active": true,
+  "original_orders_payments_saleevents_lesson_history_preserved": true,
+  "external_contract_status": "proposed-unimplemented",
+  "latest_head_ci": "PENDING"
+}

@@ -78,6 +78,12 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const evidenceGates=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+   '/api/v1/marketing-campaigns/finance-incidents/evidence-gates',
+   {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
  const followups=async staff=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
    '/api/v1/marketing-campaigns/finance-incidents/follow-ups',
@@ -409,6 +415,28 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     await assert.rejects(pool.query('DELETE FROM ms.audit_events WHERE FALSE'),
       e=>e.code==='42501');
   }
+  // V3.2-65: server-side completeness is a scoped derived gate, never approval.
+  let gateResponse=await evidenceGates(A);
+  assert.equal(gateResponse.status,200,JSON.stringify(gateResponse));
+  assert.equal(gateResponse.data.items.find(x=>x.incident_id===incident1),undefined,
+   'a closed supporting-materials incident cannot enter escalated evidence gates');
+  assert.equal((await evidenceGates(B)).status,401);
+  let gate=gateResponse.data.items.find(x=>x.incident_id===incident2);
+  assert.equal(gate.sales_packet_status,'blocked_missing_reporter_evidence');
+  assert.equal(gate.sales_packet_complete,false);
+  const requireHardHold=g=>{
+    assert.equal(g.incident_status,'manual_escalated');
+    assert.equal(g.finance_acceptance_verified,false);
+    assert.equal(g.academic_acceptance_verified,false);
+    assert.equal(g.cross_department_accepted,false);
+    assert.equal(g.hold_active,true);
+    assert.equal(g.finance_authorized,false);
+    assert.equal(g.execution_allowed,false);
+    for(const secret of ['evidence_ref','reason_zh','review_reason','request_key',
+      'organization_id','report_reason','review_evidence_ref','after_business_json'])
+      assert.equal(Object.hasOwn(g,secret),false,'evidence gate leaked '+secret);
+  };
+  requireHardHold(gate);
   // V3.2-64: only the reporter and actual independent sales reviewer may append.
   assert.equal((await appendFollowup(A,incident1)).status,403,
     'closed recheck may not be used for escalation follow-up');
@@ -422,22 +450,49 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.equal(addendum.data.responsibility_boundary,'sales_reporter');
   assert.equal(addendum.data.finance_authorized,false);
   assert.equal(addendum.data.execution_allowed,false);
+  gateResponse=await evidenceGates(A);
+  gate=gateResponse.data.items.find(x=>x.incident_id===incident2);
+  assert.equal(gate.sales_packet_status,'blocked_missing_independent_sales_evidence');
+  assert.equal(gate.reporter_evidence_present,true);
+  assert.equal(gate.independent_sales_review_present,false);
+  requireHardHold(gate);
   const original=addendum.data.followup_id;
   assert.equal((await appendFollowup(A,incident2,'sales_evidence_addendum',addendumKey)).data.followup_id,
     original,'idempotent replay must not append extra note or audit');
   assert.equal((await appendFollowup(A,incident2,'external_finance_requirements_pending',addendumKey)).status,409);
+  const reviewerEvidence=await appendFollowup(M,incident2,'sales_evidence_addendum');
+  assert.equal(reviewerEvidence.status,200,JSON.stringify(reviewerEvidence));
+  assert.equal(reviewerEvidence.data.responsibility_boundary,'independent_sales_reviewer');
+  gateResponse=await evidenceGates(M);
+  gate=gateResponse.data.items.find(x=>x.incident_id===incident2);
+  assert.equal(gate.sales_packet_status,'blocked_missing_finance_requirements_note');
+  assert.equal(gate.reporter_evidence_present,true);
+  assert.equal(gate.independent_sales_review_present,true);
+  assert.equal(gate.finance_requirements_documented,false);
+  requireHardHold(gate);
   const independent=await appendFollowup(M,incident2,'external_finance_requirements_pending');
   assert.equal(independent.status,200,JSON.stringify(independent));
   assert.equal(independent.data.responsibility_boundary,'independent_sales_reviewer');
   assert.equal(independent.data.finance_authorized,false);
   assert.equal(independent.data.execution_allowed,false);
   for(const who of [A,M]){
+    const packet=await evidenceGates(who);
+    assert.equal(packet.status,200,JSON.stringify(packet));
+    const ready=packet.data.items.find(x=>x.incident_id===incident2);
+    assert.equal(ready.sales_packet_status,'sales_packet_collected_external_acceptance_pending');
+    assert.equal(ready.reporter_evidence_present,true);
+    assert.equal(ready.independent_sales_review_present,true);
+    assert.equal(ready.finance_requirements_documented,true);
+    assert.equal(ready.sales_packet_complete,true);
+    requireHardHold(ready);
+  }
+  for(const who of [A,M]){
     const notes=await followups(who);
     assert.equal(notes.status,200,JSON.stringify(notes));
     const items=notes.data.items.filter(x=>x.incident_id===incident2);
-    assert.equal(items.length,2,'two responsibility parties independently append notes');
+    assert.equal(items.length,3,'three evidence notes from two distinct responsibility parties');
     assert.deepEqual(items.map(x=>x.responsibility_boundary).sort(),
-      ['independent_sales_reviewer','sales_reporter'].sort());
+      ['independent_sales_reviewer','independent_sales_reviewer','sales_reporter'].sort());
     for(const x of items){
       assert.equal(x.incident_status,'manual_escalated');
       assert.equal(x.external_authority_state,'awaiting_external_finance_authority');
@@ -450,9 +505,9 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     }
   }
   let followupEvents=(await auditHistory(A)).data.items.filter(x=>x.incident_id===incident2);
-  assert.equal(followupEvents.length,4,'each addendum creates one append-only audit event');
+  assert.equal(followupEvents.length,5,'each addendum creates one append-only audit event');
   assert.equal(followupEvents.filter(x=>
-    x.event_name==='CAMPAIGN_FINANCE_ESCALATION_FOLLOWUP_RECORDED').length,2);
+    x.event_name==='CAMPAIGN_FINANCE_ESCALATION_FOLLOWUP_RECORDED').length,3);
   assert.ok(followupEvents.every(x=>x.current_incident_status==='manual_escalated'&&
     x.finance_authorized===false&&x.execution_allowed===false));
   assert.equal((await handoffs(A)).data.items.find(x=>x.review_id===reviewId).readiness_status,
@@ -472,6 +527,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.deepEqual(eventNames,
    ['CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED','CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED',
     'CAMPAIGN_FINANCE_ISSUE_ESCALATED','CAMPAIGN_FINANCE_ISSUE_RECHECK_REQUESTED',
+    'CAMPAIGN_FINANCE_ESCALATION_FOLLOWUP_RECORDED',
     'CAMPAIGN_FINANCE_ESCALATION_FOLLOWUP_RECORDED',
     'CAMPAIGN_FINANCE_ESCALATION_FOLLOWUP_RECORDED'].sort());
   for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
@@ -537,6 +593,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     'revoked external signed identity cannot read prior incident audit');
   assert.equal((await followups(A)).status,403,
     'revoked signed identity cannot enumerate escalation follow-ups');
+  assert.equal((await evidenceGates(A)).status,403,
+    'revoked signed identity cannot enumerate evidence gates');
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));

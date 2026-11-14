@@ -288,9 +288,13 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
     .fill('模拟外部财务审核仍未接入');
   await staffPage.locator('#campaign-escalation-followup-form textarea[name="reason_zh"]')
     .fill('销售侧仅补充材料索引，不代表财务部门签收或资金授权');
+  await expect(staffPage.locator('#campaign-evidence-list')).toContainText('缺少原报告人补充佐证');
+  await expect(staffPage.locator('#campaign-evidence-list')).toContainText('财务未签收');
   await staffPage.getByRole('button',{name:'追加销售侧核查资料'}).click();
   await expect(staffPage.locator('#toast')).toContainText('人工升级阻断保持');
   await expect(staffPage.locator('#campaign-escalation-list')).toContainText('外部财务核查事项待确认');
+  await expect(staffPage.locator('#campaign-evidence-list')).toContainText('缺少原报告人补充佐证');
+  await expect(staffPage.locator('#campaign-evidence-list')).toContainText('跨部门未通过');
   await expect(staffPage.locator('#campaign-incident-history-list')).toContainText('人工升级后销售侧补充材料');
   await expect(staffPage.locator('#campaign-finance-list')).toContainText('交接资料存在异常');
   expect((await admin.query('SELECT status FROM ms.isolated_campaign_finance_incidents WHERE id=$1',
@@ -307,6 +311,16 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await staffPage.unroute('**/api/v1/marketing-campaigns/finance-incidents/follow-ups');
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(staffPage.locator('#campaign-escalation-list')).toContainText('外部财务核查事项待确认');
+
+  await staffPage.route('**/api/v1/marketing-campaigns/finance-incidents/evidence-gates',
+    route=>route.fulfill({status:500,contentType:'application/json',
+      body:JSON.stringify({code:'INTERNAL_ERROR',message:'模拟跨部门准入核验读取失败'})}));
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-evidence-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-escalation-followup-panel')).toBeHidden();
+  await staffPage.unroute('**/api/v1/marketing-campaigns/finance-incidents/evidence-gates');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-evidence-list')).toContainText('跨部门未通过');
 
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
     status:500,contentType:'application/json',
@@ -375,6 +389,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-incident-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-incident-history-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-escalation-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-evidence-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{
