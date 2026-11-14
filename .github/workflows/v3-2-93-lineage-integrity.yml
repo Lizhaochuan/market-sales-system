@@ -1,0 +1,22 @@
+name: V3.2-93 isolated freeze lineage integrity audit
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-lineage-integrity-audit.mjs'
+      - 'tests/security/v3-2-93-m02-lineage-integrity-audit.test.mjs'
+      - '.github/workflows/v3-2-93-lineage-integrity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-lineage-integrity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax validation
+        run: node --check src/cross-module-lineage-integrity-audit.mjs
+      - name: Freeze lineage integrity and upstream regression
+        run: node --test tests/security/v3-2-93-m02-lineage-integrity-audit.test.mjs tests/security/v3-2-92-m02-freeze-handoff-lineage.test.mjs
