@@ -40,7 +40,8 @@ export function createIsolatedThreePartyRecoveryCheck({getFixtureSnapshot}={}){
  const accepted=new Map();
  return Object.freeze({
   async check({organization_id,incident_id,afterFirstRead}={}){
-   if(!UUID.test(organization_id)||!UUID.test(incident_id)||
+   if(!exact(arguments[0],['organization_id','incident_id','afterFirstRead'])||
+    !UUID.test(organization_id)||!UUID.test(incident_id)||
     typeof afterFirstRead!=='function')
     return blocked('INVALID_RECOVERY_CHECK_INPUT');
    const org=organization_id.toLowerCase(),incident=incident_id.toLowerCase();
