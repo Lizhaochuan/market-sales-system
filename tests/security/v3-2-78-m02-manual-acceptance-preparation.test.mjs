@@ -23,7 +23,7 @@ function setup(){
   getFixtureEvidenceRevision:()=>revision,
   getFixtureActor:(organization_id,actor_id)=>{
    const a=identities.get(actor_id);
-   return a?{actor_id,role:a.role,active:a.active,organization_id,fixture_only:true}:null;
+   return a?{actor_id,role:a.role,active:a.active,organization_id:org,fixture_only:true}:null;
   }
  });
  const request=(requirement_code,stage,actor_id,idempotency_key,extra={})=>({
