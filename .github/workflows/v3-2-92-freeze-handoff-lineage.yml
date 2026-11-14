@@ -1,0 +1,22 @@
+name: V3.2-92 isolated freeze handoff lineage
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-freeze-handoff-lineage.mjs'
+      - 'tests/security/v3-2-92-m02-freeze-handoff-lineage.test.mjs'
+      - '.github/workflows/v3-2-92-freeze-handoff-lineage.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-freeze-lineage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check isolated frozen handoff lineage
+        run: node --check src/cross-module-freeze-handoff-lineage.mjs
+      - name: Test historical freeze rejection and upstream gated refreeze
+        run: node --test tests/security/v3-2-92-m02-freeze-handoff-lineage.test.mjs tests/security/v3-2-91-m02-gated-refreeze.test.mjs tests/security/v3-2-89-m02-unified-report-freeze.test.mjs
