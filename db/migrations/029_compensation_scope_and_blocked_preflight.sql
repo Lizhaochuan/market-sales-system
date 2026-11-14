@@ -507,6 +507,8 @@ BEGIN
  IF actor=plan_sales_reviewer OR actor=c.reviewed_by OR actor IN(
   SELECT reviewed_by FROM ms.downstream_student_reconciliation_findings
   WHERE case_id=c.id)
+  OR actor IN(SELECT resolved_by FROM ms.downstream_student_reconciliation_resolutions
+   WHERE case_id=c.id)
  THEN RAISE EXCEPTION '最终隔离预审必须由未参加前序销售复核的独立主管记录'
  USING ERRCODE='42501'; END IF;
  SELECT * INTO old FROM ms.cross_module_execution_preflight_blocks
@@ -580,5 +582,29 @@ AND (m.created_by=ms.current_scoped_staff_id()
   AND g.revoked_at IS NULL AND g.valid_from<=now()));
 REVOKE ALL ON ms.scoped_cross_module_compensation_status FROM PUBLIC;
 GRANT SELECT ON ms.scoped_cross_module_compensation_status TO ms_cross_module_plan_reader;
+
+-- Inspectable minimum projection: never disclose bank, order amount,
+-- student identity, external payment ID or source record IDs to general staff.
+CREATE VIEW ms.scoped_cross_module_compensation_scope
+WITH (security_barrier=true) AS
+SELECT sc.id AS scope_id,sc.manifest_id,sc.department,sc.record_type,
+ CASE WHEN sc.record_type='no_linked_record' THEN '本地暂无关联记录，仍需外部核对'
+      ELSE '关联业务记录待逐项核对（原记录不会修改）' END AS business_label,
+ EXISTS(SELECT 1 FROM ms.cross_module_compensation_items i
+  WHERE i.scope_id=sc.id) AS item_recorded
+FROM ms.cross_module_compensation_scope sc
+JOIN ms.cross_module_compensation_manifests m ON m.id=sc.manifest_id
+WHERE sc.organization_id=ms.current_scoped_organization_id()
+ AND ms.current_scoped_staff_id() IS NOT NULL
+ AND (m.created_by=ms.current_scoped_staff_id()
+  OR EXISTS(SELECT 1 FROM ms.user_role_grants g
+    JOIN ms.role_templates t ON t.id=g.role_id
+    WHERE g.user_id=ms.current_scoped_staff_id()
+     AND t.organization_id=sc.organization_id
+     AND t.role_code IN('sales_manager','finance_correction_reviewer','academic_correction_reviewer')
+     AND g.revoked_at IS NULL AND g.valid_from<=now()));
+REVOKE ALL ON ms.scoped_cross_module_compensation_scope FROM PUBLIC;
+GRANT SELECT ON ms.scoped_cross_module_compensation_scope TO ms_cross_module_plan_reader;
+
 -- NO real execution authorization function exists in migration 029.
 COMMIT;
