@@ -83,7 +83,7 @@ DECLARE actor uuid;org uuid;creator uuid;
 BEGIN
  SELECT staff_id,org_id INTO actor,org FROM ms.access_actor();
  IF actor IS NULL THEN RAISE EXCEPTION '没有可信员工身份' USING ERRCODE='42501'; END IF;
- IF p_manifest IS NULL OR p_department NOT IN ('finance','academic')
+ IF p_manifest IS NULL OR p_department IS NULL OR p_department NOT IN ('finance','academic')
  OR p_system IS NULL OR p_system !~ '^[a-z][a-z0-9_-]{2,63}$'
  OR p_tenant IS NULL OR p_tenant !~ '^[A-Za-z0-9_-]{2,80}$'
  OR p_purpose IS NULL OR length(trim(p_purpose)) NOT BETWEEN 8 AND 400
@@ -130,8 +130,8 @@ DECLARE actor uuid;org uuid;creator uuid;
 BEGIN
  SELECT staff_id,org_id INTO actor,org FROM ms.access_actor();
  IF actor IS NULL THEN RAISE EXCEPTION '没有可信员工身份' USING ERRCODE='42501'; END IF;
- IF p_request IS NULL OR p_role NOT IN ('domain_owner','security_owner')
- OR p_decision NOT IN ('approved_for_planning','rejected','return_for_revision')
+ IF p_request IS NULL OR p_role IS NULL OR p_role NOT IN ('domain_owner','security_owner')
+ OR p_decision IS NULL OR p_decision NOT IN ('approved_for_planning','rejected','return_for_revision')
  OR p_evidence IS NULL OR length(trim(p_evidence)) NOT BETWEEN 4 AND 200
  OR p_reason IS NULL OR length(trim(p_reason)) NOT BETWEEN 4 AND 400
  OR p_key IS NULL OR p_key !~ '^[A-Za-z0-9_-]{16,128}$'
@@ -154,6 +154,14 @@ BEGIN
    IF NOT security_ok THEN RAISE EXCEPTION '只有本机构独立信息安全审核员可以审核'
    USING ERRCODE='42501'; END IF;
  END IF;
+ -- An independent source-security reviewer cannot be a prior sales
+ -- correction signatory, even if the same employee has two organization roles.
+ IF p_role='security_owner' AND EXISTS(
+  SELECT 1 FROM ms.cross_module_compensation_manifests m
+  JOIN ms.cross_module_correction_signoffs s ON s.plan_id=m.plan_id
+  WHERE m.id=req.manifest_id AND s.signed_by=actor
+ ) THEN RAISE EXCEPTION '原三方纠错方案签署人不能兼任独立来源安全审核'
+ USING ERRCODE='42501'; END IF;
  SELECT * INTO prev FROM ms.cross_module_source_onboarding_reviews
  WHERE reviewed_by=actor AND request_key=p_key;
  IF FOUND THEN
@@ -213,7 +221,7 @@ CREATE FUNCTION ms.cross_module_source_onboarding_readiness(p_manifest uuid)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,ms AS $g$
 DECLARE actor uuid;org uuid;m ms.cross_module_compensation_manifests%ROWTYPE;
  c ms.lead_student_downstream_correction_cases%ROWTYPE;
- domain_count integer;security_count integer;request_count integer;
+ domain_count integer;security_count integer;request_count integer;active_review_count integer;
  has_rejected boolean;latest boolean;fingerprint_ok boolean;
  can_view boolean;underlying jsonb;
 BEGIN
@@ -244,6 +252,17 @@ BEGIN
  SELECT EXISTS(SELECT 1 FROM ms.cross_module_source_onboarding_reviews r
   JOIN ms.cross_module_source_onboarding_requests q ON q.id=r.request_id
   WHERE q.manifest_id=m.id AND r.decision<>'approved_for_planning') INTO has_rejected;
+ -- Approval is no longer currently valid if a reviewer's org role was revoked.
+ SELECT count(*) INTO active_review_count
+ FROM ms.cross_module_source_onboarding_reviews r
+ JOIN ms.cross_module_source_onboarding_requests q ON q.id=r.request_id
+ JOIN ms.staff_users su ON su.id=r.reviewed_by AND su.organization_id=m.organization_id AND su.status='active'
+ JOIN ms.user_role_grants g ON g.user_id=su.id AND g.revoked_at IS NULL AND g.valid_from<=now()
+ JOIN ms.role_templates t ON t.id=g.role_id AND t.organization_id=m.organization_id
+ WHERE q.manifest_id=m.id AND r.decision='approved_for_planning'
+  AND t.role_code=(CASE WHEN r.review_role='security_owner' THEN 'source_security_reviewer'
+                        WHEN q.department='finance' THEN 'finance_correction_reviewer'
+                        ELSE 'academic_correction_reviewer' END);
  SELECT m.plan_version=max(p.version_no) INTO latest FROM ms.cross_module_correction_plans p
  WHERE p.case_id=m.case_id;
  fingerprint_ok:=c.status='hold_active' AND
@@ -251,10 +270,11 @@ BEGIN
  RETURN jsonb_build_object(
   'planning_requests',request_count,'domain_planning_approvals',domain_count,
   'independent_security_planning_approvals',security_count,
+  'valid_current_role_approvals',active_review_count,
   'any_rejection_or_revision',has_rejected,
   'local_scope_current',fingerprint_ok,'latest_plan',COALESCE(latest,false),
   'planning_paperwork_complete',request_count=2 AND domain_count=2 AND
-    security_count=2 AND NOT has_rejected AND fingerprint_ok AND COALESCE(latest,false),
+    security_count=2 AND active_review_count=4 AND NOT has_rejected AND fingerprint_ok AND COALESCE(latest,false),
   'official_source_registered',false,'official_credentials_installed',false,
   'production_readonly_connection_allowed',false,
   'finance_source_authenticated',false,'crm_source_authenticated',false,
