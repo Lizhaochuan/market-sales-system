@@ -184,6 +184,62 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
    const crossDownload=await get('/api/v1/uat-preview/reports/'+sourceB+'/markdown',jwt());
    assert.equal(crossDownload.status,403);
   });
+  await t.test('token expiry after actual DB read denies seven protected UAT outputs',async()=>{
+   // Controlled test clock advances only after a real PostgreSQL query has
+   // returned, so initial JWT verification succeeds and the response gate
+   // must independently reject a token that expired while reading.
+   const actualNow=Date.now;
+   const originalConnect=A.connect;
+   const clockStart=Math.floor(actualNow()/1000);
+   let clockSeconds=clockStart,expiredReads=0;
+   Date.now=()=>clockSeconds*1000;
+   const token=jwt(subject,{iat:clockStart,exp:clockStart+30});
+   const cases=[
+    ['/api/v1/uat-preview/requests',undefined,'FROM ms.scoped_uat_preview_choices'],
+    ['/api/v1/uat-preview/reports/'+sourceA,undefined,'SELECT ms.readonly_integration_uat_report('],
+    ['/api/v1/uat-preview/reports/'+sourceA+'/markdown',undefined,'SELECT ms.readonly_integration_uat_report('],
+    ['/api/v1/uat-preview/reports/'+sourceA+'/freeze-state',undefined,'SELECT ms.readonly_fixture_uat_freeze_state('],
+    ['/api/v1/uat-preview/reports/'+sourceA+'/history',undefined,'SELECT ms.readonly_fixture_uat_diff('],
+    ['/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1',undefined,'SELECT ms.readonly_fixture_uat_diff('],
+    ['/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown',2,'SELECT ms.readonly_fixture_uat_diff_guarded(']
+   ];
+   try{
+    for(const [path,revision,readQuery] of cases){
+     clockSeconds=clockStart;
+     let completedRead=false;
+     A.connect=async(...args)=>{
+      const underlying=await originalConnect.apply(A,args);
+      return {
+       query:async(...queryArgs)=>{
+        const result=await underlying.query(...queryArgs);
+        if(!completedRead&&typeof queryArgs[0]==='string'&&
+           queryArgs[0].includes(readQuery)){
+         completedRead=true;expiredReads++;
+         clockSeconds=clockStart+31;
+        }
+        return result;
+       },
+       release:()=>underlying.release()
+      };
+     };
+     const response=await get(path,token,revision);
+     assert.equal(completedRead,true,'fixture data read was not executed: '+path);
+     assert.equal(response.status,401,'expired signed token unexpectedly allowed: '+path);
+     assert.equal(response.headers.get('cache-control'),'no-store, max-age=0');
+     const output=await response.json();
+     assert.equal(output.code,'AUTH_REQUIRED');
+     assert.equal(output.data,undefined);
+     assert.doesNotMatch(JSON.stringify(output),new RegExp(sourceA,'i'));
+    }
+    assert.equal(expiredReads,cases.length);
+   }finally{
+    Date.now=actualNow;
+    A.connect=originalConnect;
+   }
+   // Revalidating token expiry must not break current, unexpired tokens.
+   const recovered=await get('/api/v1/uat-preview/reports/'+sourceA,jwt());
+   assert.equal(recovered.status,200);
+  });
   await t.test('late authorization denial blocks seven UAT paths without source disclosure',async()=>{
    // The initial check uses the real nonowner DB LOGIN and returns true.
    // Only the final, post-read identity recheck is simulated as revoked.
