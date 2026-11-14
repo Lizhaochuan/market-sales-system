@@ -21,14 +21,15 @@ test('V3.2-51 M01 channel API is isolated GET-only with no strict mode downgrade
  const adapter=read('src/scoped-legacy-read-adapter.mjs');
  const list=adapter.slice(adapter.indexOf('export const migratedLegacyReads='),
   adapter.indexOf('const listQueries='));
- assert.ok(!list.includes("'listMarketingChannels'"),'must not accidentally bypass strict mode');
+ assert.ok(list.includes("'listMarketingChannels'"),'V3.2-53 must route strict mode through restricted view, never broad login');
+ assert.ok(adapter.includes('ms.scoped_marketing_channel_catalog'));
  const src=read(m.runtime_file);
  for(const s of ['inactive_inherited','parent_id','organization_id','nodes.has(row.id)',
   'depth>16','source_attribution_verified:false','production_integration_allowed:false'])
   assert.ok(src.includes(s),'Missing channel catalog guard: '+s);
  const openapi=JSON.parse(read('api/openapi/m01-isolated-channel-catalog.v3.2.json'));
  assert.equal(openapi['x-contract-status'],'isolated-implemented');
- assert.equal(openapi['x-strict-employee-mode-enabled'],false);
+ assert.equal(openapi['x-strict-employee-mode-enabled'],true);
  assert.equal(openapi['x-production-integration-allowed'],false);
  assert.equal(openapi['x-write-operations-allowed'],false);
  assert.ok(openapi.paths[m.http_path].get);
