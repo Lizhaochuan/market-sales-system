@@ -1,6 +1,6 @@
 // V3.2-86: CI-only read-only diff between two fictional blocker audit snapshots.
 // Reporting changes and follow-up history never conveys release authority.
-const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const SHA=/^[a-f0-9]{64}$/;
 const CODES=Object.freeze([
  'finance_signature','academic_signature','order_payment_reconciliation',
