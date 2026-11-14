@@ -1,0 +1,22 @@
+name: V3.2-76 isolated final handoff preflight regression
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-final-handoff-preflight.mjs'
+      - 'tests/security/v3-2-76-m02-final-handoff-preflight.test.mjs'
+      - '.github/workflows/v3-2-76-final-handoff.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-preflight:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check isolated final preflight source syntax
+        run: node --check src/cross-module-final-handoff-preflight.mjs
+      - name: Run integrated offline handoff blocker tests
+        run: node --test tests/security/v3-2-76-m02-final-handoff-preflight.test.mjs tests/security/v3-2-75-m02-reconfirmation.test.mjs tests/security/v3-2-74-m02-recovery-consistency.test.mjs tests/security/v3-2-72-m02-evidence-revocation.test.mjs
