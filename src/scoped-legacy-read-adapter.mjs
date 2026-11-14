@@ -23,7 +23,7 @@ export const migratedLegacyReads=new Set([
 
 const listQueries={
   listCampaignFinanceHandoffs:
-    'SELECT review_id,campaign_id,campaign_version,requested_by,sales_approved_by,submitted_at,sales_approved_at,campaign_name,planned_budget_cents,channel_count,handoff_status,finance_authorized,execution_allowed,campaign_status FROM ms.scoped_isolated_campaign_finance_handoffs ORDER BY sales_approved_at DESC,review_id LIMIT 101',
+    'SELECT review_id,campaign_id,campaign_version,requested_by,sales_approved_by,submitted_at,sales_approved_at,campaign_name,planned_budget_cents,channel_count,handoff_status,finance_authorized,execution_allowed,campaign_status,readiness_status FROM ms.scoped_isolated_campaign_finance_handoffs ORDER BY sales_approved_at DESC,review_id LIMIT 101',
   listCampaignSalesReviews:
     'SELECT review_id,campaign_id,campaign_version,requested_by,status,created_at,reviewed_at,reviewed_by,can_sales_review FROM ms.scoped_isolated_campaign_sales_reviews ORDER BY created_at DESC,review_id LIMIT 101',
   listCampaignDrafts:

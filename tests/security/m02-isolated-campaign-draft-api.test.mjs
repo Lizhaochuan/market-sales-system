@@ -256,6 +256,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    assert.equal(Number(item.planned_budget_cents),99500);
    assert.equal(item.channel_count,1);
    assert.equal(item.handoff_status,'awaiting_external_finance_authority');
+   assert.equal(item.readiness_status,'ready_for_external_manual_check');
    assert.equal(item.campaign_status,'draft');
    assert.equal(item.finance_authorized,false);
    assert.equal(item.execution_allowed,false);

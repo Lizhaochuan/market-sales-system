@@ -272,7 +272,9 @@ function renderCampaignFinanceHandoffs(){
     x.campaign_name,
     '草稿版本 '+x.campaign_version+' · 计划预算 '+yuan(x.planned_budget_cents)+
       ' · 关联渠道 '+x.channel_count+' 个 · 销售审批时间 '+formatDate(x.sales_approved_at),
-    '等待外部财务权威核验；不代表审批通过或允许支出','财'));
+    (x.readiness_status==='ready_for_external_manual_check'
+      ?'资料一致，可供外部财务人工复核；仍未获财务授权'
+      :'交接资料存在异常，必须重新核实；禁止财务放行'),'财'));
 }
 function renderCampaignSalesReview(){
   const healthy=state.strict&&!state.campaignSalesLoadError&&
@@ -573,7 +575,7 @@ async function refresh(){
       const fields=['review_id','campaign_id','campaign_version','requested_by',
         'sales_approved_by','submitted_at','sales_approved_at','campaign_name',
         'planned_budget_cents','channel_count','handoff_status','finance_authorized',
-        'execution_allowed','campaign_status'];
+        'execution_allowed','campaign_status','readiness_status'];
       const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
         x&&Object.keys(x).every(k=>fields.includes(k))&&
         fields.every(k=>Object.hasOwn(x,k))&&
@@ -586,7 +588,9 @@ async function refresh(){
         Number(x.planned_budget_cents)>=0&&Number(x.planned_budget_cents)<=100000000000&&
         x.handoff_status==='awaiting_external_finance_authority'&&
         x.finance_authorized===false&&x.execution_allowed===false&&
-        x.campaign_status==='draft');
+        x.campaign_status==='draft'&&
+        ['ready_for_external_manual_check','blocked_missing_campaign',
+          'blocked_campaign_not_draft','blocked_snapshot_mismatch'].includes(x.readiness_status));
       state.campaignFinanceHandoffs=valid?items:[];
       state.campaignFinanceLoadError=!valid;
     }else if(key==='campaignSalesReviews'){

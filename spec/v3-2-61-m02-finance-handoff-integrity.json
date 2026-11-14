@@ -1,0 +1,30 @@
+{
+  "schema_version": "v3.2-61-m02-finance-handoff-integrity-v1",
+  "module": "M02",
+  "parent_pr": 67,
+  "parent_head": "28b50e1ac4a4539bdbc01ef28b413ade4f8ffbd9",
+  "parent_ci": 43612375904,
+  "parent_ci_conclusion": "PENDING",
+  "scope": "CI_ONLY_READONLY_INTEGRITY_NO_FINANCE_AUTH",
+  "sql": "tests/sql/create_v3_2_61_finance_handoff_integrity.sql",
+  "endpoint": "GET /api/v1/marketing-campaigns/finance-handoffs",
+  "status_codes": [
+    "ready_for_external_manual_check",
+    "blocked_missing_campaign",
+    "blocked_campaign_not_draft",
+    "blocked_snapshot_mismatch"
+  ],
+  "finance_authorized": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "production_integration_allowed": false,
+  "new_production_migration": false,
+  "migration_count": 38,
+  "staff_primary_student": true,
+  "family_on_demand": true,
+  "wrong_student_with_downstream_hold_active": true,
+  "original_orders_payments_saleevents_lesson_consumption_preserved": true,
+  "latest_head_ci": "PENDING"
+}
