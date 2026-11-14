@@ -82,7 +82,7 @@ test('V3.2-41 can never promote fixture role checks to production approval',()=>
  assert.equal(contract.family_optional,true);
  for(const p of ['api/openapi/crm-integration.v1.json','api/openapi/market-sales.v1.json'])
   assert.equal(JSON.parse(read(p))['x-contract-status'],contract.financial_crm_source_status);
- assert.equal(readdirSync(resolve(root,'db/migrations')).filter(x=>/^\\d{3}_.+\\.sql$/.test(x)).length,38);
+ assert.equal(readdirSync(resolve(root,'db/migrations')).filter(x=>/^\d{3}_.+\.sql$/.test(x)).length,38);
  const doc=read('docs/V3.2-41_PREVIEW_LOGIN_ROLE_ESCALATION_REGRESSION.md');
  for(const phrase of ['hold_active','不合并','不部署','真实','SET ROLE'])
   assert.ok(doc.includes(phrase),'Required guard missing '+phrase);
