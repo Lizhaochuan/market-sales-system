@@ -192,12 +192,52 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
     const before=await pinned.query(
      'SELECT ms.scoped_employee_identity_valid($1,$2) AS permitted',[issuer,subject]);
     assert.equal(before.rows[0].permitted,true);
-    await owner.query(
-     'UPDATE ms.staff_identity_bindings SET revoked_at=now() WHERE issuer=$1 AND subject=$2',
-     [issuer,subject]);
-    const after=await pinned.query(
-     'SELECT ms.scoped_employee_identity_valid($1,$2) AS permitted',[issuer,subject]);
-    assert.equal(after.rows[0].permitted,false);
+
+    // Deterministically pause an actual database-backed list request AFTER its
+    // authorized SELECT has returned, but BEFORE its HTTP response is sent.
+    const originalConnect=A.connect;
+    let signalRead,releaseRead,once=false;
+    const readCompleted=new Promise(resolve=>{signalRead=resolve;});
+    const continueResponse=new Promise(resolve=>{releaseRead=resolve;});
+    A.connect=async(...args)=>{
+     const underlying=await originalConnect.apply(A,args);
+     return {
+      query:async(...queryArgs)=>{
+       const result=await underlying.query(...queryArgs);
+       if(!once&&typeof queryArgs[0]==='string'&&
+          queryArgs[0].includes('FROM ms.scoped_uat_preview_choices')){
+        once=true;signalRead();await continueResponse;
+       }
+       return result;
+      },
+      release:()=>underlying.release()
+     };
+    };
+    try{
+     const inFlight=get('/api/v1/uat-preview/requests',jwt());
+     let timer;
+     try{
+      await Promise.race([readCompleted,new Promise((_,reject)=>{
+       timer=setTimeout(()=>reject(Error('timed out waiting for in-flight read')),8000);
+      })]);
+     }finally{clearTimeout(timer);}
+     // Revocation is committed while the selected report data is in memory.
+     await owner.query(
+      'UPDATE ms.staff_identity_bindings SET revoked_at=now() WHERE issuer=$1 AND subject=$2',
+      [issuer,subject]);
+     const after=await pinned.query(
+      'SELECT ms.scoped_employee_identity_valid($1,$2) AS permitted',[issuer,subject]);
+     assert.equal(after.rows[0].permitted,false);
+     releaseRead();
+     const deniedInFlight=await inFlight;
+     assert.equal(deniedInFlight.status,403,
+      'read completed before revocation must not deliver data after final recheck');
+     assert.equal(deniedInFlight.headers.get('cache-control'),'no-store, max-age=0');
+     assert.doesNotMatch(await deniedInFlight.text(),new RegExp(sourceA,'i'));
+    }finally{
+     releaseRead?.();
+     A.connect=originalConnect;
+    }
    }finally{pinned.release();}
 
    // Concurrency starts AFTER the revocation COMMIT. This deliberately does
