@@ -163,16 +163,20 @@ test('V3.2-23 two independent supervisor reconciliation; no silent financial or 
    await deny(root,"UPDATE ms.opportunities SET stage='qualified' WHERE id=$1",
     [row.opportunity],'23514');
   });
-  await t.test('snapshot cannot be stale: new order between reviewer stages blocks release',async()=>{
-   const row=await startCase('快照状态变化阻断');
+  await t.test('new authoritative payment fact after initial finding still blocks release and remains recorded',async()=>{
+   const row=await startCase('核对后财务新事实',{order:true});
    await verifyLink(row);
    const f=await fn(m,attest,evidence(row.caseId));
-   const o=(await root.query(
-    'INSERT INTO ms.sales_orders(student_id,opportunity_id,amount_due_cents) VALUES($1,$2,1000) RETURNING id',
-    [row.student,row.opportunity])).rows[0].id;
-   assert.ok(o);
-   await deny(m2,resolve,[f,'release_verified','变化后尝试释放',
-    '复核后订单新增应被拒绝',k()],'23514');
+   const receipt=(await root.query(
+    "INSERT INTO ms.payment_receipt_projections(authority_system,external_payment_id,amount_cents) VALUES('fictional-fixture',$1,2000) RETURNING id",
+    ['fictional-'+randomUUID()])).rows[0].id;
+   await root.query(
+    'INSERT INTO ms.payment_allocations(receipt_id,order_id,allocated_cents) VALUES($1,$2,600)',
+    [receipt,row.salesOrder]);
+   await deny(m2,resolve,[f,'release_verified','新增收款后尝试错误释放',
+    '检查近期财务事实变更',k()],'23514');
+   assert.equal((await root.query('SELECT count(*)::int AS n FROM ms.payment_allocations WHERE order_id=$1',
+    [row.salesOrder])).rows[0].n,1);
    assert.equal((await root.query('SELECT status FROM ms.lead_student_downstream_correction_cases WHERE id=$1',
     [row.caseId])).rows[0].status,'hold_active');
   });
