@@ -167,6 +167,50 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   await expect(b.locator('#contacts-list')).not.toContainText(name);
   await expect(a.locator('#contacts-list')).toContainText(name);
   expect((await owner.query('SELECT assignee_id FROM ms.contact_custody_assignments WHERE contact_id=$1 AND revoked_at IS NULL',[contact.id])).rows[0].assignee_id).toBe(ids.A);
+  // V3.2-17: actual Chromium staff workflow makes a candidate, never a lead.
+  const candidateContact='候选测试家长-'+randomUUID();
+  await a.locator('button[data-view="contacts"]').click();
+  await a.locator('#contact-form input[name="display_name"]').fill(candidateContact);
+  await a.getByRole('button',{name:'保存联系人'}).click();
+  await expect(a.locator('#contacts-list')).toContainText(candidateContact);
+  await a.locator('button[data-view="leads"]').click();
+  await a.locator('#event-form select[name="contact_id"]').selectOption({label:candidateContact});
+  await a.locator('#event-form select[name="event_type"]').selectOption('电话咨询');
+  await a.getByRole('button',{name:'保存本次咨询'}).click();
+  await expect(a.locator('#strict-consultation-list')).toContainText('电话咨询');
+  const candidateForm=a.locator('#lead-candidate-request-form');
+  await expect(candidateForm).toBeVisible();
+  const sourceOption=candidateForm.locator('select[name="source_event_id"] option')
+    .filter({hasText:candidateContact}).first();
+  const eventId=await sourceOption.getAttribute('value');
+  expect(eventId).toBeTruthy();
+  await candidateForm.locator('select[name="source_event_id"]').selectOption(eventId);
+  await candidateForm.locator('textarea[name="reason_zh"]')
+    .fill('经确认是真实咨询，申请独立审核转线索候选');
+  await candidateForm.locator('input[name="evidence_ref"]')
+    .fill('虚构咨询时间及客户意愿核实记录');
+  await candidateForm.getByRole('button',{name:'提交线索候选审核'}).click();
+  await expect(a.locator('#lead-candidates-list')).toContainText(candidateContact);
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE source_event_id=$1',[eventId])).rows[0].n).toBe(0);
+  await m.locator('button[data-view="leads"]').click();
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const managerChoice=m.locator('#lead-candidate-decision-form select[name="candidate_id"]');
+  const candidateId=await managerChoice.locator('option').filter({hasText:candidateContact})
+    .first().getAttribute('value');
+  expect(candidateId).toBeTruthy();
+  await managerChoice.selectOption(candidateId);
+  await m.locator('#lead-candidate-decision-form textarea[name="reason_zh"]')
+    .fill('独立审核确认客户未拒绝联系且无重复正式线索');
+  await m.locator('#lead-candidate-decision-form input[name="evidence_ref"]')
+    .fill('虚构复核材料独立审核');
+  await m.getByRole('button',{name:'保存候选独立审核'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.consultation_lead_candidates WHERE id=$1',
+      [candidateId])
+  ).rows[0]?.status).toBe('reviewed_eligible');
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE source_event_id=$1',[eventId])).rows[0].n).toBe(0);
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  await expect(a.locator('#lead-candidates-list')).toContainText('候选核查通过（未生成线索）');
   await m.setViewportSize({width:390,height:844});
   await expect(m.locator('#custody-decision-card')).toBeVisible();
   const overflow=await m.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
