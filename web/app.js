@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -66,6 +66,13 @@ function fillOptions(){
       v=>v.contact_name+' · '+v.event_type+' · '+formatDate(v.occurred_at)],
     eligibleLeadCandidates:[state.leadCandidates.filter(v=>v.status==='reviewed_eligible'),
       'candidate_id',v=>v.contact_name+' · '+v.event_type+' · 候选已核实'],
+    clearedForFinal:[state.readinessReviews.filter(v=>
+      v.status==='cleared'&&v.effective_status==='转换预审已通过（未创建线索）'),
+      'review_id',v=>v.contact_name+' · 预审已通过'],
+    pendingFinalConversions:[state.finalLeadConversions.filter(v=>v.status==='pending'),
+      'authorization_id',v=>v.contact_name+' · 等待最终授权'],
+    approvedFinalConversions:[state.finalLeadConversions.filter(v=>v.status==='approved'),
+      'authorization_id',v=>v.contact_name+' · 已批准待执行'],
     pendingReadiness:[state.readinessReviews.filter(v=>v.status==='pending'),
       'review_id',v=>v.contact_name+' · 待转换预审'],
     clearedReadiness:[state.readinessReviews.filter(v=>v.status==='cleared'),
@@ -174,6 +181,13 @@ function render(){
     x.contact_name+' · '+x.event_type,
     '咨询时间：'+formatDate(x.occurred_at)+' · 申请时间：'+formatDate(x.created_at),
     ({pending:'待主管审核',reviewed_eligible:'候选核查通过（未生成线索）',rejected:'已驳回'})[x.status]||'状态待核对','候'));
+  $('final-lead-conversion-workbench').hidden=!state.strict;
+  $('final-lead-conversion-decision-card').hidden=!state.strict||
+    state.capabilities.approve_final_lead_conversion!==true;
+  if(state.strict)paint('final-lead-conversions-list',state.finalLeadConversions,x=>record(
+    x.contact_name,'申请时间：'+formatDate(x.created_at),
+    ({pending:'等待最终独立审核',approved:'已批准，等待本人执行',
+      rejected:'已驳回，不得创建线索',executed:'已创建一条正式销售线索'})[x.status]||'状态待核查','线'));
   $('conversion-readiness-workbench').hidden=!state.strict;
   $('readiness-decision-card').hidden=!state.strict||
     state.capabilities.review_conversion_readiness!==true;
@@ -246,7 +260,8 @@ async function refresh(){
     ['leadCandidates','/api/v1/lead-candidates'],
     ['readinessReviews','/api/v1/conversion-readiness'],
     ['attributionDisputes','/api/v1/attribution-disputes'],
-    ['disputableCandidates','/api/v1/attribution-disputes/eligible']
+    ['disputableCandidates','/api/v1/attribution-disputes/eligible'],
+    ['finalLeadConversions','/api/v1/lead-conversions']
   ]:[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],['leads','/api/v1/leads'],
@@ -254,7 +269,7 @@ async function refresh(){
   ];
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
   if(state.strict)for(const key of ['leads','opportunities','families'])state[key]=[];
-  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];}
+  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     state[key]=r.status==='fulfilled'?r.value.items||[]:[];
@@ -277,7 +292,7 @@ function setView(view){
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   applyStrictLayout();
-  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates'])state[key]=[];
+  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions'])state[key]=[];
   document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
   $('workspace').hidden=true;$('login-screen').hidden=false;
   $('login-form').reset();$('external-login-form').reset();$('audit-list').replaceChildren();
@@ -461,6 +476,29 @@ register('attribution-dispute-decision-form',async d=>{
   return d.decision==='upheld'?
     '异议成立，原候选不得通过归因预审；没有生成正式线索':
     '已驳回异议，原候选仍需单独通过转换预审';
+});
+register('final-lead-conversion-request-form',async d=>{
+  await api('/api/v1/lead-conversions',{method:'POST',body:{
+    readiness_id:d.readiness_id,evidence_ref:d.evidence_ref.trim(),
+    reason_zh:d.reason_zh.trim()
+  }});
+  return '正式销售线索转换申请已提交，等待独立主管最终批准；尚未创建线索';
+});
+register('final-lead-conversion-decision-form',async d=>{
+  await api('/api/v1/lead-conversions/'+encodeURIComponent(d.authorization_id)+
+    '/decision',{method:'POST',body:{
+      decision:d.decision,evidence_ref:d.evidence_ref.trim(),
+      reason_zh:d.reason_zh.trim()
+    }});
+  return d.decision==='approved'?
+    '最终授权已通过，但正式线索尚未创建；需原申请人再次确认执行':
+    '最终转换已驳回，没有创建销售线索';
+});
+register('final-lead-conversion-execute-form',async d=>{
+  const out=await api('/api/v1/lead-conversions/'+
+    encodeURIComponent(d.authorization_id)+'/execute',{method:'POST',body:{}});
+  if(!out?.lead_id)throw Error('没有返回已创建的正式线索，请核实实际业务状态');
+  return '已原子创建一条正式销售线索；仍未自动关联学生、合同、收款或课时';
 });
 register('event-form',async d=>{
   const created=await api('/api/v1/contact-events',{method:'POST',body:{
