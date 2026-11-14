@@ -130,6 +130,37 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
    assert.match(md,/禁止真实联调/);
    assert.match(md,/合同|课时|财务/);
    assert.doesNotMatch(md,/银行卡号|身份证号|AUTH_HMAC_SECRET/);
+   const seq=(await fin.query(
+    'SELECT ms.record_fixture_uat_evidence($1,$2,$3,$4,$5,$6,$7) AS result',
+    [sourceA,'finance_reconciliation','fixture_added','fictional_api_history01',
+     null,'fixture_received',idKey()])).rows[0].result;
+   assert.equal(seq,1);
+   const historyRes=await get('/api/v1/uat-preview/reports/'+sourceA+'/history',jwt());
+   assert.equal(historyRes.status,200);
+   const history=(await historyRes.json()).data.history;
+   assert.equal(history.current,1);
+   assert.equal(history.added,1);
+   assert.equal(history.activeAfter,1);
+   assert.equal(history.execution_allowed,false);
+   const comparison=await get('/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1',jwt());
+   assert.equal(comparison.status,200);
+   const diffReport=(await comparison.json()).data.history;
+   assert.equal(diffReport.events.length,1);
+   assert.equal(diffReport.events[0].fixtureRef,'fictional_api_history01');
+   const historyExport=await get(
+    '/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown',jwt());
+   assert.equal(historyExport.status,200);
+   const historyMd=await historyExport.text();
+   assert.match(historyMd,/禁止解除学生错误关联隔离/);
+   assert.match(historyMd,/fictional_api_history01/);
+   assert.doesNotMatch(historyMd,/staff_identity_bindings|AUTH_HMAC_SECRET/);
+   const unknownVersion=await get('/api/v1/uat-preview/reports/'+sourceA+'/diff/0/9',jwt());
+   assert.equal(unknownVersion.status,422);
+   const historyCross=await get('/api/v1/uat-preview/reports/'+sourceB+'/history',jwt());
+   assert.equal(historyCross.status,403);
+   const exportCross=await get(
+    '/api/v1/uat-preview/reports/'+sourceB+'/diff/0/0/markdown',jwt());
+   assert.equal(exportCross.status,403);
    const cross=await get('/api/v1/uat-preview/reports/'+sourceB,jwt());
    assert.equal(cross.status,403);
    const crossDownload=await get('/api/v1/uat-preview/reports/'+sourceB+'/markdown',jwt());
@@ -142,6 +173,10 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
    assert.equal(denied.status,403);
    const list=await get('/api/v1/uat-preview/requests',jwt());
    assert.equal(list.status,403);
+   const deniedHistory=await get('/api/v1/uat-preview/reports/'+sourceA+'/history',jwt());
+   assert.equal(deniedHistory.status,403);
+   const deniedExport=await get('/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown',jwt());
+   assert.equal(deniedExport.status,403);
   });
  }finally{
   if(server?.listening)await close(server);
