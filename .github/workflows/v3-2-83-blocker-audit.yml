@@ -1,0 +1,22 @@
+name: V3.2-83 isolated unified blocker audit
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-unified-blocker-audit.mjs'
+      - 'tests/security/v3-2-83-m02-unified-blocker-audit.test.mjs'
+      - '.github/workflows/v3-2-83-blocker-audit.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-blocker-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax-check isolated blocker audit
+        run: node --check src/cross-module-unified-blocker-audit.mjs
+      - name: Run blocker audit and unified-gate safety regression
+        run: node --test tests/security/v3-2-83-m02-unified-blocker-audit.test.mjs tests/security/v3-2-82-m02-unified-handoff-blocker.test.mjs
