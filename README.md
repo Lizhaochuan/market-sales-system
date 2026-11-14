@@ -10,6 +10,7 @@
 - [机器可读 PR 主线及验收清单](spec/v3-2-48-delivery-closure-manifest.json)：当前主线 Draft PR #4—26、#28—36、#39—54；不选用并行 #27、#37、#38，避免误并入重复迁移 032/035。
 - [V3.2-49 未选方案独有功能与迁移冲突审计](docs/V3.2-49_ALTERNATE_PR_DELTA_AUDIT.md)：逐项核对 #27/#37/#38 与被选主链的实际 SQL/功能差异；暂不丢弃独有需求，不直接重放冲突 027/032/035，等待明确安全评审。
 - [V3.2-50 财务＋教务联合只读 UAT 阻断报告](docs/V3.2-50_JOINT_BLOCKED_UAT_READONLY.md)：复用现有 035 受限 SQL 和安全 LOGIN，在隔离测试环境将两份 12 项报告组合为 16 项，保留不同来源缺失计数。不新增数据库迁移，不对外开放正式 API。
+- [V3.2-51 M01 渠道目录隔离只读接口](docs/V3.2-51_M01_CHANNEL_CATALOG_READONLY.md)：复用 001 渠道表，提供按机构过滤、层级及停用继承校验的可运行 GET；严格员工模式仍拒绝，渠道 CRUD、真实归因与生产联调未开放。
 - 上游 **PR #54** 在自身最新 HEAD `9f438cdbb9ab85cb0a3ea2686b8d927c2e7bcb0a` 的 [隔离 CI #43586142266](https://github.com/Lizhaochuan/market-sales-system/actions/runs/43586142266) 已成功。**不代表主分支已合并、业务 M01—M14 全部完成或真实财务/CRM UAT 通过。**
 - PostgreSQL 迁移仍限于 001—038；生产对接、正式收退款/课时、补偿与真正错绑的 `hold_active` 解除继续阻断。旧 `edu-management-system` 不改动，技术文档不提前融合。
 
