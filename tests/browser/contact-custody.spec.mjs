@@ -289,6 +289,117 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   ).rows[0]?.status).toBe('revoked');
   expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE contact_id=$1',
     [candidateContactId])).rows[0].n).toBe(0);
+  // V3.2-19: separate complete human-readable Chromium path ending in ONE lead.
+  const finalContact='独立最终转换家长-'+randomUUID();
+  await a.locator('button[data-view="contacts"]').click();
+  await a.locator('#contact-form input[name="display_name"]').fill(finalContact);
+  await a.getByRole('button',{name:'保存联系人'}).click();
+  await expect(a.locator('#contacts-list')).toContainText(finalContact);
+  const finalContactId=(await owner.query(
+    'SELECT id FROM ms.contacts WHERE organization_id=$1 AND display_name=$2',
+    [org,finalContact])).rows[0].id;
+  await a.locator('button[data-view="leads"]').click();
+  await a.locator('#event-form select[name="contact_id"]').selectOption({label:finalContact});
+  await a.locator('#event-form select[name="event_type"]').selectOption('到店咨询');
+  await a.getByRole('button',{name:'保存本次咨询'}).click();
+  await expect(a.locator('#strict-consultation-list')).toContainText('到店咨询');
+  const newCandidateForm=a.locator('#lead-candidate-request-form');
+  const newEventId=await newCandidateForm.locator('select[name="source_event_id"] option')
+    .filter({hasText:finalContact}).first().getAttribute('value');
+  expect(newEventId).toBeTruthy();
+  await newCandidateForm.locator('select[name="source_event_id"]').selectOption(newEventId);
+  await newCandidateForm.locator('textarea[name="reason_zh"]')
+    .fill('家长实际到店咨询，申请线索候选独立核查');
+  await newCandidateForm.locator('input[name="evidence_ref"]')
+    .fill('虚构家长到店咨询时间与意愿证明');
+  await newCandidateForm.getByRole('button',{name:'提交线索候选审核'}).click();
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const newCandidateDecision=m.locator('#lead-candidate-decision-form');
+  const finalCandidateId=await newCandidateDecision.locator('select[name="candidate_id"] option')
+    .filter({hasText:finalContact}).first().getAttribute('value');
+  expect(finalCandidateId).toBeTruthy();
+  await newCandidateDecision.locator('select[name="candidate_id"]').selectOption(finalCandidateId);
+  await newCandidateDecision.locator('textarea[name="reason_zh"]')
+    .fill('独立核实此次实际到店咨询的候选来源');
+  await newCandidateDecision.locator('input[name="evidence_ref"]')
+    .fill('虚构候选独立审核记录');
+  await newCandidateDecision.getByRole('button',{name:'保存候选独立审核'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.consultation_lead_candidates WHERE id=$1',
+      [finalCandidateId])
+  ).rows[0]?.status).toBe('reviewed_eligible');
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  const newReadinessForm=a.locator('#conversion-readiness-request-form');
+  await newReadinessForm.locator('select[name="candidate_id"]').selectOption(finalCandidateId);
+  await newReadinessForm.locator('textarea[name="reason_zh"]')
+    .fill('无跨员工异议，提交正式转化前条件核查');
+  await newReadinessForm.locator('input[name="evidence_ref"]')
+    .fill('虚构真实咨询与去重证明');
+  await newReadinessForm.getByRole('button',{name:'提交转换预审申请'}).click();
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const newReadinessDecision=m.locator('#conversion-readiness-decision-form');
+  const finalReadinessId=await newReadinessDecision.locator('select[name="review_id"] option')
+    .filter({hasText:finalContact}).first().getAttribute('value');
+  expect(finalReadinessId).toBeTruthy();
+  await newReadinessDecision.locator('select[name="review_id"]').selectOption(finalReadinessId);
+  await newReadinessDecision.locator('textarea[name="reason_zh"]')
+    .fill('独立主管预审确认没有重复线索及未裁决争议');
+  await newReadinessDecision.locator('input[name="evidence_ref"]')
+    .fill('虚构转换预审核对单');
+  await newReadinessDecision.getByRole('button',{name:'保存独立预审结论'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.lead_conversion_readiness WHERE id=$1',
+      [finalReadinessId])
+  ).rows[0]?.status).toBe('cleared');
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  const finalRequest=a.locator('#final-lead-conversion-request-form');
+  await finalRequest.locator('select[name="readiness_id"]').selectOption(finalReadinessId);
+  await finalRequest.locator('textarea[name="reason_zh"]')
+    .fill('申请最后独立批准，批准后由本人确认创建');
+  await finalRequest.locator('input[name="evidence_ref"]')
+    .fill('虚构预审通过与原咨询证明');
+  await finalRequest.getByRole('button',{name:'提交最终转换审核'}).click();
+  await expect(a.locator('#final-lead-conversions-list')).toContainText('等待最终独立审核');
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const lastReview=m.locator('#final-lead-conversion-decision-form');
+  const finalAuthorizationId=await lastReview.locator('select[name="authorization_id"] option')
+    .filter({hasText:finalContact}).first().getAttribute('value');
+  expect(finalAuthorizationId).toBeTruthy();
+  await lastReview.locator('select[name="authorization_id"]').selectOption(finalAuthorizationId);
+  await lastReview.locator('textarea[name="reason_zh"]')
+    .fill('独立核实双重前置审核、原申请人及实时归因');
+  await lastReview.locator('input[name="evidence_ref"]')
+    .fill('虚构最终独立批准材料');
+  await lastReview.getByRole('button',{name:'保存最终独立审核'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.lead_conversion_authorizations WHERE id=$1',
+      [finalAuthorizationId])
+  ).rows[0]?.status).toBe('approved');
+  expect((await owner.query(
+    'SELECT COUNT(*)::int AS n FROM ms.leads WHERE contact_id=$1',[finalContactId]
+  )).rows[0].n).toBe(0);
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  const executionForm=a.locator('#final-lead-conversion-execute-form');
+  await executionForm.locator('select[name="authorization_id"]')
+    .selectOption(finalAuthorizationId);
+  await executionForm.getByRole('button',{name:'确认创建一条正式销售线索'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.lead_conversion_authorizations WHERE id=$1',
+      [finalAuthorizationId])
+  ).rows[0]?.status).toBe('executed');
+  const finalLeads=await owner.query(
+    'SELECT id,source_event_id,owner_user_id FROM ms.leads WHERE contact_id=$1',
+    [finalContactId]);
+  expect(finalLeads.rowCount).toBe(1);
+  expect(finalLeads.rows[0].source_event_id).toBe(newEventId);
+  expect(finalLeads.rows[0].owner_user_id).toBe(ids.A);
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.lead_students WHERE lead_id=$1',
+    [finalLeads.rows[0].id])).rows[0].n).toBe(0);
+  await expect(a.locator('#final-lead-conversions-list'))
+    .toContainText('已创建一条正式销售线索');
+  await testInfo.attach('v3-2-19-final-approved-lead-conversion',{
+    body:await a.screenshot({fullPage:true}),contentType:'image/png'
+  });
   await m.locator('button[data-view="contacts"]').click();
   await m.setViewportSize({width:390,height:844});
   await expect(m.locator('#custody-decision-card')).toBeVisible();
