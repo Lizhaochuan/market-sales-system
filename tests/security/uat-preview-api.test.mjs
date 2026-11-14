@@ -184,17 +184,46 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
    const crossDownload=await get('/api/v1/uat-preview/reports/'+sourceB+'/markdown',jwt());
    assert.equal(crossDownload.status,403);
   });
-  await t.test('signed identity revocation invalidates next request and export',async()=>{
-   await owner.query('UPDATE ms.staff_identity_bindings SET revoked_at=now() WHERE issuer=$1 AND subject=$2',
-    [issuer,subject]);
-   const denied=await get('/api/v1/uat-preview/reports/'+sourceA+'/markdown',jwt());
-   assert.equal(denied.status,403);
-   const list=await get('/api/v1/uat-preview/requests',jwt());
-   assert.equal(list.status,403);
-   const deniedHistory=await get('/api/v1/uat-preview/reports/'+sourceA+'/history',jwt());
-   assert.equal(deniedHistory.status,403);
-   const deniedExport=await get('/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown',jwt());
-   assert.equal(deniedExport.status,403);
+  await t.test('signed identity revocation invalidates pinned DB session and concurrent next reads',async()=>{
+   // An already checked-out, nonowner DB connection must re-evaluate the
+   // issuer+subject binding after a committed revocation (no cached allow).
+   const pinned=await A.connect();
+   try{
+    const before=await pinned.query(
+     'SELECT ms.scoped_employee_identity_valid($1,$2) AS permitted',[issuer,subject]);
+    assert.equal(before.rows[0].permitted,true);
+    await owner.query(
+     'UPDATE ms.staff_identity_bindings SET revoked_at=now() WHERE issuer=$1 AND subject=$2',
+     [issuer,subject]);
+    const after=await pinned.query(
+     'SELECT ms.scoped_employee_identity_valid($1,$2) AS permitted',[issuer,subject]);
+    assert.equal(after.rows[0].permitted,false);
+   }finally{pinned.release();}
+
+   // Concurrency starts AFTER the revocation COMMIT. This deliberately does
+   // not claim cancellation of operations authorized before that commit.
+   const paths=[
+    '/api/v1/uat-preview/requests',
+    '/api/v1/uat-preview/reports/'+sourceA,
+    '/api/v1/uat-preview/reports/'+sourceA+'/markdown',
+    '/api/v1/uat-preview/reports/'+sourceA+'/history',
+    '/api/v1/uat-preview/reports/'+sourceA+'/freeze-state',
+    '/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1',
+    '/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown'
+   ];
+   const requests=[...paths,...paths.slice(0,5)];
+   const outcomes=await Promise.all(requests.map(async path=>{
+    const response=await get(path,jwt(),path.endsWith('/diff/0/1/markdown')?2:undefined);
+    const body=await response.text();
+    return {path,status:response.status,cache:response.headers.get('cache-control'),body};
+   }));
+   assert.equal(outcomes.length,12);
+   for(const result of outcomes){
+    assert.equal(result.status,403,'post-revocation read unexpectedly allowed: '+result.path);
+    assert.equal(result.cache,'no-store, max-age=0');
+    assert.doesNotMatch(result.body,new RegExp(sourceA,'i'),
+     'forbidden response must not echo the source request identifier');
+   }
   });
  }finally{
   if(server?.listening)await close(server);
