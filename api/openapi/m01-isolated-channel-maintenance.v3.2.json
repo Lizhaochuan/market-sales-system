@@ -1,0 +1,257 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "M01 渠道维护隔离审批接口",
+    "version": "v3.2-54",
+    "description": "仅已验证模拟 RS256 员工、独立主管审批、一次性 PostgreSQL CI 环境。生产禁止调用。"
+  },
+  "x-contract-status": "isolated-implemented",
+  "x-environment": "isolated-test",
+  "x-production-integration-allowed": false,
+  "x-channel-mutations-require-independent-review": true,
+  "servers": [
+    {
+      "url": "http://127.0.0.1",
+      "description": "本机独立 CI"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "parameters": {
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128
+        }
+      }
+    },
+    "schemas": {
+      "Result": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "data"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "OK"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "request_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "applied",
+                  "rejected"
+                ]
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "create",
+                  "edit",
+                  "deactivate"
+                ]
+              },
+              "channel_id": {
+                "type": "string",
+                "format": "uuid",
+                "nullable": true
+              }
+            }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/marketing-channels/change-requests": {
+      "post": {
+        "summary": "提交渠道新增、编辑或停用申请，不直接修改渠道",
+        "operationId": "requestIsolatedChannelChange",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "create",
+                      "edit",
+                      "deactivate"
+                    ]
+                  },
+                  "channel_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "parent_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "nullable": true
+                  },
+                  "channel_type": {
+                    "type": "string",
+                    "maxLength": 60
+                  },
+                  "evidence_ref": {
+                    "type": "string"
+                  },
+                  "reason_zh": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "返回 pending 申请（同一请求重复时返回已有状态）"
+          },
+          "403": {
+            "description": "未授权签名/未映射的严格员工"
+          },
+          "409": {
+            "description": "防重复编号冲突"
+          },
+          "422": {
+            "description": "非法输入、其他机构或循环父级"
+          },
+          "500": {
+            "description": "隔离数据库不可用时安全拒绝"
+          }
+        }
+      }
+    },
+    "/api/v1/marketing-channels/change-requests/{request_id}/decision": {
+      "post": {
+        "summary": "不同有效销售主管审批，批准时才执行虚构渠道变更",
+        "operationId": "reviewIsolatedChannelChange",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "decision",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "rejected"
+                    ]
+                  },
+                  "evidence_ref": {
+                    "type": "string"
+                  },
+                  "reason_zh": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "approved→applied，rejected→rejected"
+          },
+          "403": {
+            "description": "不是当前主管、申请人本人或外机构"
+          },
+          "409": {
+            "description": "已经复核或编号冲突"
+          },
+          "422": {
+            "description": "目标快照陈旧或层级、名称冲突"
+          },
+          "500": {
+            "description": "隔离数据库失败，不发送业务数据"
+          }
+        }
+      }
+    }
+  }
+}
