@@ -232,6 +232,42 @@
           </form>
         </article>
       </div>
+      <div id="lead-candidate-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>真实咨询转线索候选（独立审核）</h2>
+          <p>候选不是正式销售线索。不会创建销售商机、分配学生、改变归因或触发收款。</p></div>
+        <div class="two-col">
+          <article class="panel"><h3>提交本人真实咨询的候选申请</h3>
+            <form id="lead-candidate-request-form" class="field-stack">
+              <label>选择符合条件的已记录咨询
+                <select name="source_event_id" data-options="candidateConsultations" required></select></label>
+              <label>为什么需要进入线索候选审核
+                <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构咨询核实材料说明
+                <input name="evidence_ref" maxlength="200" required placeholder="仅虚构材料，切勿输入手机号或证件信息"></label>
+              <div class="form-hint">有现存销售线索、拒绝联系、跨员工或跨机构咨询，不允许生成候选。相同咨询只能有一份候选。</div>
+              <button class="primary" type="submit">提交线索候选审核</button>
+            </form>
+          </article>
+          <article class="panel" id="lead-candidate-decision-card" hidden>
+            <h3>独立主管核实候选</h3>
+            <form id="lead-candidate-decision-form" class="field-stack">
+              <label>待审核候选
+                <select name="candidate_id" data-options="pendingLeadCandidates" required></select></label>
+              <label>审核结论 <select name="decision">
+                <option value="reviewed_eligible">候选条件核查通过（不生成线索）</option>
+                <option value="rejected">驳回本次候选</option>
+              </select></label>
+              <label>审核理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构独立核实依据 <input name="evidence_ref" maxlength="200" required></label>
+              <button class="primary" type="submit">保存候选独立审核</button>
+            </form>
+          </article>
+        </div>
+        <article class="panel space-top">
+          <h3>本人候选及待审核记录</h3>
+          <div id="lead-candidates-list" class="record-list"></div>
+        </article>
+      </div>
       <article class="panel space-top" id="strict-consultation-card" hidden>
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>

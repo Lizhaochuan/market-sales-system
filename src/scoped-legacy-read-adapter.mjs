@@ -8,10 +8,15 @@ export const migratedLegacyReads=new Set([
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
   'getStudent','getLead','getOpportunity',
   'listContactCustodyRequests','listContactCustodyStaff',
-  'listContactCustodyActive','listContactCustodyReviews','listRelatedStudents'
+  'listContactCustodyActive','listContactCustodyReviews','listRelatedStudents',
+  'listCandidateConsultations','listLeadCandidates'
 ]);
 
 const listQueries={
+  listCandidateConsultations:
+    'SELECT event_id,event_type,occurred_at,contact_name FROM ms.scoped_consultations_for_candidates ORDER BY occurred_at DESC,event_id LIMIT 100',
+  listLeadCandidates:
+    'SELECT candidate_id,source_event_id,status,created_at,contact_name,event_type,occurred_at,requested_by FROM ms.scoped_consultation_lead_candidates ORDER BY created_at DESC,candidate_id LIMIT 100',
   listContactCustodyActive:
     'SELECT assignment_id,contact_id,contact_name,assignee_id,granted_at FROM ms.scoped_contact_custody_active ORDER BY granted_at DESC LIMIT 100',
   listContactCustodyReviews:
