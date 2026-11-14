@@ -56,3 +56,14 @@ td .blocked{color:var(--warn);font-weight:700}
 .status{min-height:24px;font-size:13px;color:#235e55;font-weight:650}
 footer{font-size:11px;text-align:center;color:#89989b;padding:17px 0}
 @media(max-width:720px){.shell{padding:12px}.hero{padding:24px 20px;display:block}.hero h1{font-size:23px}.hero-status{margin-top:17px;min-width:0}.panel{padding:18px}.panel-head,.toolbar{align-items:flex-start;flex-direction:column}.login-input,.selection{display:grid;grid-template-columns:1fr;width:100%}input,select{width:100%}.metrics{grid-template-columns:1fr 1fr}.metrics div:last-child{grid-column:1/-1}.subtle{display:block;margin-left:0}.panel-head button{width:100%}}
+
+#history-panel .selection{margin:16px 0 14px;gap:10px;align-items:center}
+#history-panel .selection label{margin:0;font-size:12px}
+#history-panel .selection input{width:110px;min-width:90px;max-width:120px;flex:0 0 110px}
+#history-panel .table-scroll{margin-top:12px}
+#history-panel table{min-width:980px}
+@media(max-width:720px){
+ #history-panel .selection{display:grid;grid-template-columns:1fr 1fr}
+ #history-panel .selection input{width:100%;min-width:0;max-width:none}
+ #history-panel .selection button{grid-column:1/-1}
+}

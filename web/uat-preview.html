@@ -91,6 +91,35 @@
     <p class="note">导出前服务器会再次校验临时签名身份、数据库员工和机构权限。此文件仅供整理待办，不代表真实验收通过，也不包含生产账号或资金信息。</p>
     <pre id="markdown-preview" tabindex="0" aria-label="Markdown 待办报告内容"></pre>
    </section>
+   <section id="history-panel" class="panel" hidden>
+    <div class="panel-head"><div><span class="eyebrow">05 / 虚构证据历史</span>
+      <h2>新增、撤销及版本差异</h2></div>
+      <span class="tag blocked">始终不代表真实验收通过</span>
+    </div>
+    <p class="note">历史为只追加的虚构材料引用，不能证明资金、合同或课时归属。每次查看及导出均重新核对签名身份与机构权限。</p>
+    <div class="metrics">
+      <div><span>已记录版本</span><strong id="audit-current">0</strong></div>
+      <div><span>差异新增 / 撤销</span><strong id="audit-change">0 / 0</strong></div>
+      <div><span>有效虚构引用（前 → 后）</span><strong id="audit-active">0 → 0</strong></div>
+    </div>
+    <div class="selection">
+      <label for="audit-from">起始版本</label>
+      <input id="audit-from" type="number" min="0" step="1" value="0">
+      <label for="audit-to">结束版本</label>
+      <input id="audit-to" type="number" min="0" step="1" value="0">
+      <button id="compare-history" class="secondary" type="button">核对版本差异</button>
+      <button id="export-history" class="secondary" type="button">重新鉴权导出审计</button>
+    </div>
+    <p id="audit-notice" class="note">尚无虚构证据历史，也不得视为已具备真实来源授权。</p>
+    <div class="table-scroll">
+      <table aria-label="UAT 虚构证据差异历史">
+        <thead><tr><th scope="col">版本</th><th scope="col">责任检查</th>
+          <th scope="col">变动</th><th scope="col">测试引用</th>
+          <th scope="col">对应版本</th><th scope="col">原因</th><th scope="col">UTC 时间</th></tr></thead>
+        <tbody id="audit-events"></tbody>
+      </table>
+    </div>
+   </section>
   </main>
   <p id="status" class="status" role="status" aria-live="polite"></p>
   <footer>V3.2-33 · 本机隔离只读演示 · 仅供虚构业务安全验收</footer>

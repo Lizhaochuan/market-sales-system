@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {createExternalTokenVerifier} from './external-identity.mjs';
 import {buildBlockedUatTasks,renderBlockedUatMarkdown} from './integration-uat-blocker-report.mjs';
+import {verifyBlockedFixtureHistory,renderBlockedFixtureHistoryMarkdown} from './uat-evidence-history.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LOCAL=new Set(['127.0.0.1','::1','::ffff:127.0.0.1']);
@@ -30,11 +31,16 @@ export async function assertUatPreviewPool(pool){
   "has_table_privilege(current_user,'ms.payment_allocations','SELECT') AS raw_finance,"+
   "has_table_privilege(current_user,'ms.crm_entitlement_links','SELECT') AS raw_crm,"+
   "has_table_privilege(current_user,'ms.integration_missing_evidence_events','SELECT') AS raw_uat,"+
+  "has_table_privilege(current_user,'ms.fixture_uat_evidence_events','SELECT') AS raw_evidence,"+
   "has_table_privilege(current_user,'ms.sales_orders','UPDATE') AS update_orders,"+
   "has_function_privilege(current_user,"+
     "'ms.record_integration_missing_evidence(uuid,text,text,text,text,text)','EXECUTE') AS can_write_gap,"+
   "has_function_privilege(current_user,"+
     "'ms.propose_fixture_source_readiness(text,text,text,text,text,text)','EXECUTE') AS can_propose,"+
+  "has_function_privilege(current_user,"+
+    "'ms.record_fixture_uat_evidence(uuid,text,text,text,integer,text,text)','EXECUTE') AS can_write_evidence,"+
+  "has_function_privilege(current_user,"+
+    "'ms.readonly_fixture_uat_diff(uuid,integer,integer)','EXECUTE') AS can_audit,"+
   "has_function_privilege(current_user,"+
     "'ms.scoped_employee_identity_valid(text,text)','EXECUTE') AS can_validate_identity,"+
   "has_function_privilege(current_user,"+
@@ -44,9 +50,9 @@ export async function assertUatPreviewPool(pool){
  );
  const x=rows[0];
  if(!x||x.principal!==x.login||x.rolsuper||x.rolbypassrls||
-  x.raw_orders||x.raw_finance||x.raw_crm||x.raw_uat||x.update_orders||
-  x.can_write_gap||x.can_propose||!x.can_validate_identity||
-  !x.can_report||!x.can_list)
+  x.raw_orders||x.raw_finance||x.raw_crm||x.raw_uat||x.raw_evidence||x.update_orders||
+  x.can_write_gap||x.can_propose||x.can_write_evidence||!x.can_validate_identity||
+  !x.can_report||!x.can_list||!x.can_audit)
    throw Error('UAT preview must use a dedicated function-only and read-only DB LOGIN');
  const p=await pool.query(
    'SELECT ms.current_scoped_staff_id() AS staff_id,'+
@@ -87,10 +93,13 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
    }
    const isList=url.pathname==='/api/v1/uat-preview/requests';
    const match=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})(\/markdown)?$/.exec(url.pathname);
-   if(!isList&&!match){
+   const historyMatch=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})\/history$/.exec(url.pathname);
+   const diffMatch=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})\/diff\/([0-9]{1,8})\/([0-9]{1,8})(\/markdown)?$/.exec(url.pathname);
+   if(!isList&&!match&&!historyMatch&&!diffMatch){
     send(res,404,'NOT_FOUND','没有开放该只读操作',trace);return;
    }
-   if(match&&!UUID.test(match[1])){
+   const reportId=match?.[1]||historyMatch?.[1]||diffMatch?.[1];
+   if(reportId&&!UUID.test(reportId)){
     send(res,422,'VALIDATION_ERROR','来源申请编号格式不正确',trace);return;
    }
    const token=(req.headers.authorization||'').match(/^Bearer (\S+)$/i)?.[1];
@@ -125,6 +134,22 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
       release_allowed:false
      }))
     });return;
+   }
+   if(historyMatch||diffMatch){
+    const from=diffMatch?Number(diffMatch[2]):0;
+    const to=diffMatch?Number(diffMatch[3]):null;
+    const result=await client.query(
+     'SELECT ms.readonly_fixture_uat_diff($1,$2,$3) AS report',
+     [reportId,from,to]);
+    const historyRaw=result.rows[0]?.report;
+    const history=verifyBlockedFixtureHistory(historyRaw);
+    if(diffMatch?.[4]){
+     const markdown=renderBlockedFixtureHistoryMarkdown(historyRaw);
+     res.writeHead(200,{...headers('text/markdown; charset=utf-8'),
+      'Content-Disposition':'attachment; filename="uat-audit-'+reportId+'-'+from+'-'+to+'.md"'});
+     res.end(markdown);return;
+    }
+    send(res,200,'OK','虚构证据历史差异只读预览，真实联调仍被阻断',trace,{history});return;
    }
    const result=await client.query(
     'SELECT ms.readonly_integration_uat_report($1) AS report',[match[1]]);
