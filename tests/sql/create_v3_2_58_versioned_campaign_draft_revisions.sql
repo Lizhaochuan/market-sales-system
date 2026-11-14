@@ -96,6 +96,12 @@ BEGIN
  IF campaign.status<>'draft' THEN
   RAISE EXCEPTION '非草稿活动不能修改' USING ERRCODE='23514';
  END IF;
+ -- V3.2-59: freeze edits while sales review is pending or finance hold is active.
+ IF EXISTS(SELECT 1 FROM ms.isolated_campaign_sales_reviews r
+  WHERE r.campaign_id=p_campaign AND r.status IN
+   ('pending_sales','sales_approved_pending_finance')) THEN
+  RAISE EXCEPTION '活动已有销售待审或财务待确认记录，禁止修改' USING ERRCODE='23505';
+ END IF;
  SELECT COALESCE(v.version,1) INTO current_version FROM
   (SELECT 1 AS version) d LEFT JOIN ms.isolated_campaign_draft_versions v
    ON v.campaign_id=p_campaign;
