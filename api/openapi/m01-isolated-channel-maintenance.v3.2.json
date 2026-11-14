@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M01 渠道维护隔离审批接口",
-    "version": "v3.2-55",
-    "description": "CI-only fictional channels: employee-scoped request listing, employee proposal, independent manager approval. No production integration."
+    "version": "v3.2-56",
+    "description": "Isolated, fictional channel maintenance only: employee-owned requests, manager review and least-privilege historical event chronology. No production or finance integration."
   },
   "x-contract-status": "isolated-implemented",
   "x-environment": "isolated-test",
@@ -354,6 +354,112 @@
           },
           "500": {
             "description": "隔离数据库失败，不发送业务数据"
+          }
+        }
+      }
+    },
+    "/api/v1/marketing-channels/change-requests/audit-history": {
+      "get": {
+        "summary": "Minimal history for own requests, own completed reviews, and manager-reviewable current pending requests",
+        "operationId": "listScopedIsolatedChannelAuditHistory",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "CI-only. SESSION_USER determines employee/organization. Never exposes audit JSON, evidence, or finance. Fails closed if more than 100 events.",
+        "responses": {
+          "200": {
+            "description": "Bounded, permission-filtered channel event timeline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "OK"
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "maxItems": 100,
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "audit_id",
+                              "request_id",
+                              "event_name",
+                              "actor_user_id",
+                              "happened_at",
+                              "action",
+                              "status",
+                              "requested_by"
+                            ],
+                            "properties": {
+                              "audit_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "request_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "event_name": {
+                                "type": "string",
+                                "enum": [
+                                  "CHANNEL_CHANGE_REQUESTED",
+                                  "CHANNEL_CHANGE_APPLIED",
+                                  "CHANNEL_CHANGE_REJECTED"
+                                ]
+                              },
+                              "actor_user_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "happened_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "action": {
+                                "type": "string",
+                                "enum": [
+                                  "create",
+                                  "edit",
+                                  "deactivate"
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "applied",
+                                  "rejected"
+                                ]
+                              },
+                              "requested_by": {
+                                "type": "string",
+                                "format": "uuid"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unapproved signed staff or wrong restricted database LOGIN"
+          },
+          "500": {
+            "description": "Untrusted data or unavailable projection; no prior data returned"
           }
         }
       }
