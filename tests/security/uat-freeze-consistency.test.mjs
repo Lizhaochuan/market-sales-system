@@ -73,7 +73,7 @@ test('V3.2-35 one-way freeze, revoked roles, large windows, concurrent commit or
    assert.equal(head.production_integration_allowed,false);
    assert.equal(head.release_allowed,false);
    await denied(viewerB,state,[id],'42501');
-   await denied(finance,append,event(id,'fictional_after_freeze')),'55000');
+   await denied(finance,append,event(id,'fictional_after_freeze'),'55000');
    await denied(finance,append,[id,'finance_reconciliation','fixture_withdrawn',
     'fictional_first_ref01',1,'fixture_revoked',key()],'55000');
    const snap=await result(viewerA,guarded,[id,0,2,2]);
@@ -121,7 +121,7 @@ test('V3.2-35 one-way freeze, revoked roles, large windows, concurrent commit or
    assert.equal(details.events.length,current.current_sequence);
    assert.deepEqual(details.events.map(x=>x.sequence),
     Array.from({length:current.current_sequence},(_,i)=>i+1));
-   await denied(finance,append,event(concurrencySource,'fictional_after_race')),'55000');
+   await denied(finance,append,event(concurrencySource,'fictional_after_race'),'55000');
   });
   await t.test('overlarge history window fails, smaller explicit immutable windows still work',async()=>{
    const big=await makeSource(finance,'large');
