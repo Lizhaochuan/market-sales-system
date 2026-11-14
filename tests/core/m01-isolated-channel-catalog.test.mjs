@@ -18,12 +18,16 @@ function ch(id,org,parent=null,status='active',name='虚构渠道',type='web'){
 }
 test('M01 catalog rejects tenant mixing, cycles, broken ancestry and malformed data',()=>{
  const a=randomUUID(),b=randomUUID(),root=randomUUID(),child=randomUUID();
+ const ownInactive=randomUUID();
  const tree=buildIsolatedChannelCatalog([
-  ch(child,a,root,'active','子渠道'),ch(root,a,null,'inactive','主渠道')
+  ch(child,a,root,'active','父渠道停用的子渠道'),
+  ch(ownInactive,a,null,'inactive','直接停用的渠道'),
+  ch(root,a,null,'inactive','主渠道')
  ],a);
- assert.equal(tree.count,2);assert.equal(tree.root_count,1);
+ assert.equal(tree.count,3);assert.equal(tree.root_count,2);
  assert.equal(tree.effective_active_count,0);
  assert.equal(tree.channels.find(x=>x.channel_id===child).effective_status,'inactive_inherited');
+ assert.equal(tree.channels.find(x=>x.channel_id===ownInactive).effective_status,'inactive');
  assert.equal(tree.channels.find(x=>x.channel_id===child).depth,1);
  assert.equal(tree.production_integration_allowed,false);
  assert.equal(tree.cross_student_family_inference_allowed,false);
