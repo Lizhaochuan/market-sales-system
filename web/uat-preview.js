@@ -112,6 +112,49 @@ async function viewReport(){
  renderHistory(history.history,{initial:true});
  status('已重新核对员工及机构权限。该报告和虚构历史仍然禁止真实联调和纠错执行。');
 }
+function renderHistory(history,{initial=false}={}){
+ if(!history||history.requestId!==state.requestId||
+  history.production_integration_allowed!==false||
+  history.execution_allowed!==false||history.release_allowed!==false||
+  history.status!=='仍未取得真实权威证据'||
+  !Array.isArray(history.events))throw Error('无效或不受阻的证据历史不可展示');
+ state.history=history;
+ if(initial){
+  $('audit-from').value='0';
+  $('audit-to').value=String(history.current);
+ }
+ $('audit-from').max=String(history.current);
+ $('audit-to').max=String(history.current);
+ $('audit-current').textContent=String(history.current);
+ $('audit-change').textContent=String(history.added)+' / '+String(history.withdrawn);
+ $('audit-active').textContent=String(history.activeBefore)+' → '+String(history.activeAfter);
+ const target=$('audit-events');
+ target.replaceChildren();
+ for(const entry of history.events){
+  if(!entry.fixtureRef?.startsWith('fictional_'))
+   throw Error('审计记录不是虚构来源引用');
+  const tr=document.createElement('tr');
+  for(const value of [entry.sequence,entry.check,entry.action,entry.fixtureRef,
+   entry.parentSequence===null?'—':entry.parentSequence,
+   entry.reason,entry.observedAt]){
+   makeCell(tr,value);
+  }
+  target.append(tr);
+ }
+ $('audit-notice').textContent=history.events.length?
+  '仅虚构引用变动；历史保留，真实来源仍未授权。':
+  '所选版本内没有虚构证据变动；不能视为业务通过。';
+ $('history-panel').hidden=false;
+}
+function chosenVersionRange(){
+ const start=$('audit-from').value,end=$('audit-to').value;
+ const from=Number(start),to=Number(end),current=state.history?.current;
+ if(!/^(0|[1-9][0-9]{0,7})$/.test(start)||
+  !/^(0|[1-9][0-9]{0,7})$/.test(end)||
+  !Number.isSafeInteger(from)||!Number.isSafeInteger(to)||
+  from<0||to<from||to>current)throw Error('所选版本超出本机构已记录的虚构历史');
+ return {from,to};
+}
 $('login-form').addEventListener('submit',async event=>{
  event.preventDefault();
  const token=$('signed-token').value.trim();
