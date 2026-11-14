@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,24 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='attestDownstreamReconciliation'){
+    only(body,['finding','student_evidence_ref','opportunity_evidence_ref','finance_evidence_ref','reason_zh']);
+    if(!['original_student_confirmed','wrong_student_confirmed'].includes(body.finding))
+      fail(422,'VALIDATION_ERROR','请选择确认原学生或确认错误关联');
+    return {params:[uuid(routeParams?.[0],'下游纠错案件'),body.finding,
+      approvalText(body.student_evidence_ref,'指定学生核实证据',200),
+      approvalText(body.opportunity_evidence_ref,'商机核查证据',200),
+      approvalText(body.finance_evidence_ref,'订单财务影响核查证据',200),
+      approvalText(body.reason_zh,'核查原因',400)]};
+  }
+  if(op==='resolveDownstreamReconciliation'){
+    only(body,['resolution','evidence_ref','reason_zh']);
+    if(!['release_verified','escalate_manual'].includes(body.resolution))
+      fail(422,'VALIDATION_ERROR','请选择安全释放或转人工处理');
+    return {params:[uuid(routeParams?.[0],'独立核查结论'),
+      body.resolution,approvalText(body.evidence_ref,'二次复核凭据',200),
+      approvalText(body.reason_zh,'二次复核理由',400)]};
+  }
   if(op==='requestDownstreamStudentCorrection'){
     only(body,['association_request_id','evidence_ref','reason_zh']);
     return {params:[uuid(body.association_request_id,'指定学生原关联'),
@@ -288,6 +306,14 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'attestDownstreamReconciliation':
+        result=await client.query(
+          'SELECT ms.attest_downstream_student_reconciliation($1,$2,$3,$4,$5,$6,$7) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'resolveDownstreamReconciliation':
+        result=await client.query(
+          'SELECT ms.resolve_downstream_student_reconciliation($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'requestDownstreamStudentCorrection':
         result=await client.query(
           'SELECT ms.request_downstream_student_correction($1,$2,$3,$4) AS result',

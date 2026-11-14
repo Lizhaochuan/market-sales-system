@@ -11,10 +11,12 @@ export const migratedLegacyReads=new Set([
   'listContactCustodyActive','listContactCustodyReviews','listRelatedStudents',
   'listCandidateConsultations','listLeadCandidates',
   'listConversionReadiness','listAttributionDisputes','listAttributionDisputable',
-  'listFinalLeadConversions','listLeadStudentAssociations','listLeadStudentLinkReviews','listCurrentLeadStudentLinks','listDownstreamStudentCorrections','listDownstreamCorrectionEligible','listLeadAdjustments','listLeadCorrectionNotes'
+  'listFinalLeadConversions','listLeadStudentAssociations','listLeadStudentLinkReviews','listCurrentLeadStudentLinks','listDownstreamStudentCorrections','listDownstreamCorrectionEligible','listDownstreamReconciliations','listLeadAdjustments','listLeadCorrectionNotes'
 ]);
 
 const listQueries={
+  listDownstreamReconciliations:
+    'SELECT case_id,association_request_id,student_id,lead_id,student_name,case_status,finding_id,finding,finding_created_at,resolution,resolved_at,first_reviewer_id,requested_by FROM ms.scoped_downstream_student_reconciliations ORDER BY student_name,case_id LIMIT 100',
   listDownstreamStudentCorrections:
     'SELECT case_id,association_request_id,lead_id,student_id,student_name,status,created_at,requested_by,opportunity_count,quote_count,order_count,allocation_count,refund_allocation_count,trial_count,sale_event_count,entitlement_count FROM ms.scoped_downstream_student_correction_cases ORDER BY created_at DESC,case_id LIMIT 100',
   listDownstreamCorrectionEligible:
