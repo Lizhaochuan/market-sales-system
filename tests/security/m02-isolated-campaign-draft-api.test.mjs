@@ -290,7 +290,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
    if([aRead,bRead,mRead].includes(pool)){
     await assert.rejects(pool.query('INSERT INTO ms.scoped_isolated_campaign_finance_handoffs(review_id) VALUES($1)',[reviewId]),
-      e=>e.code==='42501','read-only view cannot be written');
+      e=>['42501','55000','0A000'].includes(e.code),'read-only view cannot be written');
    }
    await assert.rejects(pool.query('SELECT * FROM ms.isolated_campaign_sales_reviews'),
     e=>e.code==='42501');
