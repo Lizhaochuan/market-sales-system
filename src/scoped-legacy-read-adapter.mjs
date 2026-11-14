@@ -3,8 +3,10 @@
 // DB SESSION_USER is admin-bound to a single employee, independent of JWT role.
 // Does NOT migrate any POST, family approvals, audit or identity-management API.
 import {fail} from './auth.mjs';
+import {buildIsolatedChannelCatalog} from './marketing-channel-catalog.mjs';
 
 export const migratedLegacyReads=new Set([
+  'listMarketingChannels',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
   'getStudent','getLead','getOpportunity',
   'listContactCustodyRequests','listContactCustodyStaff',
@@ -15,6 +17,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listMarketingChannels:
+    'SELECT id,organization_id,parent_id,name,channel_type,status FROM ms.scoped_marketing_channel_catalog ORDER BY id LIMIT 201',
   listDownstreamReconciliations:
     'SELECT case_id,association_request_id,student_id,lead_id,student_name,case_status,finding_id,finding,finding_created_at,resolution,resolved_at,first_reviewer_id,requested_by FROM ms.scoped_downstream_student_reconciliations ORDER BY student_name,case_id LIMIT 100',
   listDownstreamStudentCorrections:
@@ -126,7 +130,9 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      data={items:projectList(operation,r.rows,context.user)};
+      data=operation==='listMarketingChannels'
+        ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)
+        :{items:projectList(operation,r.rows,context.user)};
     }else{
       const detail=detailQueries[operation];
       const id=params?.[0];
