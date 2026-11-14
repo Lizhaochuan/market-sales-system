@@ -113,7 +113,7 @@ test('V3.2-34 real DB LOGIN: fictional append-only evidence and tenant-safe revi
    assert.equal(verified.withdrawn,1);
    assert.equal(verified.activeAfter,1);
    const md=renderBlockedFixtureHistoryMarkdown(full);
-   assert.match(md,/1 → 3/);
+   assert.match(md,/0 → 3/);
    assert.match(md,/禁止真实联调/);
    assert.match(md,/禁止解除学生错误关联隔离/);
    await deny(viewerA,diff,[sourceA,0,4],'23514');
