@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope, chatgpt/v3-2-09-scoped-read-business-api, chatgpt/v3-2-10-legacy-read-hardening, chatgpt/v3-2-11-student-access-governance, chatgpt/v3-2-12-chinese-access-ui-lowrisk-writes, chatgpt/v3-2-13-legacy-lowrisk-writes-trusted-ui, chatgpt/v3-2-14-scoped-contact-links-consultations, chatgpt/v3-2-15-scoped-identity-directory, chatgpt/v3-2-16-custody-withdrawals-disputes, chatgpt/v3-2-17-consultation-lead-candidate, chatgpt/v3-2-18-conversion-preflight-attribution-dispute, chatgpt/v3-2-19-final-approved-lead-conversion, chatgpt/v3-2-20-student-link-and-lead-corrections, chatgpt/v3-2-21-verified-student-link-withdrawal, chatgpt/v3-2-22-downstream-student-correction-hold]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope, chatgpt/v3-2-09-scoped-read-business-api, chatgpt/v3-2-10-legacy-read-hardening, chatgpt/v3-2-11-student-access-governance, chatgpt/v3-2-12-chinese-access-ui-lowrisk-writes, chatgpt/v3-2-13-legacy-lowrisk-writes-trusted-ui, chatgpt/v3-2-14-scoped-contact-links-consultations, chatgpt/v3-2-15-scoped-identity-directory, chatgpt/v3-2-16-custody-withdrawals-disputes, chatgpt/v3-2-17-consultation-lead-candidate, chatgpt/v3-2-18-conversion-preflight-attribution-dispute, chatgpt/v3-2-19-final-approved-lead-conversion, chatgpt/v3-2-20-student-link-and-lead-corrections, chatgpt/v3-2-21-verified-student-link-withdrawal, chatgpt/v3-2-22-downstream-student-correction-hold, chatgpt/v3-2-23-downstream-reconciliation-release]
   workflow_dispatch:
 
 permissions:
@@ -39,12 +39,14 @@ jobs:
       DATABASE_URL_ASSIGNEE_A: postgresql://ms_assignee_reader_a:fictional_assignee_a_2026_74e5a9@127.0.0.1:5432/ms_test
       DATABASE_URL_ASSIGNEE_B: postgresql://ms_assignee_reader_b:fictional_assignee_b_2026_129b6e@127.0.0.1:5432/ms_test
       DATABASE_URL_ASSIGNEE_MANAGER: postgresql://ms_assignee_reader_manager:fictional_assignee_manager_2026_0bc5ea@127.0.0.1:5432/ms_test
+      DATABASE_URL_ASSIGNEE_MANAGER_2: postgresql://ms_assignee_reader_manager_2:fictional_assignee_manager2_2026_d28b57@127.0.0.1:5432/ms_test
       DATABASE_URL_ACCESS_A: postgresql://ms_access_a:fictional_access_a_2026_982a1e@127.0.0.1:5432/ms_test
       DATABASE_URL_ACCESS_B: postgresql://ms_access_b:fictional_access_b_2026_819a0f@127.0.0.1:5432/ms_test
       DATABASE_URL_ACCESS_MANAGER: postgresql://ms_access_manager:fictional_access_manager_2026_15be2c@127.0.0.1:5432/ms_test
       DATABASE_URL_AUTH_DIRECTORY: postgresql://ms_strict_auth_login:fictional_auth_directory_2026_12f4c8@127.0.0.1:5432/ms_test
       DATABASE_URL_WRITE_A: postgresql://ms_write_a:fictional_write_a_2026_618f92@127.0.0.1:5432/ms_test
       DATABASE_URL_WRITE_MANAGER: postgresql://ms_write_manager:fictional_write_manager_2026_6b31e2@127.0.0.1:5432/ms_test
+      DATABASE_URL_WRITE_MANAGER_2: postgresql://ms_write_manager_2:fictional_write_manager2_2026_f971a6@127.0.0.1:5432/ms_test
       DATABASE_URL_WRITE_B: postgresql://ms_write_b:fictional_write_b_2026_a0c33f@127.0.0.1:5432/ms_test
       DATABASE_URL_DIRECTORY_A: postgresql://ms_directory_reader_a:fictional_viewonly_a_2026_d2ea45@127.0.0.1:5432/ms_test
       DATABASE_URL_DIRECTORY_B: postgresql://ms_directory_reader_b:fictional_viewonly_b_2026_c72180@127.0.0.1:5432/ms_test
@@ -98,6 +100,7 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/024_lead_student_pending_links_and_adjustments.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/025_independent_student_link_verification_withdrawal.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/026_downstream_student_correction_holds.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/027_two_supervisor_downstream_reconciliation.sql
           psql -X -v ON_ERROR_STOP=1             -v "route_password=fictional_approved_route_2026_8136bc"             -v "assignee_password_a=fictional_assignee_a_2026_74e5a9"             -v "assignee_password_b=fictional_assignee_b_2026_129b6e"             -f tests/sql/create_v3_2_08_readonly_principals.sql
           psql -X -v ON_ERROR_STOP=1 -v "manager_password=fictional_assignee_manager_2026_0bc5ea" -f tests/sql/create_v3_2_10_manager_readonly_login.sql
           psql -X -v ON_ERROR_STOP=1             -v "pass_a=fictional_access_a_2026_982a1e"             -v "pass_b=fictional_access_b_2026_819a0f"             -v "pass_m=fictional_access_manager_2026_15be2c"             -f tests/sql/create_v3_2_11_access_operator_logins.sql
@@ -105,6 +108,7 @@ jobs:
           psql -X -v ON_ERROR_STOP=1             -v "reader_password_a=fictional_viewonly_a_2026_d2ea45"             -v "reader_password_b=fictional_viewonly_b_2026_c72180"             -f tests/sql/create_directory_projection_readers.sql
           psql -X -v ON_ERROR_STOP=1 -v "directory_password=fictional_auth_directory_2026_12f4c8" -f tests/sql/create_v3_2_15_strict_auth_directory_login.sql
           psql -X -v ON_ERROR_STOP=1 -v "manager_write_password=fictional_write_manager_2026_6b31e2" -f tests/sql/create_v3_2_15_manager_function_only_writer.sql
+          psql -X -v ON_ERROR_STOP=1 -v "read_m2_password=fictional_assignee_manager2_2026_d28b57" -v "write_m2_password=fictional_write_manager2_2026_f971a6" -f tests/sql/create_v3_2_23_second_manager_principals.sql
       - name: Restricted runtime role and forbidden finance operations
         run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/lowrisk_runtime_permissions.smoke.sql
       - name: Restricted actual LOGIN and tenant row-level security E2E
