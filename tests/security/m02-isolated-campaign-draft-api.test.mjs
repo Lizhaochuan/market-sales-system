@@ -78,6 +78,12 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const compensationMatrix=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/compensation-matrix',
+    {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
  const trustFailureGates=async staff=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
     '/api/v1/marketing-campaigns/finance-incidents/trust-failure-gates',
@@ -427,6 +433,41 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     await assert.rejects(pool.query('DELETE FROM ms.audit_events WHERE FALSE'),
       e=>e.code==='42501');
   }
+  // V3.2-68: "must preserve" is not proof that any original CRM fact was verified.
+  let matrix=await compensationMatrix(A);
+  assert.equal(matrix.status,200,JSON.stringify(matrix));
+  assert.equal(matrix.data.items.some(x=>x.incident_id===incident1),false,
+    'closed incident is not a compensation candidate');
+  assert.equal((await compensationMatrix(B)).status,401);
+  const verifyMatrix=(x,complete)=>{
+    assert.ok(x,'scoped escalated candidate must be present');
+    assert.equal(x.incident_status,'manual_escalated');
+    assert.equal(x.issue_kind,'integrity_mismatch');
+    assert.equal(x.sales_packet_complete,complete);
+    assert.equal(x.failure_classification,'snapshot_integrity_conflict');
+    assert.equal(x.proposed_next_step,'independent_sales_snapshot_review_required');
+    assert.equal(x.sales_responsibility,'sales:original_reporter_and_independent_reviewer');
+    assert.equal(x.finance_responsibility,
+      'finance:trusted_independent_receipt_and_payment_reconciliation_required');
+    assert.equal(x.academic_responsibility,
+      'academic:trusted_student_and_lesson_reconciliation_required');
+    assert.equal(x.compensation_candidate_state,'candidate_only_no_execution_authority');
+    for(const k of ['downstream_student_impact_assessed','actual_order_reconciliation_verified',
+      'actual_payment_reconciliation_verified','actual_sale_event_reconciliation_verified',
+      'actual_lesson_reconciliation_verified','historical_compensation_chain_verified',
+      'independent_sales_case_accepted','independent_finance_case_accepted',
+      'independent_academic_case_accepted','all_original_records_integrity_verified',
+      'original_records_mutable','compensation_write_allowed','release_eligible',
+      'finance_authorized','execution_allowed','activity_publish_allowed'])
+      assert.equal(x[k],false,'Unverified external truth or permission '+k);
+    for(const k of ['preserve_original_orders_required','preserve_original_payments_required',
+      'preserve_original_sale_events_required','preserve_original_lessons_required',
+      'hold_active'])assert.equal(x[k],true,k);
+    for(const k of ['organization_id','student_id','order_id','payment_id','lesson_id',
+      'evidence_ref','reason_zh','after_business_json','request_key','signature'])
+      assert.equal(Object.hasOwn(x,k),false,'Scoped matrix leaked '+k);
+  };
+  verifyMatrix(matrix.data.items.find(x=>x.incident_id===incident2),false);
   // V3.2-67: external signature, revocation and replay checks are unavailable.
   let trust=await trustFailureGates(A);
   assert.equal(trust.status,200,JSON.stringify(trust));
@@ -559,6 +600,24 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     trust=await trustFailureGates(who);
     assert.equal(trust.status,200,JSON.stringify(trust));
     checkTrust(trust.data.items.find(x=>x.incident_id===incident2),true);
+    matrix=await compensationMatrix(who);
+    assert.equal(matrix.status,200,JSON.stringify(matrix));
+    verifyMatrix(matrix.data.items.find(x=>x.incident_id===incident2),true);
+  }
+  const illegalCompensation=await fetch(
+    'http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/compensation-matrix',{
+      method:'POST',headers:{Authorization:'Bearer '+sign(A),
+        'Content-Type':'application/json','Idempotency-Key':key()},
+      body:JSON.stringify({compensation_write_allowed:true,release_eligible:true,
+        original_records_mutable:true,finance_authorized:true})
+    });
+  assert.equal(illegalCompensation.status,404,
+    'no fake compensation execution route exists');
+  for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+    await assert.rejects(
+      pool.query("UPDATE ms.scoped_isolated_campaign_compensation_responsibility_matrix SET compensation_write_allowed=true WHERE FALSE"),
+      e=>['42501','55000','0A000'].includes(e.code));
   }
   const unauthorizedTrustWrite=await fetch(
     'http://127.0.0.1:'+app.address().port+
@@ -703,6 +762,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     'revoked signed identity cannot claim cross-department acceptance');
   assert.equal((await trustFailureGates(A)).status,403,
     'revoked employee cannot read or bypass cross-party trust failure');
+  assert.equal((await compensationMatrix(A)).status,403,
+    'revoked identity cannot list compensation candidates');
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));
