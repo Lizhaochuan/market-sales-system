@@ -159,7 +159,8 @@ test('V3.2-09: five actual scoped HTTP read endpoints isolate staff, fields and 
       assert.equal((await request(apps[0],paths.students,tokenB)).status,403);
       assert.equal((await request(apps[1],paths.students,tokenA)).status,403);
       const tampered=tokenA.split('.');
-      tampered[2]='x'+tampered[2].slice(1);
+      // Never accidentally reproduce an unchanged random RSA signature.
+      tampered[2]=(tampered[2][0]==='x'?'y':'x')+tampered[2].slice(1);
       assert.equal((await request(apps[0],paths.students,tampered.join('.'))).status,401);
       assert.equal((await request(apps[0],paths.students,null)).status,401);
     });
