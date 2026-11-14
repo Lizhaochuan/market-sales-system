@@ -1,0 +1,22 @@
+name: V3.2-72 isolated evidence revocation regression
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-evidence-revocation-ledger.mjs'
+      - 'tests/security/v3-2-72-m02-evidence-revocation.test.mjs'
+      - '.github/workflows/v3-2-72-revocation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-revocation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check revocation module syntax
+        run: node --check src/cross-module-evidence-revocation-ledger.mjs
+      - name: Run isolated revocation unit tests
+        run: node --test tests/security/v3-2-72-m02-evidence-revocation.test.mjs
