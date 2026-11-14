@@ -78,6 +78,12 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const compensationChecklist=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/compensation-checklist',
+    {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
  const compensationMatrix=async staff=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
     '/api/v1/marketing-campaigns/finance-incidents/compensation-matrix',
@@ -433,6 +439,41 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     await assert.rejects(pool.query('DELETE FROM ms.audit_events WHERE FALSE'),
       e=>e.code==='42501');
   }
+  // V3.2-69: four approval stages are *requirements*, never actual approvals.
+  let checklist=await compensationChecklist(A);
+  assert.equal(checklist.status,200,JSON.stringify(checklist));
+  assert.equal(checklist.data.items.some(x=>x.incident_id===incident1),false);
+  assert.equal((await compensationChecklist(B)).status,401);
+  const checkChecklist=(x,complete)=>{
+    assert.ok(x,'a scoped escalated case has a proposed checklist');
+    assert.equal(x.incident_status,'manual_escalated');
+    assert.equal(x.issue_kind,'integrity_mismatch');
+    assert.equal(x.failure_classification,'snapshot_integrity_conflict');
+    assert.equal(x.sales_packet_complete,complete);
+    assert.equal(x.first_blocking_gate,complete
+      ?'blocked_independent_sales_case_authority_missing':'blocked_sales_evidence_missing');
+    assert.deepEqual([x.stage_1_sales,x.stage_2_finance,x.stage_3_academic,x.stage_4_joint],
+      ['01_sales_independent_case_review','02_finance_originals_and_signed_decision',
+       '03_academic_student_lesson_signed_decision',
+       '04_joint_evidence_and_history_reconciliation']);
+    assert.equal(x.checklist_state,'proposal_only_no_compensation_or_release');
+    for(const k of ['sales_original_snapshot_verified','sales_independent_case_approved',
+      'finance_original_order_evidence_verified','finance_original_payment_evidence_verified',
+      'finance_independent_decision_signed','academic_student_identity_verified',
+      'academic_original_lesson_evidence_verified','academic_independent_decision_signed',
+      'compensation_history_chain_verified','external_replay_and_revocation_verified',
+      'all_source_record_hashes_verified','joint_three_party_approval_verified',
+      'original_records_mutable','compensation_write_allowed','release_eligible',
+      'finance_authorized','execution_allowed','activity_publish_allowed'])
+      assert.equal(x[k],false,'compensation authority not verified '+k);
+    for(const k of ['preserve_original_orders_required','preserve_original_payments_required',
+      'preserve_original_sale_events_required','preserve_original_lessons_required','hold_active'])
+      assert.equal(x[k],true,k);
+    for(const secret of ['student_id','order_id','payment_id','lesson_id','organization_id',
+      'evidence_ref','reason_zh','request_key','audit_events','approval_signature'])
+      assert.equal(Object.hasOwn(x,secret),false,'private evidence leaked '+secret);
+  };
+  checkChecklist(checklist.data.items.find(x=>x.incident_id===incident2),false);
   // V3.2-68: "must preserve" is not proof that any original CRM fact was verified.
   let matrix=await compensationMatrix(A);
   assert.equal(matrix.status,200,JSON.stringify(matrix));
@@ -603,6 +644,25 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     matrix=await compensationMatrix(who);
     assert.equal(matrix.status,200,JSON.stringify(matrix));
     verifyMatrix(matrix.data.items.find(x=>x.incident_id===incident2),true);
+    checklist=await compensationChecklist(who);
+    assert.equal(checklist.status,200,JSON.stringify(checklist));
+    checkChecklist(checklist.data.items.find(x=>x.incident_id===incident2),true);
+  }
+  const illegalChecklistApproval=await fetch(
+    'http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/compensation-checklist',{
+      method:'POST',headers:{Authorization:'Bearer '+sign(A),
+        'Content-Type':'application/json','Idempotency-Key':key()},
+      body:JSON.stringify({sales_independent_case_approved:true,
+        finance_independent_decision_signed:true,academic_independent_decision_signed:true,
+        joint_three_party_approval_verified:true,release_eligible:true})
+    });
+  assert.equal(illegalChecklistApproval.status,404,
+    'no fake compensation checklist approval API exists');
+  for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+    await assert.rejects(
+      pool.query("UPDATE ms.scoped_isolated_campaign_compensation_evidence_approval_gates SET release_eligible=true WHERE FALSE"),
+      e=>['42501','55000','0A000'].includes(e.code));
   }
   const illegalCompensation=await fetch(
     'http://127.0.0.1:'+app.address().port+
@@ -764,6 +824,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     'revoked employee cannot read or bypass cross-party trust failure');
   assert.equal((await compensationMatrix(A)).status,403,
     'revoked identity cannot list compensation candidates');
+  assert.equal((await compensationChecklist(A)).status,403,
+    'revoked identity cannot claim independent approval');
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));
