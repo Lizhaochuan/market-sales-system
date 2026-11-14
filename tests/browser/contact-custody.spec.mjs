@@ -404,8 +404,10 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   await a.locator('button[data-view="students"]').click();
   await a.locator('#student-form input[name="display_name"]').fill(linkedStudentName);
   await a.getByRole('button',{name:'保存学生档案'}).click();
+  await expect(a.locator('#students-list')).toContainText(linkedStudentName);
   await a.locator('#student-form input[name="display_name"]').fill(unlinkedSiblingName);
   await a.getByRole('button',{name:'保存学生档案'}).click();
+  await expect(a.locator('#students-list')).toContainText(unlinkedSiblingName);
   const namedStudentId=(await owner.query('SELECT id FROM ms.students WHERE display_name=$1 AND organization_id=$2',
     [linkedStudentName,org])).rows[0].id;
   const siblingStudentId=(await owner.query('SELECT id FROM ms.students WHERE display_name=$1 AND organization_id=$2',
