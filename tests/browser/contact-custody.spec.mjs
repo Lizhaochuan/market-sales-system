@@ -111,12 +111,18 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   const m=await login('M');
   await expect(m.locator('#custody-decision-card')).toBeVisible();
   await expect(m.locator('#custody-requests-list')).toContainText(name);
+  const approvalChoice=m.locator('#custody-decision-form select[name="request_id"]');
+  const approvalId=await approvalChoice.locator('option').filter({hasText:name}).first().getAttribute('value');
+  expect(approvalId).toBeTruthy();
+  await approvalChoice.selectOption(approvalId);
   await m.locator('#custody-decision-form textarea[name="reason_zh"]')
    .fill('独立主管核实当前联系人管理人和接收员工后批准');
   await m.locator('#custody-decision-form input[name="evidence_ref"]')
    .fill('虚构独立审核材料说明');
   await m.getByRole('button',{name:'保存联系人交接审核'}).click();
-  await expect(m.locator('#custody-requests-list')).toContainText('已批准');
+  await expect.poll(async()=>(
+    await owner.query('SELECT assignee_id FROM ms.contact_custody_assignments WHERE contact_id=$1 AND revoked_at IS NULL',[contact.id])
+  ).rows[0]?.assignee_id).toBe(ids.B);
   await b.getByRole('button',{name:'刷新数据'}).click();
   await expect(b.locator('#contacts-list')).toContainText(name);
   const rows=await owner.query(
@@ -140,13 +146,22 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   await m.getByRole('button',{name:'刷新数据'}).click();
   await expect(m.locator('#custody-review-decision-card')).toBeVisible();
   const decideReview=m.locator('#custody-review-decision-form');
+  const reviewChoice=decideReview.locator('select[name="review_id"]');
+  const reviewId=await reviewChoice.locator('option').filter({hasText:name}).first().getAttribute('value');
+  expect(reviewId).toBeTruthy();
+  await reviewChoice.selectOption(reviewId);
   await decideReview.locator('select[name="result"]').selectOption('reversed');
   await decideReview.locator('textarea[name="reason_zh"]')
    .fill('独立复核确认管理权需要恢复原任员工');
   await decideReview.locator('input[name="evidence_ref"]')
    .fill('虚构独立复核证据记录');
   await decideReview.getByRole('button',{name:'保存独立复核决定'}).click();
-  await expect(m.locator('#custody-reviews-list')).toContainText('已撤回');
+  await expect.poll(async()=>(
+    await owner.query('SELECT assignee_id FROM ms.contact_custody_assignments WHERE contact_id=$1 AND revoked_at IS NULL',[contact.id])
+  ).rows[0]?.assignee_id).toBe(ids.A);
+  await expect.poll(async()=>(
+    await pools.readB.query('SELECT COUNT(*)::int AS n FROM ms.scoped_contacts_directory WHERE contact_id=$1',[contact.id])
+  ).rows[0]?.n).toBe(0);
   await b.getByRole('button',{name:'刷新数据'}).click();
   await a.getByRole('button',{name:'刷新数据'}).click();
   await expect(b.locator('#contacts-list')).not.toContainText(name);
