@@ -292,6 +292,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
     .toContainText('销售证据未齐，禁止进入跨部门验收');
   await expect(staffPage.locator('#campaign-trust-failure-list'))
     .toContainText('销售资料不完整，不能进入三方签名验收');
+  await expect(staffPage.locator('#campaign-compensation-list'))
+    .toContainText('销售证据未齐：补充材料，不得释放');
   await expect(staffPage.locator('#campaign-acceptance-list'))
     .toContainText('财务未签收');
   await expect(staffPage.locator('#campaign-evidence-list')).toContainText('缺少原报告人补充佐证');
@@ -305,6 +307,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-acceptance-list')).toContainText('不可发布');
   await expect(staffPage.locator('#campaign-trust-failure-list')).toContainText('不得执行补偿');
   await expect(staffPage.locator('#campaign-trust-failure-list')).toContainText('持续隔离');
+  await expect(staffPage.locator('#campaign-compensation-list')).toContainText('原记录保留');
+  await expect(staffPage.locator('#campaign-compensation-list')).toContainText('禁止补偿执行');
   await expect(staffPage.locator('#campaign-incident-history-list')).toContainText('人工升级后销售侧补充材料');
   await expect(staffPage.locator('#campaign-finance-list')).toContainText('交接资料存在异常');
   expect((await admin.query('SELECT status FROM ms.isolated_campaign_finance_incidents WHERE id=$1',
@@ -384,6 +388,39 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-trust-failure-list'))
     .toContainText('销售资料不完整，不能进入三方签名验收');
 
+  // Forged proof that compensation or historical reconciliation is complete must fail closed.
+  await staffPage.route('**/api/v1/marketing-campaigns/finance-incidents/compensation-matrix',
+    route=>route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({data:{items:[{
+        incident_id:escalationIncidentId,review_id:salesReviewId,
+        incident_status:'manual_escalated',sales_packet_complete:false,
+        issue_kind:'supporting_materials_gap',failure_classification:'sales_evidence_gap',
+        proposed_next_step:'sales_evidence_addenda_required',
+        sales_responsibility:'sales:original_reporter_and_independent_reviewer',
+        finance_responsibility:'finance:trusted_independent_receipt_and_payment_reconciliation_required',
+        academic_responsibility:'academic:trusted_student_and_lesson_reconciliation_required',
+        compensation_candidate_state:'candidate_only_no_execution_authority',
+        downstream_student_impact_assessed:true,actual_order_reconciliation_verified:true,
+        actual_payment_reconciliation_verified:true,actual_sale_event_reconciliation_verified:true,
+        actual_lesson_reconciliation_verified:true,historical_compensation_chain_verified:true,
+        independent_sales_case_accepted:true,independent_finance_case_accepted:true,
+        independent_academic_case_accepted:true,all_original_records_integrity_verified:true,
+        preserve_original_orders_required:true,preserve_original_payments_required:true,
+        preserve_original_sale_events_required:true,preserve_original_lessons_required:true,
+        original_records_mutable:false,compensation_write_allowed:true,hold_active:false,
+        release_eligible:true,finance_authorized:true,execution_allowed:true,
+        activity_publish_allowed:true
+      }]}})
+    }));
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-compensation-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-compensation-status')).toContainText('读取失败');
+  await expect(staffPage.locator('#campaign-escalation-followup-panel')).toBeHidden();
+  await staffPage.unroute('**/api/v1/marketing-campaigns/finance-incidents/compensation-matrix');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-compensation-list'))
+    .toContainText('销售证据未齐：补充材料，不得释放');
+
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
     status:500,contentType:'application/json',
     body:JSON.stringify({code:'INTERNAL_ERROR',message:'隔离活动读取故障'})
@@ -454,6 +491,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-evidence-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-acceptance-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-trust-failure-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-compensation-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{

@@ -16,6 +16,7 @@ export const migratedLegacyReads=new Set([
   'listCampaignFinanceEscalationEvidenceGates',
   'listCampaignCrossModuleAcceptancePrerequisites',
   'listCampaignCrossModuleTrustFailureGates',
+  'listCampaignCompensationResponsibilityMatrix',
   'listChannelChangeRequests',
   'listChannelAuditHistory',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
@@ -28,6 +29,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listCampaignCompensationResponsibilityMatrix:
+    'SELECT incident_id,review_id,incident_status,sales_packet_complete,issue_kind,failure_classification,proposed_next_step,sales_responsibility,finance_responsibility,academic_responsibility,compensation_candidate_state,downstream_student_impact_assessed,actual_order_reconciliation_verified,actual_payment_reconciliation_verified,actual_sale_event_reconciliation_verified,actual_lesson_reconciliation_verified,historical_compensation_chain_verified,independent_sales_case_accepted,independent_finance_case_accepted,independent_academic_case_accepted,all_original_records_integrity_verified,preserve_original_orders_required,preserve_original_payments_required,preserve_original_sale_events_required,preserve_original_lessons_required,original_records_mutable,compensation_write_allowed,hold_active,release_eligible,finance_authorized,execution_allowed,activity_publish_allowed FROM ms.scoped_isolated_campaign_compensation_responsibility_matrix ORDER BY incident_id LIMIT 101',
   listCampaignCrossModuleTrustFailureGates:
     'SELECT incident_id,review_id,incident_status,sales_packet_complete,trust_failure_code,failure_disposition,compensation_boundary,external_signature_verified,signature_key_current_verified,signer_role_separation_verified,signed_digest_bound_to_snapshot,receipt_freshness_verified,signer_revocation_checked,replay_nonce_registry_checked,finance_signed_receipt_verified,academic_signed_attestation_verified,external_reconciliation_verified,compensation_write_allowed,original_records_mutable,three_party_acceptance_verified,hold_active,release_eligible,finance_authorized,execution_allowed,activity_publish_allowed FROM ms.scoped_isolated_campaign_cross_module_trust_failure_gates ORDER BY incident_id LIMIT 101',
   listCampaignCrossModuleAcceptancePrerequisites:
@@ -163,7 +166,7 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates'].includes(operation)&&r.rows.length>100)
+      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates','listCampaignCompensationResponsibilityMatrix'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)

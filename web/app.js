@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,campaignFinanceHandoffs:[],campaignFinanceLoadError:false,campaignFinanceIncidents:[],campaignIncidentLoadError:false,campaignIncidentHistory:[],campaignIncidentHistoryLoadError:false,campaignEscalationFollowups:[],campaignEscalationLoadError:false,campaignEscalationEvidence:[],campaignEvidenceLoadError:false,campaignAcceptancePrerequisites:[],campaignAcceptanceLoadError:false,campaignTrustFailureGates:[],campaignTrustFailureLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,campaignFinanceHandoffs:[],campaignFinanceLoadError:false,campaignFinanceIncidents:[],campaignIncidentLoadError:false,campaignIncidentHistory:[],campaignIncidentHistoryLoadError:false,campaignEscalationFollowups:[],campaignEscalationLoadError:false,campaignEscalationEvidence:[],campaignEvidenceLoadError:false,campaignAcceptancePrerequisites:[],campaignAcceptanceLoadError:false,campaignTrustFailureGates:[],campaignTrustFailureLoadError:false,campaignCompensationMatrix:[],campaignCompensationLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],campaigns:['获客管理','市场活动'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -261,8 +261,30 @@ function setCampaignRevisionChoice(){
     option.selected=selectedChannels.has(option.value);
   $('campaign-revise-version').textContent='当前草稿版本 '+selected.version+'；保存时需与数据库版本一致';
 }
+function renderCampaignCompensationMatrix(){
+  const healthy=state.strict&&!state.campaignCompensationLoadError&&
+    !state.campaignTrustFailureLoadError&&!state.campaignAcceptanceLoadError&&
+    !state.campaignEvidenceLoadError&&!state.campaignEscalationLoadError&&
+    !state.campaignIncidentLoadError&&!state.campaignIncidentHistoryLoadError;
+  $('campaign-compensation-total').textContent=healthy
+    ?state.campaignCompensationMatrix.length+' 条':'0 条';
+  $('campaign-compensation-status').textContent=healthy
+    ?'只读补偿分类和三方责任。学生、订单、付款、SaleEvent 与课时的真实对账未做；禁止写入补偿或解除隔离。'
+    :'补偿风险状态读取失败，已清空分类且仍不得补偿或放行。';
+  if(!healthy){$('campaign-compensation-list').replaceChildren();return;}
+  const classes={
+    snapshot_integrity_conflict:'冻结活动快照不一致：销售独立复核',
+    sales_evidence_gap:'销售证据未齐：补充材料，不得释放',
+    external_authority_or_reconciliation_unknown:'外部权威及业务对账缺失'
+  };
+  paint('campaign-compensation-list',state.campaignCompensationMatrix,x=>record(
+    '补偿责任分类 · '+x.incident_id.slice(0,8),
+    classes[x.failure_classification],
+    '销售核对 · 财务独立核对 · 教务独立核对 · 原记录保留 · 禁止补偿执行 · 持续隔离','禁'));
+}
 function renderCampaignTrustFailureGates(){
   const healthy=state.strict&&!state.campaignTrustFailureLoadError&&
+    !state.campaignCompensationLoadError&&
     !state.campaignAcceptanceLoadError&&!state.campaignEvidenceLoadError&&
     !state.campaignEscalationLoadError&&!state.campaignIncidentLoadError&&
     !state.campaignIncidentHistoryLoadError;
@@ -281,7 +303,7 @@ function renderCampaignTrustFailureGates(){
 }
 function renderCampaignAcceptancePrerequisites(){
   const healthy=state.strict&&!state.campaignAcceptanceLoadError&&
-    !state.campaignTrustFailureLoadError&&
+    !state.campaignTrustFailureLoadError&&!state.campaignCompensationLoadError&&
     !state.campaignEvidenceLoadError&&!state.campaignEscalationLoadError&&
     !state.campaignIncidentLoadError&&!state.campaignIncidentHistoryLoadError;
   $('campaign-acceptance-total').textContent=healthy
@@ -300,6 +322,7 @@ function renderCampaignAcceptancePrerequisites(){
 function renderCampaignEscalationEvidence(){
   const healthy=state.strict&&!state.campaignEvidenceLoadError&&
     !state.campaignAcceptanceLoadError&&!state.campaignTrustFailureLoadError&&
+    !state.campaignCompensationLoadError&&
     !state.campaignEscalationLoadError&&!state.campaignIncidentLoadError&&
     !state.campaignIncidentHistoryLoadError;
   $('campaign-evidence-total').textContent=healthy
@@ -324,7 +347,7 @@ function renderCampaignEscalationEvidence(){
 function renderCampaignEscalationFollowups(){
   const healthy=state.strict&&!state.campaignEscalationLoadError&&
     !state.campaignEvidenceLoadError&&!state.campaignAcceptanceLoadError&&
-    !state.campaignTrustFailureLoadError&&
+    !state.campaignTrustFailureLoadError&&!state.campaignCompensationLoadError&&
     !state.campaignIncidentLoadError&&!state.campaignIncidentHistoryLoadError&&
     !state.campaignFinanceLoadError;
   const escalated=state.campaignFinanceIncidents.filter(x=>
@@ -370,7 +393,7 @@ function renderCampaignIncidents(){
   const healthy=state.strict&&!state.campaignIncidentLoadError&&
     !state.campaignIncidentHistoryLoadError&&!state.campaignEscalationLoadError&&
     !state.campaignEvidenceLoadError&&!state.campaignAcceptanceLoadError&&
-    !state.campaignTrustFailureLoadError&&
+    !state.campaignTrustFailureLoadError&&!state.campaignCompensationLoadError&&
     !state.campaignFinanceLoadError&&!state.campaignSalesLoadError;
   const available=state.campaignFinanceHandoffs;
   const pending=state.campaignFinanceIncidents.filter(x=>x.status==='open'&&
@@ -489,6 +512,7 @@ function render(){
   renderCampaignEscalationEvidence();
   renderCampaignAcceptancePrerequisites();
   renderCampaignTrustFailureGates();
+  renderCampaignCompensationMatrix();
   $('campaigns-status').textContent=state.campaignLoadError||state.channelLoadError
     ?'活动草稿或渠道目录读取失败，旧数据已清空，禁止新建。'
     :'只显示本人负责的草稿和主管有权查看的本机构草稿。预算均为未审批的计划金额。';
@@ -677,6 +701,7 @@ async function refresh(){
     ['campaignEscalationEvidence','/api/v1/marketing-campaigns/finance-incidents/evidence-gates'],
     ['campaignAcceptancePrerequisites','/api/v1/marketing-campaigns/finance-incidents/acceptance-prerequisites'],
     ['campaignTrustFailureGates','/api/v1/marketing-campaigns/finance-incidents/trust-failure-gates'],
+    ['campaignCompensationMatrix','/api/v1/marketing-campaigns/finance-incidents/compensation-matrix'],
     ['channels','/api/v1/marketing-channels'],
     ['channelRequests','/api/v1/marketing-channels/change-requests'],
     ['channelAuditHistory','/api/v1/marketing-channels/change-requests/audit-history'],
@@ -721,11 +746,61 @@ async function refresh(){
     state.campaignEscalationEvidence=[];state.campaignEvidenceLoadError=false;
     state.campaignAcceptancePrerequisites=[];state.campaignAcceptanceLoadError=false;
     state.campaignTrustFailureGates=[];state.campaignTrustFailureLoadError=false;
+    state.campaignCompensationMatrix=[];state.campaignCompensationLoadError=false;
     state.channelRequests=[];state.channelRequestLoadError=false;
     state.channelAuditHistory=[];state.channelAuditLoadError=false;state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
-    if(key==='campaignTrustFailureGates'){
+    if(key==='campaignCompensationMatrix'){
+      const items=r.status==='fulfilled'?r.value?.items:null;
+      const fields=['incident_id','review_id','incident_status','sales_packet_complete',
+        'issue_kind','failure_classification','proposed_next_step',
+        'sales_responsibility','finance_responsibility','academic_responsibility',
+        'compensation_candidate_state','downstream_student_impact_assessed',
+        'actual_order_reconciliation_verified','actual_payment_reconciliation_verified',
+        'actual_sale_event_reconciliation_verified','actual_lesson_reconciliation_verified',
+        'historical_compensation_chain_verified','independent_sales_case_accepted',
+        'independent_finance_case_accepted','independent_academic_case_accepted',
+        'all_original_records_integrity_verified','preserve_original_orders_required',
+        'preserve_original_payments_required','preserve_original_sale_events_required',
+        'preserve_original_lessons_required','original_records_mutable',
+        'compensation_write_allowed','hold_active','release_eligible','finance_authorized',
+        'execution_allowed','activity_publish_allowed'];
+      const denied=['downstream_student_impact_assessed','actual_order_reconciliation_verified',
+        'actual_payment_reconciliation_verified','actual_sale_event_reconciliation_verified',
+        'actual_lesson_reconciliation_verified','historical_compensation_chain_verified',
+        'independent_sales_case_accepted','independent_finance_case_accepted',
+        'independent_academic_case_accepted','all_original_records_integrity_verified',
+        'original_records_mutable','compensation_write_allowed','release_eligible',
+        'finance_authorized','execution_allowed','activity_publish_allowed'];
+      const required=['preserve_original_orders_required','preserve_original_payments_required',
+        'preserve_original_sale_events_required','preserve_original_lessons_required',
+        'hold_active'];
+      const classes={
+        snapshot_integrity_conflict:'independent_sales_snapshot_review_required',
+        sales_evidence_gap:'sales_evidence_addenda_required',
+        external_authority_or_reconciliation_unknown:'external_finance_academic_reconciliation_required'
+      };
+      const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
+        x&&Object.keys(x).every(k=>fields.includes(k))&&
+        fields.every(k=>Object.hasOwn(x,k))&&
+        typeof x.incident_id==='string'&&typeof x.review_id==='string'&&
+        x.incident_status==='manual_escalated'&&
+        typeof x.sales_packet_complete==='boolean'&&
+        ['integrity_mismatch','supporting_materials_gap'].includes(x.issue_kind)&&
+        Object.hasOwn(classes,x.failure_classification)&&
+        x.failure_classification===(x.issue_kind==='integrity_mismatch'
+          ?'snapshot_integrity_conflict'
+          :x.sales_packet_complete?'external_authority_or_reconciliation_unknown':'sales_evidence_gap')&&
+        x.proposed_next_step===classes[x.failure_classification]&&
+        x.sales_responsibility==='sales:original_reporter_and_independent_reviewer'&&
+        x.finance_responsibility==='finance:trusted_independent_receipt_and_payment_reconciliation_required'&&
+        x.academic_responsibility==='academic:trusted_student_and_lesson_reconciliation_required'&&
+        x.compensation_candidate_state==='candidate_only_no_execution_authority'&&
+        denied.every(k=>x[k]===false)&&required.every(k=>x[k]===true));
+      state.campaignCompensationMatrix=valid?items:[];
+      state.campaignCompensationLoadError=!valid;
+    }else if(key==='campaignTrustFailureGates'){
       const items=r.status==='fulfilled'?r.value?.items:null;
       const fields=['incident_id','review_id','incident_status','sales_packet_complete',
         'trust_failure_code','failure_disposition','compensation_boundary',
@@ -981,6 +1056,10 @@ function logout(notice=true){
   state.campaignEscalationEvidence=[];state.campaignEvidenceLoadError=false;
   state.campaignAcceptancePrerequisites=[];state.campaignAcceptanceLoadError=false;
   state.campaignTrustFailureGates=[];state.campaignTrustFailureLoadError=false;
+  state.campaignCompensationMatrix=[];state.campaignCompensationLoadError=false;
+  $('campaign-compensation-list').replaceChildren();
+  $('campaign-compensation-total').textContent='0 条';
+  $('campaign-compensation-status').textContent='未登录，三方补偿责任分类已清空。';
   $('campaign-trust-failure-list').replaceChildren();
   $('campaign-trust-failure-total').textContent='0 条';
   $('campaign-trust-failure-status').textContent='未登录，三方可信验证阻断已清空。';
@@ -1158,7 +1237,7 @@ register('campaign-sales-request-form',async d=>{
     :'已有该审核申请，状态：'+result.status;
 });
 register('campaign-escalation-followup-form',async d=>{
-  if(!state.strict||state.campaignEscalationLoadError||state.campaignEvidenceLoadError||state.campaignAcceptanceLoadError||state.campaignTrustFailureLoadError||state.campaignIncidentLoadError||
+  if(!state.strict||state.campaignEscalationLoadError||state.campaignEvidenceLoadError||state.campaignAcceptanceLoadError||state.campaignTrustFailureLoadError||state.campaignCompensationLoadError||state.campaignIncidentLoadError||
     state.campaignIncidentHistoryLoadError||state.campaignFinanceLoadError)
     throw Error('未核实人工升级异常和受限历史，请刷新重试');
   const incident=state.campaignFinanceIncidents.find(x=>
