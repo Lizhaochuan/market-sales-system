@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
+export const migratedLegacyWrites=new Set(['reviseCampaignDraft','createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,19 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='reviseCampaignDraft'){
+    only(body,['expected_version','name','starts_at','ends_at','budget_cents','channel_ids']);
+    if(!Number.isSafeInteger(body.expected_version)||
+       body.expected_version<1||body.expected_version>2147483645)
+      fail(422,'VALIDATION_ERROR','草稿版本无效，请刷新活动列表');
+    // Reuse exactly the bounded validation for draft fields.
+    const create=strictBody('createCampaignDraft',{
+      name:body.name,starts_at:body.starts_at,ends_at:body.ends_at,
+      budget_cents:body.budget_cents,channel_ids:body.channel_ids
+    },routeParams);
+    return {params:[uuid(routeParams?.[0],'本人市场活动草稿'),
+      body.expected_version,...create.params]};
+  }
   if(op==='createCampaignDraft'){
     only(body,['name','starts_at','ends_at','budget_cents','channel_ids']);
     const name=cleanName(body.name,'活动名称');
@@ -361,6 +374,10 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'reviseCampaignDraft':
+        result=await client.query(
+          'SELECT ms.revise_isolated_campaign_draft($1,$2,$3,$4,$5,$6,$7,$8) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'createCampaignDraft':
         result=await client.query(
           'SELECT ms.create_isolated_campaign_draft($1,$2,$3,$4,$5,$6) AS result',
