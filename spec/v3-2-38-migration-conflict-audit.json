@@ -1,0 +1,48 @@
+{
+  "schema_version": "v3.2-38-migration-audit-v1",
+  "scope": "isolated-static-review-only",
+  "parent_pr": 44,
+  "production_integration_allowed": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "real_business_uat_completed": false,
+  "new_migration": false,
+  "correct_student_primary": true,
+  "family_optional": true,
+  "hold_active_required": true,
+  "sql_variants": [
+    {
+      "version": "V3.2-29",
+      "migration": "032",
+      "primary_pr": 34,
+      "alternate_pr": 37,
+      "primary_path": "db/migrations/032_fixture_source_registration_readiness.sql",
+      "alternate_path": "db/migrations/032_source_onboarding_planning_reviews.sql",
+      "decision": "KEEP_PRIMARY_ALTERNATE_REVIEW_REQUIRED"
+    },
+    {
+      "version": "V3.2-32",
+      "migration": "035",
+      "primary_pr": 39,
+      "alternate_pr": 38,
+      "primary_path": "db/migrations/035_readonly_integration_uat_report.sql",
+      "alternate_path": "db/migrations/035_joint_integration_uat_readonly_report.sql",
+      "decision": "KEEP_PRIMARY_ALTERNATE_REVIEW_REQUIRED"
+    }
+  ],
+  "special_dependency": {
+    "pr": 38,
+    "uses": "ms.source_readiness_requests",
+    "provided_by_pr": 34
+  },
+  "migration_range": {
+    "first": "001",
+    "last": "038",
+    "count": 38
+  },
+  "review": "STATIC_ONLY_NOT_COMPLETE",
+  "external_approvals": "MISSING",
+  "recovery_test": "NOT_RUN"
+}
