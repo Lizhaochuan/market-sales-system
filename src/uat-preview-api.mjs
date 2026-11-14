@@ -197,8 +197,7 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
     if(diffMatch?.[4]){
      const markdown=renderBlockedFixtureHistoryMarkdown(historyRaw);
      if(!(await confirmStillAuthorized()))return;
-     if(!(await confirmStillAuthorized()))return;
-    res.writeHead(200,{...headers('text/markdown; charset=utf-8'),
+     res.writeHead(200,{...headers('text/markdown; charset=utf-8'),
       'Content-Disposition':'attachment; filename="uat-audit-'+reportId+'-'+from+'-'+to+'.md"'});
      res.end(markdown);return;
     }
@@ -212,6 +211,7 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
    const report=buildBlockedUatTasks(raw);
    if(match[2]){
     const markdown=renderBlockedUatMarkdown(raw);
+    if(!(await confirmStillAuthorized()))return;
     res.writeHead(200,{...headers('text/markdown; charset=utf-8'),
      'Content-Disposition':'attachment; filename="uat-blockers-'+match[1]+'.md"'});
     res.end(markdown);return;
