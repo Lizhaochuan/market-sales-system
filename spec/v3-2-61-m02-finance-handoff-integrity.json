@@ -4,7 +4,7 @@
   "parent_pr": 67,
   "parent_head": "28b50e1ac4a4539bdbc01ef28b413ade4f8ffbd9",
   "parent_ci": 43612375904,
-  "parent_ci_conclusion": "PENDING",
+  "parent_ci_conclusion": "success",
   "scope": "CI_ONLY_READONLY_INTEGRITY_NO_FINANCE_AUTH",
   "sql": "tests/sql/create_v3_2_61_finance_handoff_integrity.sql",
   "endpoint": "GET /api/v1/marketing-campaigns/finance-handoffs",
