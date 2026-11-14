@@ -87,7 +87,7 @@ test('V3.2-84 replay and forgery never duplicate audit or release hold',()=>{
  assert.strictEqual(replay.event,created.event);
  assert.equal(replay.reason_code,'BLOCKED_HISTORICAL_TRIAGE_REPLAY');
  assert.throws(()=>f.triage.apply({...request,actor_id:'sales_closer'}),
-  {code:'ILLEGAL_TRIAGE_TRANSITION'});
+  {code:'TRIAGE_IDEMPOTENCY_CONFLICT'});
  assert.throws(()=>f.triage.apply(f.request('begin_review','sales_owner',
   'v84-review-forged-nonce-0001',{handoff_allowed:true})),
   {code:'INVALID_TRIAGE_EVENT_INPUT'});
