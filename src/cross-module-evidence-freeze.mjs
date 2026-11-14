@@ -1,7 +1,7 @@
 // V3.2-70: memory-only CI fixture registry. No production trust anchor,
 // external signature, authority, payment, compensation or release endpoint.
 import {createHash} from 'node:crypto';
-const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const hex=/^[a-f0-9]{64}$/;
 const kinds=new Set(['market_sales','crm_finance','academic']);
 const object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x)&&Object.getPrototypeOf(x)===Object.prototype;
