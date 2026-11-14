@@ -1,0 +1,38 @@
+{
+  "schema_version": "v3.2-64-m02-escalation-followup-evidence-v1",
+  "module": "M02",
+  "parent_pr": 70,
+  "parent_head": "65573d350dc5cc50150a2e1ebdff9b5fead94d06",
+  "parent_ci": 43614602899,
+  "parent_ci_conclusion": "success",
+  "scope": "CI_ONLY_APPEND_SALES_SIDE_EVIDENCE_NO_RELEASE",
+  "sql": "tests/sql/create_v3_2_64_finance_escalation_followup.sql",
+  "list": "GET /api/v1/marketing-campaigns/finance-incidents/follow-ups",
+  "append": "POST /api/v1/marketing-campaigns/finance-incidents/{incident_id}/follow-ups",
+  "allowed_writer_roles": [
+    "sales_reporter",
+    "independent_sales_reviewer"
+  ],
+  "allowed_status": "manual_escalated",
+  "note_types": [
+    "sales_evidence_addendum",
+    "external_finance_requirements_pending"
+  ],
+  "max_items": 100,
+  "external_finance_acceptance_implemented": false,
+  "escalation_hold_release_allowed": false,
+  "finance_authorized": false,
+  "execution_allowed": false,
+  "production_integration_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "new_production_migration": false,
+  "migration_count": 38,
+  "student_primary": true,
+  "family_optional": true,
+  "downstream_wrong_student_hold_active": true,
+  "original_orders_payments_saleevents_lesson_history_preserved": true,
+  "external_contract_status": "proposed-unimplemented",
+  "latest_head_ci": "PENDING"
+}

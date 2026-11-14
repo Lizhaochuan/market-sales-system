@@ -12,6 +12,7 @@ export const migratedLegacyReads=new Set([
   'listCampaignFinanceHandoffs',
   'listCampaignFinanceIncidents',
   'listCampaignFinanceIncidentHistory',
+  'listCampaignFinanceEscalationFollowups',
   'listChannelChangeRequests',
   'listChannelAuditHistory',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
@@ -24,6 +25,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listCampaignFinanceEscalationFollowups:
+    'SELECT followup_id,incident_id,review_id,recorded_by,responsibility_boundary,note_type,created_at,incident_status,finance_authorized,execution_allowed,external_authority_state FROM ms.scoped_isolated_campaign_finance_escalation_followups ORDER BY created_at DESC,followup_id LIMIT 101',
   listCampaignFinanceIncidentHistory:
     'SELECT audit_id,incident_id,review_id,issue_kind,event_name,actor_user_id,happened_at,event_status,current_incident_status,finance_authorized,execution_allowed FROM ms.scoped_isolated_campaign_finance_incident_audit_history ORDER BY happened_at DESC,audit_id LIMIT 101',
   listCampaignFinanceIncidents:
@@ -151,7 +154,7 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory'].includes(operation)&&r.rows.length>100)
+      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)

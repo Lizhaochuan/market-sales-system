@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['reportCampaignFinanceIncident','triageCampaignFinanceIncident','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft','createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
+export const migratedLegacyWrites=new Set(['appendCampaignFinanceEscalationFollowup','reportCampaignFinanceIncident','triageCampaignFinanceIncident','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft','createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,15 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='appendCampaignFinanceEscalationFollowup'){
+    only(body,['note_type','evidence_ref','reason_zh']);
+    if(!['sales_evidence_addendum','external_finance_requirements_pending'].includes(body.note_type))
+      fail(422,'VALIDATION_ERROR','后续核查材料类型不受支持');
+    return {params:[uuid(routeParams?.[0],'人工升级异常'),
+      body.note_type,
+      approvalText(body.evidence_ref,'补充材料索引',200),
+      approvalText(body.reason_zh,'后续核查说明',400)]};
+  }
   if(op==='reportCampaignFinanceIncident'){
     only(body,['issue_kind','evidence_ref','reason_zh']);
     if(!['integrity_mismatch','supporting_materials_gap'].includes(body.issue_kind))
@@ -408,6 +417,10 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'appendCampaignFinanceEscalationFollowup':
+        result=await client.query(
+          'SELECT ms.append_isolated_campaign_finance_escalation_followup($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'reportCampaignFinanceIncident':
         result=await client.query(
           'SELECT ms.report_isolated_campaign_finance_incident($1,$2,$3,$4,$5) AS result',
