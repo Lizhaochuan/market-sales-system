@@ -440,11 +440,78 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
     await owner.query('SELECT status FROM ms.lead_student_association_requests WHERE id=$1',
       [linkRequestId])
   ).rows[0]?.status).toBe('approved_pending');
+  expect((await owner.query(
+    'SELECT confirmation_state FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
+    [finalLeads.rows[0].id,namedStudentId]
+  )).rows[0].confirmation_state).toBe('pending_review');
+  // V3.2-21: explicit human verification of this ONE student, then wrong-link withdrawal.
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  await expect(a.locator('#student-link-verification-workbench')).toBeVisible();
+  const linkVerification=a.locator('#student-link-verification-request-form');
+  await linkVerification.locator('select[name="action"]').selectOption('verify');
+  await linkVerification.locator('select[name="verify_association"]').selectOption(linkRequestId);
+  await linkVerification.locator('select[name="basis_kind"]').selectOption('student_consultation');
+  await linkVerification.locator('input[name="confirmation_ref"]')
+    .fill('虚构单名学生明确咨询证据编号');
+  await linkVerification.locator('input[name="evidence_ref"]')
+    .fill('虚构指定学生真实关联核实依据');
+  await linkVerification.locator('textarea[name="reason_zh"]')
+    .fill('独立核实本次线索确实对应指定的这一名学生');
+  await linkVerification.getByRole('button',{name:'提交单学生核实／撤回申请'}).click();
+  await expect(a.locator('#student-link-reviews-list')).toContainText('等待独立主管审核');
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const independentVerification=m.locator('#student-link-verification-decision-form');
+  const verifyChoice=await independentVerification.locator('select[name="review_id"] option')
+    .filter({hasText:linkedStudentName}).first().getAttribute('value');
+  expect(verifyChoice).toBeTruthy();
+  await independentVerification.locator('select[name="review_id"]').selectOption(verifyChoice);
+  await independentVerification.locator('select[name="decision"]').selectOption('approved');
+  await independentVerification.locator('textarea[name="reason_zh"]')
+    .fill('只对这名学生和对应咨询进行独立人工复核');
+  await independentVerification.locator('input[name="evidence_ref"]')
+    .fill('虚构主管核实依据，不证明监护关系');
+  await independentVerification.getByRole('button',{name:'保存独立核实或撤回结论'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT confirmation_state FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
+      [finalLeads.rows[0].id,namedStudentId])
+  ).rows[0]?.confirmation_state).toBe('verified');
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.student_contacts WHERE student_id=$1',
+    [namedStudentId])).rows[0].n).toBe(0);
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  await expect(a.locator('#student-link-current-list'))
+    .toContainText('已人工确认销售关联');
+  await linkVerification.locator('select[name="action"]').selectOption('withdraw');
+  await linkVerification.locator('select[name="withdraw_association"]').selectOption(linkRequestId);
+  await linkVerification.locator('input[name="evidence_ref"]')
+    .fill('虚构客户发现本次学生关联错误的材料');
+  await linkVerification.locator('textarea[name="reason_zh"]')
+    .fill('指定学生关联错误，必须保留历史并撤回');
+  await linkVerification.getByRole('button',{name:'提交单学生核实／撤回申请'}).click();
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const withdrawChoice=await independentVerification.locator('select[name="review_id"] option')
+    .filter({hasText:linkedStudentName}).first().getAttribute('value');
+  expect(withdrawChoice).toBeTruthy();
+  await independentVerification.locator('select[name="review_id"]').selectOption(withdrawChoice);
+  await independentVerification.locator('textarea[name="reason_zh"]')
+    .fill('独立核查后确认错误的学生关联，批准撤回但保留原审批');
+  await independentVerification.locator('input[name="evidence_ref"]')
+    .fill('虚构主管撤回核对依据');
+  await independentVerification.getByRole('button',{name:'保存独立核实或撤回结论'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT confirmation_state FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
+      [finalLeads.rows[0].id,namedStudentId])
+  ).rows[0]?.confirmation_state).toBe('withdrawn');
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.lead_student_link_review_effects WHERE lead_id=$1',
+    [finalLeads.rows[0].id])).rows[0].n).toBe(2);
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
+    [finalLeads.rows[0].id,siblingStudentId])).rows[0].n).toBe(0);
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  await expect(a.locator('#student-link-current-list')).toContainText('错误关联已撤回');
   const onlyOne=(await owner.query('SELECT student_id,confirmation_state FROM ms.lead_students WHERE lead_id=$1',
     [finalLeads.rows[0].id])).rows;
   expect(onlyOne).toHaveLength(1);
   expect(onlyOne[0].student_id).toBe(namedStudentId);
-  expect(onlyOne[0].confirmation_state).toBe('pending_review');
+  expect(onlyOne[0].confirmation_state).toBe('withdrawn');
   expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.lead_students WHERE lead_id=$1 AND student_id=$2',
     [finalLeads.rows[0].id,siblingStudentId])).rows[0].n).toBe(0);
   await a.getByRole('button',{name:'刷新数据'}).click();
