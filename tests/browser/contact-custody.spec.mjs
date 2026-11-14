@@ -211,6 +211,84 @@ test('真实 Chromium：A→B 独立交接、B 申请撤回、主管复核、管
   expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE source_event_id=$1',[eventId])).rows[0].n).toBe(0);
   await a.getByRole('button',{name:'刷新数据'}).click();
   await expect(a.locator('#lead-candidates-list')).toContainText('候选核查通过（未生成线索）');
+  // V3.2-18: fictional historic consultation by B creates a genuine
+  // cross-employee attribution conflict. Browser resolves it before clearance.
+  const candidateContactId=(await owner.query(
+    'SELECT id FROM ms.contacts WHERE organization_id=$1 AND display_name=$2',
+    [org,candidateContact])).rows[0].id;
+  const claimedEvent=(await owner.query(
+    "INSERT INTO ms.contact_events(organization_id,contact_id,event_type,occurred_at,recorded_by) "+
+    "VALUES($1,$2,'微信咨询',now(),$3) RETURNING id",
+    [org,candidateContactId,ids.B])).rows[0].id;
+  await b.locator('button[data-view="leads"]').click();
+  await b.getByRole('button',{name:'刷新数据'}).click();
+  const disputeForm=b.locator('#attribution-dispute-request-form');
+  const disputeOption=disputeForm.locator('select[name="choice_key"] option')
+    .filter({hasText:candidateContact}).first();
+  const choice=await disputeOption.getAttribute('value');
+  expect(choice).toBe(candidateId+':'+claimedEvent);
+  await disputeForm.locator('select[name="choice_key"]').selectOption(choice);
+  await disputeForm.locator('textarea[name="reason_zh"]')
+    .fill('该联系人也有销售B曾经发生的真实沟通');
+  await disputeForm.locator('input[name="evidence_ref"]')
+    .fill('虚构销售B原咨询的核实记录');
+  await disputeForm.getByRole('button',{name:'提交归因争议'}).click();
+  await expect(b.locator('#attribution-disputes-list')).toContainText('待独立裁决');
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const disputeDecision=m.locator('#attribution-dispute-decision-form');
+  const disputeChoice=disputeDecision.locator('select[name="dispute_id"] option')
+    .filter({hasText:candidateContact}).first();
+  const disputedId=await disputeChoice.getAttribute('value');
+  expect(disputedId).toBeTruthy();
+  await disputeDecision.locator('select[name="dispute_id"]').selectOption(disputedId);
+  await disputeDecision.locator('select[name="decision"]').selectOption('rejected');
+  await disputeDecision.locator('textarea[name="reason_zh"]')
+    .fill('已独立确认争议不影响原咨询来源，预审仍需单独核实');
+  await disputeDecision.locator('input[name="evidence_ref"]')
+    .fill('虚构双方咨询对照记录');
+  await disputeDecision.getByRole('button',{name:'保存独立争议裁决'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.lead_attribution_disputes WHERE id=$1',[disputedId])
+  ).rows[0]?.status).toBe('rejected');
+  await a.getByRole('button',{name:'刷新数据'}).click();
+  const readinessForm=a.locator('#conversion-readiness-request-form');
+  await readinessForm.locator('select[name="candidate_id"]').selectOption(candidateId);
+  await readinessForm.locator('textarea[name="reason_zh"]')
+    .fill('候选已核实，申请正式转换条件预审');
+  await readinessForm.locator('input[name="evidence_ref"]')
+    .fill('虚构咨询和重复线索检查记录');
+  await readinessForm.getByRole('button',{name:'提交转换预审申请'}).click();
+  await expect(a.locator('#readiness-list')).toContainText('等待独立主管预审');
+  await m.getByRole('button',{name:'刷新数据'}).click();
+  const readinessDecision=m.locator('#conversion-readiness-decision-form');
+  const readinessChoice=readinessDecision.locator('select[name="review_id"] option')
+    .filter({hasText:candidateContact}).first();
+  const preflightId=await readinessChoice.getAttribute('value');
+  expect(preflightId).toBeTruthy();
+  await readinessDecision.locator('select[name="review_id"]').selectOption(preflightId);
+  await readinessDecision.locator('select[name="decision"]').selectOption('cleared');
+  await readinessDecision.locator('textarea[name="reason_zh"]')
+    .fill('两方咨询记录已独立核清，未存在相同联系人正式线索');
+  await readinessDecision.locator('input[name="evidence_ref"]')
+    .fill('虚构主管预审证明');
+  await readinessDecision.getByRole('button',{name:'保存独立预审结论'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.lead_conversion_readiness WHERE id=$1',[preflightId])
+  ).rows[0]?.status).toBe('cleared');
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE contact_id=$1',
+    [candidateContactId])).rows[0].n).toBe(0);
+  const revocation=m.locator('#conversion-readiness-revoke-form');
+  await revocation.locator('select[name="review_id"]').selectOption(preflightId);
+  await revocation.locator('textarea[name="reason_zh"]')
+    .fill('预审结束后取消此前许可，保留历史审计链');
+  await revocation.locator('input[name="evidence_ref"]')
+    .fill('虚构主管主动撤销依据');
+  await revocation.getByRole('button',{name:'撤销预审并保留不可变决定'}).click();
+  await expect.poll(async()=>(
+    await owner.query('SELECT status FROM ms.lead_conversion_readiness WHERE id=$1',[preflightId])
+  ).rows[0]?.status).toBe('revoked');
+  expect((await owner.query('SELECT COUNT(*)::int AS n FROM ms.leads WHERE contact_id=$1',
+    [candidateContactId])).rows[0].n).toBe(0);
   await m.locator('button[data-view="contacts"]').click();
   await m.setViewportSize({width:390,height:844});
   await expect(m.locator('#custody-decision-card')).toBeVisible();

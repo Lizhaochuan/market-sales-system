@@ -150,7 +150,11 @@ test('真实 Chromium：原中文工作台签名员工测试身份登录，原�
     await b.getByRole('button',{name:'家长与联系人'}).click();
     await expect(b.locator('#contacts-list')).not.toContainText(contactName);
     await b.getByRole('button',{name:'咨询与线索'}).click();
-    await expect(b.locator('#strict-consultation-list')).not.toContainText('电话咨询');
+    // B may have their own telephone consultations from other tests.
+    // Assert the EXACT A-owned event is invisible through B's employee DB LOGIN.
+    expect((await bRead.query(
+      'SELECT event_id FROM ms.scoped_contact_events_directory WHERE event_id=$1',
+      [consultation.rows[0].id])).rowCount).toBe(0);
     await b.getByRole('button',{name:'家长与联系人'}).click();
     await b.locator('#contact-form input[name="display_name"]').fill('只属于销售B-'+randomUUID());
     await b.getByRole('button',{name:'保存联系人'}).click();

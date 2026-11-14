@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,41 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='requestConversionReadiness'){
+    only(body,['candidate_id','evidence_ref','reason_zh']);
+    return {params:[uuid(body.candidate_id,'已核查候选'),
+      approvalText(body.evidence_ref,'预审材料',200),
+      approvalText(body.reason_zh,'预审理由',400)]};
+  }
+  if(op==='decideConversionReadiness'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['cleared','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择通过预审或驳回');
+    return {params:[uuid(routeParams?.[0],'预审申请'),body.decision,
+      approvalText(body.evidence_ref,'复核材料',200),
+      approvalText(body.reason_zh,'复核理由',400)]};
+  }
+  if(op==='revokeConversionReadiness'){
+    only(body,['evidence_ref','reason_zh']);
+    return {params:[uuid(routeParams?.[0],'预审申请'),
+      approvalText(body.evidence_ref,'撤销依据',200),
+      approvalText(body.reason_zh,'撤销理由',400)]};
+  }
+  if(op==='requestAttributionDispute'){
+    only(body,['candidate_id','own_event_id','evidence_ref','reason_zh']);
+    return {params:[uuid(body.candidate_id,'被争议候选'),
+      uuid(body.own_event_id,'本人真实咨询'),
+      approvalText(body.evidence_ref,'争议凭据',200),
+      approvalText(body.reason_zh,'争议理由',400)]};
+  }
+  if(op==='decideAttributionDispute'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['upheld','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择支持异议或驳回异议');
+    return {params:[uuid(routeParams?.[0],'归因争议'),body.decision,
+      approvalText(body.evidence_ref,'裁决凭据',200),
+      approvalText(body.reason_zh,'裁决理由',400)]};
+  }
   if(op==='requestLeadCandidate'){
     only(body,['source_event_id','evidence_ref','reason_zh']);
     return {params:[uuid(body.source_event_id,'真实咨询'),
@@ -163,6 +198,26 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'requestConversionReadiness':
+        result=await client.query(
+          'SELECT ms.submit_lead_conversion_preflight($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideConversionReadiness':
+        result=await client.query(
+          'SELECT ms.decide_lead_conversion_preflight($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'revokeConversionReadiness':
+        result=await client.query(
+          'SELECT ms.revoke_lead_conversion_clearance($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'requestAttributionDispute':
+        result=await client.query(
+          'SELECT ms.submit_lead_attribution_dispute($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideAttributionDispute':
+        result=await client.query(
+          'SELECT ms.decide_lead_attribution_dispute($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'requestLeadCandidate':
         result=await client.query(
           'SELECT ms.request_consultation_lead_candidate($1,$2,$3,$4) AS result',
