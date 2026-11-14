@@ -6,8 +6,8 @@ import pg from 'pg';
 // Only disposable fictional PostgreSQL; NEVER connects real payments or CRM.
 const A='20000000-0000-4000-8000-000000000011';
 const M='20000000-0000-4000-8000-000000000013';
-const F='20000000-0000-4000-8000-000000000015';
-const AC='20000000-0000-4000-8000-000000000016';
+const F='30000000-0000-4000-8000-000000000015';
+const AC='30000000-0000-4000-8000-000000000016';
 const key=()=>randomBytes(20).toString('hex');
 const pool=name=>new pg.Pool({connectionString:process.env[name],max:3});
 const one=async(p,sql,args)=>(await p.query(sql,args)).rows[0].result;
@@ -28,7 +28,7 @@ test('V3.2-25 sales/finance/academic review remains proposals-only and immutable
   const contact=(await one(a,'SELECT ms.create_scoped_contact($1,$2,$3) AS result',
    ['虚构纠错联系人-'+randomUUID(),false,key()])).contact_id;
   const event=(await one(a,'SELECT ms.create_scoped_contact_consultation($1,$2,$3,$4) AS result',
-   [contact,'虚构咨询',new Date(Date.now()-100000),key()])).event_id;
+   [contact,'微信咨询',new Date(Date.now()-100000),key()])).event_id;
   const candidate=await one(a,'SELECT ms.request_consultation_lead_candidate($1,$2,$3,$4) AS result',
    [event,'虚构业务来源材料','交由主管核实候选线索',key()]);
   await one(m,'SELECT ms.decide_consultation_lead_candidate($1,$2,$3,$4,$5) AS result',
