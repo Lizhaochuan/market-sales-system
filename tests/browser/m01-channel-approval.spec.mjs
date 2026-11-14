@@ -161,7 +161,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await managerPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(managerPage.locator('#campaigns-list')).toContainText(name+'-活动修订');
   await expect(managerPage.locator('#campaigns-list')).toContainText('v2');
-  await expect(managerPage.locator('#campaign-revise-panel')).toBeVisible();
+  await expect(managerPage.locator('#campaign-revise-panel')).toBeHidden();
   // Manager can edit only their own drafts; employee A's draft is absent.
   await expect(managerPage.locator('#campaign-revise-choice option[value="'+campaignId+'"]')).toHaveCount(0);
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
