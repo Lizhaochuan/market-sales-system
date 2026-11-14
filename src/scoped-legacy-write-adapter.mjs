@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview']);
+export const migratedLegacyWrites=new Set(['createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,20 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='requestLeadCandidate'){
+    only(body,['source_event_id','evidence_ref','reason_zh']);
+    return {params:[uuid(body.source_event_id,'真实咨询'),
+      approvalText(body.evidence_ref,'咨询核实依据',200),
+      approvalText(body.reason_zh,'申请理由',400)]};
+  }
+  if(op==='decideLeadCandidate'){
+    only(body,['decision','evidence_ref','reason_zh']);
+    if(!['reviewed_eligible','rejected'].includes(body.decision))
+      fail(422,'VALIDATION_ERROR','请选择候选核查通过或驳回');
+    return {params:[uuid(routeParams?.[0],'候选申请'),body.decision,
+      approvalText(body.evidence_ref,'独立审核依据',200),
+      approvalText(body.reason_zh,'审批理由',400)]};
+  }
   if(op==='requestCustodyReview'){
     only(body,['assignment_id','kind','evidence_ref','reason_zh']);
     if(!['withdrawal','dispute'].includes(body.kind))
@@ -149,6 +163,14 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'requestLeadCandidate':
+        result=await client.query(
+          'SELECT ms.request_consultation_lead_candidate($1,$2,$3,$4) AS result',
+          [...parsed.params,idempotencyKey]);break;
+      case 'decideLeadCandidate':
+        result=await client.query(
+          'SELECT ms.decide_consultation_lead_candidate($1,$2,$3,$4,$5) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'createStudent':
         result=await client.query(
           'SELECT ms.create_scoped_student($1,$2,$3,$4) AS result',
