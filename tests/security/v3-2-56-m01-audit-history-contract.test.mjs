@@ -28,7 +28,7 @@ test('V3.2-56 M01 event chronology requires staff-only scope and no raw audit fi
    '/api\\/v1\\/marketing-channels\\/change-requests\\/audit-history'])
   assert.ok(app.includes(x),'Strict audit route missing '+x);
  for(const x of ["'listChannelAuditHistory'","FROM ms.scoped_isolated_channel_audit_history",
-   "['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts'].includes(operation)&&r.rows.length>100"])
+   "['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews'].includes(operation)&&r.rows.length>100"])
   assert.ok(adapter.includes(x),'Audit read bound missing '+x);
  const openapi=JSON.parse(read('api/openapi/m01-isolated-channel-maintenance.v3.2.json'));
  assert.ok(openapi.paths['/api/v1/marketing-channels/change-requests/audit-history'].get);
