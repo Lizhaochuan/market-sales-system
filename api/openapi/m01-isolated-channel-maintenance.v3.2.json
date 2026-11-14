@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M01 渠道维护隔离审批接口",
-    "version": "v3.2-54",
-    "description": "仅已验证模拟 RS256 员工、独立主管审批、一次性 PostgreSQL CI 环境。生产禁止调用。"
+    "version": "v3.2-55",
+    "description": "CI-only fictional channels: employee-scoped request listing, employee proposal, independent manager approval. No production integration."
   },
   "x-contract-status": "isolated-implemented",
   "x-environment": "isolated-test",
@@ -177,6 +177,111 @@
           },
           "500": {
             "description": "隔离数据库不可用时安全拒绝"
+          }
+        }
+      },
+      "get": {
+        "summary": "List own channel maintenance requests and manager-reviewable pending items only",
+        "operationId": "listScopedIsolatedChannelChangeRequests",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded, minimal identity-scoped view with no evidence references",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "OK"
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "maxItems": 100,
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "request_id",
+                              "action",
+                              "status",
+                              "requested_by",
+                              "can_review"
+                            ],
+                            "properties": {
+                              "request_id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "action": {
+                                "type": "string",
+                                "enum": [
+                                  "create",
+                                  "edit",
+                                  "deactivate"
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "applied",
+                                  "rejected"
+                                ]
+                              },
+                              "requested_by": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "can_review": {
+                                "type": "boolean"
+                              },
+                              "channel_id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "nullable": true
+                              },
+                              "proposed_name": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "proposed_parent_id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "nullable": true
+                              },
+                              "proposed_type": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "created_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Unapproved employee or missing restricted LOGIN"
+          },
+          "500": {
+            "description": "Fail closed on invalid scoped request data"
           }
         }
       }
