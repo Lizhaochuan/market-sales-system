@@ -7,10 +7,16 @@ function status(text,error=false){
  $('status').textContent=text;
  $('status').classList.toggle('error',error);
 }
-async function api(path,{raw=false}={}){
+async function api(path,{raw=false,expectedRevision=null}={}){
  if(!state.token)throw Error('请先验证本机测试身份');
+ const reqHeaders={Authorization:'Bearer '+state.token};
+ if(expectedRevision!==null){
+  if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)
+   throw Error('审计导出版本水位无效');
+  reqHeaders['If-Match']='"'+expectedRevision+'"';
+ }
  const response=await fetch(path,{
-  method:'GET',cache:'no-store',headers:{Authorization:'Bearer '+state.token}
+  method:'GET',cache:'no-store',headers:reqHeaders
  });
  if(!response.ok){
   let message='权限核验未通过或来源报告不存在';
@@ -23,6 +29,7 @@ function clearReport(){
  state.requestId=null;state.markdown=null;state.history=null;
  $('history-panel').hidden=true;
  $('audit-events').replaceChildren();
+ $('audit-freeze-state').textContent='审计冻结状态需要重新确认。';
  $('audit-current').textContent='0';
  $('audit-change').textContent='0 / 0';
  $('audit-active').textContent='0 → 0';
@@ -110,6 +117,15 @@ async function viewReport(){
  renderReport(data.report,markdown);
  const history=await api('/api/v1/uat-preview/reports/'+id+'/history');
  renderHistory(history.history,{initial:true});
+ const freeze=await api('/api/v1/uat-preview/reports/'+id+'/freeze-state');
+ const freezeState=freeze.freeze_state;
+ if(!freezeState||freezeState.source_request_id!==id||
+   freezeState.production_integration_allowed!==false||
+   freezeState.execution_allowed!==false||freezeState.release_allowed!==false)
+   throw Error('来源冻结状态校验失败');
+ $('audit-freeze-state').textContent=freezeState.is_frozen?
+   '虚构审计历史已单向冻结（版本 '+freezeState.frozen_at_sequence+'）；不得再新增或撤销。':
+   '虚构审计未冻结；仍禁止真实来源联调和业务更改。';
  status('已重新核对员工及机构权限。该报告和虚构历史仍然禁止真实联调和纠错执行。');
 }
 function renderHistory(history,{initial=false}={}){
@@ -120,8 +136,8 @@ function renderHistory(history,{initial=false}={}){
   !Array.isArray(history.events))throw Error('无效或不受阻的证据历史不可展示');
  state.history=history;
  if(initial){
-  $('audit-from').value='0';
-  $('audit-to').value=String(history.current);
+  $('audit-from').value=String(history.from);
+  $('audit-to').value=String(history.to);
  }
  $('audit-from').max=String(history.current);
  $('audit-to').max=String(history.current);
@@ -152,7 +168,8 @@ function chosenVersionRange(){
  if(!/^(0|[1-9][0-9]{0,7})$/.test(start)||
   !/^(0|[1-9][0-9]{0,7})$/.test(end)||
   !Number.isSafeInteger(from)||!Number.isSafeInteger(to)||
-  from<0||to<from||to>current)throw Error('所选版本超出本机构已记录的虚构历史');
+  from<0||to<from||to>current||to-from>200)
+  throw Error('所选版本超过安全窗口，请一次只查看最多 200 条历史');
  return {from,to};
 }
 $('login-form').addEventListener('submit',async event=>{
@@ -240,7 +257,8 @@ $('export-history').addEventListener('click',async event=>{
   if(latest.history?.current!==state.history.current)
    throw Error('发现较新虚构证据历史，请重新查看报告后再导出');
   const markdown=await api('/api/v1/uat-preview/reports/'+id+
-   '/diff/'+from+'/'+to+'/markdown',{raw:true});
+   '/diff/'+from+'/'+to+'/markdown',
+   {raw:true,expectedRevision:state.history.current});
   if(!markdown.includes('禁止真实联调')||
    !markdown.includes('禁止解除学生错误关联隔离'))
    throw Error('导出内容缺失安全隔离声明');
