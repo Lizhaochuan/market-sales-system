@@ -115,8 +115,15 @@ export function createIsolatedUnifiedReportFreeze({unifiedReport,getFixtureWater
   const scope=key(input),nonceKey=scope+'\\0'+input.idempotency_key;
   const prior=queues.get(scope)||Promise.resolve();
   const running=prior.catch(()=>{}).then(async()=>{
+   const requestFingerprint=sha({organization_id:input.organization_id.toLowerCase(),
+    incident_id:input.incident_id.toLowerCase(),final_reference:input.final_reference,
+    diff_reference:input.diff_reference});
    const old=nonces.get(nonceKey);
-   if(old)return deny('BLOCKED_HISTORICAL_FREEZE_REPLAY',{freeze:old});
+   if(old){
+    if(old.requestFingerprint!==requestFingerprint)
+     return deny('FREEZE_IDEMPOTENCY_CONFLICT');
+    return deny('BLOCKED_HISTORICAL_FREEZE_REPLAY',{freeze:old.freeze});
+   }
    let a,b;
    try{a=await observe(input);if(a.error)return deny(a.error);
     b=await observe(input);if(b.error)return deny(b.error);}
@@ -135,7 +142,7 @@ export function createIsolatedUnifiedReportFreeze({unifiedReport,getFixtureWater
      pending_tasks:Object.freeze(a.value.report.pending_tasks.map(t=>Object.freeze(t))),
      external_requirements:Object.freeze(a.value.report.external_requirements)})}),
     freeze_digest:sha(payload)});
-   entries.set(scope,[...rows,freeze]);nonces.set(nonceKey,freeze);
+   entries.set(scope,[...rows,freeze]);nonces.set(nonceKey,{freeze,requestFingerprint});
    return deny('BLOCKED_FROZEN_REPORT_NO_EXTERNAL_AUTHORITY',{freeze});
   });
   queues.set(scope,running);
