@@ -155,7 +155,7 @@ test('真实 Chromium：受限中文 UAT 页面显示待办及脱敏导出、跨
   await page.getByRole('button',{name:'查看待办报告'}).click();
   await expect(page.locator('#audit-freeze-state')).toContainText('已单向冻结');
   await expect(page.locator('#audit-current')).toHaveText('2');
-  const blockedAppend=await finance.query(
+  const blockedAppend=await restricted.query(
    'SELECT ms.readonly_fixture_uat_diff($1,$2,$3) AS result',[sourceA,0,2]);
   expect(blockedAppend.rows[0].result.release_allowed).toBe(false);
   await page.setViewportSize({width:390,height:844});
