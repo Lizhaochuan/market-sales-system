@@ -49,6 +49,7 @@ test('M01 Chromium Chinese read-only channel hierarchy, XSS safety, failed refre
   }));
   await page.getByRole('button',{name:'刷新数据'}).click();
   await expect(page.locator('#channels-status')).toContainText('渠道目录未能读取');
+  await expect(page.locator('#toast')).toContainText('渠道目录读取失败，已清空旧数据');
   await expect(page.locator('#channels-list')).not.toContainText('上级停用的虚构子渠道');
   await page.unroute('**/api/v1/marketing-channels');
   await page.getByRole('button',{name:'刷新数据'}).click();
