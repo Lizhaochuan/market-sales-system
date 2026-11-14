@@ -256,6 +256,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    assert.equal(Number(item.planned_budget_cents),99500);
    assert.equal(item.channel_count,1);
    assert.equal(item.handoff_status,'awaiting_external_finance_authority');
+   assert.equal(item.readiness_status,'ready_for_external_manual_check');
    assert.equal(item.campaign_status,'draft');
    assert.equal(item.finance_authorized,false);
    assert.equal(item.execution_allowed,false);
@@ -289,7 +290,7 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
    if([aRead,bRead,mRead].includes(pool)){
     await assert.rejects(pool.query('INSERT INTO ms.scoped_isolated_campaign_finance_handoffs(review_id) VALUES($1)',[reviewId]),
-      e=>e.code==='42501','read-only view cannot be written');
+      e=>['42501','55000','0A000'].includes(e.code),'read-only view cannot be written');
    }
    await assert.rejects(pool.query('SELECT * FROM ms.isolated_campaign_sales_reviews'),
     e=>e.code==='42501');

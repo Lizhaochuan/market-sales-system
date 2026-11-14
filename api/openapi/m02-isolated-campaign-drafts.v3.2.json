@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-60",
+    "version": "v3.2-61",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -414,7 +414,7 @@
         ],
         "responses": {
           "200": {
-            "description": "At most 100 scoped sales-approved handoff summaries; finance_authorized=false, execution_allowed=false"
+            "description": "At most 100 scoped sales-approved handoff summaries; finance_authorized=false, execution_allowed=false; includes readiness_status with mismatch blockers, never finance approval"
           },
           "403": {
             "description": "Strict approved staff and dedicated read LOGIN required"
@@ -430,5 +430,6 @@
   "x-finance-approval-implemented": false,
   "x-campaign-publishing-implemented": false,
   "x-finance-handoff-readonly": true,
-  "x-finance-handoff-execution-allowed": false
+  "x-finance-handoff-execution-allowed": false,
+  "x-finance-readiness-does-not-authorize-spend": true
 }
