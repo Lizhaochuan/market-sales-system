@@ -21,7 +21,7 @@ test('V3.2-55 channel approval UI only reads scoped SQL minimal pending and owns
  assert.ok(!sql.includes('GRANT SELECT ON ms.isolated_channel_change_requests'));
  const app=read('src/app.mjs'),adapter=read('src/scoped-legacy-read-adapter.mjs');
  for(const x of ['listChannelChangeRequests','review_channel_change:ctx.manager',
-  "if(!strictStaffMode&&['listChannelChangeRequests','listChannelAuditHistory','requestChannelChange','reviewChannelChange'].includes(route.op))"])
+  "if(!strictStaffMode&&['listCampaignDrafts','createCampaignDraft','listChannelChangeRequests','listChannelAuditHistory','requestChannelChange','reviewChannelChange'].includes(route.op))"])
   assert.ok(app.includes(x),'Missing staff restricted route '+x);
  assert.ok(adapter.includes('FROM ms.scoped_isolated_channel_change_requests'));
  assert.ok(adapter.includes("if(['listChannelChangeRequests','listChannelAuditHistory'].includes(operation)&&r.rows.length>100)"));
