@@ -242,11 +242,7 @@ JOIN ms.contacts c ON c.id=a.contact_id
 JOIN ms.contact_custody_requests q ON q.id=a.approval_request_id
 WHERE a.organization_id=ms.current_scoped_organization_id()
  AND a.revoked_at IS NULL AND ms.current_scoped_staff_id() IS NOT NULL
- AND (ms.current_scoped_staff_id() IN (a.assignee_id,q.requested_by,a.prior_custodian_id)
-  OR EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates t ON t.id=g.role_id
-   WHERE g.user_id=ms.current_scoped_staff_id() AND g.revoked_at IS NULL
-   AND g.valid_from<=now() AND t.organization_id=a.organization_id
-   AND t.role_code IN ('sales_manager','super_admin')));
+ AND ms.current_scoped_staff_id() IN (a.assignee_id,q.requested_by,a.prior_custodian_id);
 CREATE VIEW ms.scoped_contact_custody_reviews
 WITH (security_barrier=true) AS
 SELECT r.id AS review_id,r.assignment_id,r.kind,r.status,
