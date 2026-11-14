@@ -1,0 +1,205 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "V3.2-16 联系人撤回与争议复核（仅隔离测试）",
+    "version": "3.2.16",
+    "description": "所有业务请求使用已核准 RSA 员工身份；数据库以 SESSION_USER 映射机构员工。Draft only."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:3000",
+      "description": "仅本机隔离环境；端口由测试运行配置"
+    }
+  ],
+  "security": [
+    {
+      "staffBearer": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "staffBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "ReviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "assignment_id",
+          "kind",
+          "evidence_ref",
+          "reason_zh"
+        ],
+        "properties": {
+          "assignment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "withdrawal",
+              "dispute"
+            ]
+          },
+          "evidence_ref": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "reason_zh": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 400
+          }
+        }
+      },
+      "ReviewDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "result",
+          "evidence_ref",
+          "reason_zh"
+        ],
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": [
+              "upheld",
+              "reversed",
+              "rejected"
+            ]
+          },
+          "evidence_ref": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "reason_zh": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 400
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/contact-custody/active": {
+      "get": {
+        "summary": "查看本人参与的当前有效交接",
+        "responses": {
+          "200": {
+            "description": "仅受授权员工或本机构有效主管可查看"
+          }
+        }
+      }
+    },
+    "/api/v1/contact-custody/reviews": {
+      "get": {
+        "summary": "查看本人参与/授权审核的最小复核记录",
+        "responses": {
+          "200": {
+            "description": "不含原始证据及原因"
+          }
+        }
+      },
+      "post": {
+        "summary": "提交撤回或争议，不立即改变管理权",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "申请已创建，等待独立主管审核"
+          },
+          "403": {
+            "description": "非当事人拒绝"
+          },
+          "409": {
+            "description": "未决冲突或重复编号"
+          }
+        }
+      }
+    },
+    "/api/v1/contact-custody/reviews/{review_id}/decision": {
+      "post": {
+        "summary": "有效独立主管复核并可撤回交接",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecision"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "决定生效，新事务即时重新判权"
+          },
+          "403": {
+            "description": "自批或越权拒绝"
+          },
+          "422": {
+            "description": "上次交接已变更或前任管理人失效"
+          }
+        }
+      }
+    },
+    "/api/v1/contact-custody/related-students": {
+      "get": {
+        "summary": "仅已核实联系人关系的学生姓名和关系",
+        "responses": {
+          "200": {
+            "description": "只有 student_id/student_name/contact_relation，绝无财务或年级"
+          }
+        }
+      }
+    }
+  }
+}
