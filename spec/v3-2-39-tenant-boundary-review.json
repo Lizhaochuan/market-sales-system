@@ -1,0 +1,33 @@
+{
+  "schema_version": "v3.2-39-tenant-boundary-review-v1",
+  "scope": "isolated-static-review-only",
+  "parent_pr": 45,
+  "source_migrations": [
+    "034_preintegration_authority_hard_gates.sql",
+    "035_readonly_integration_uat_report.sql",
+    "036_scoped_uat_preview_reader.sql"
+  ],
+  "proof_level": "STATIC_SOURCE_REVIEW_ONLY",
+  "dynamic_security_uat_completed": false,
+  "production_integration_allowed": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "new_migration": false,
+  "hold_active_required": true,
+  "student_primary": true,
+  "family_optional": true,
+  "contracts": "proposed-unimplemented",
+  "review_items": [
+    "session_user_database_principal",
+    "tenant_scoped_source_request",
+    "security_definer_and_rls",
+    "reader_grants_no_direct_tables",
+    "revoked_actor_recheck",
+    "immutable_missing_evidence",
+    "unknown_or_mismatched_source_denied"
+  ],
+  "real_uat": "NOT_RUN",
+  "external_approvals": "MISSING"
+}
