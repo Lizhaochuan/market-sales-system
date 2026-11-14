@@ -1,0 +1,22 @@
+name: V3.2-89 isolated unified report freeze
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-unified-report-freeze.mjs'
+      - 'tests/security/v3-2-89-m02-unified-report-freeze.test.mjs'
+      - '.github/workflows/v3-2-89-unified-report-freeze.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-report-freeze:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check isolated freeze source syntax
+        run: node --check src/cross-module-unified-report-freeze.mjs
+      - name: Run freeze and upstream report safety regressions
+        run: node --test tests/security/v3-2-89-m02-unified-report-freeze.test.mjs tests/security/v3-2-88-m02-unified-pending-review-report.test.mjs
