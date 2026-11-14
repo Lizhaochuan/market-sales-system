@@ -48,6 +48,6 @@ test('V3.2-51 M01 remains partial and does not authorize real CRM/finance or mer
  assert.equal(readdirSync(resolve(root,'db/migrations'))
   .filter(x=>/^\d{3}_.+\.sql$/.test(x)).length,m.expected_migration_count);
  const doc=read('docs/V3.2-51_M01_CHANNEL_CATALOG_READONLY.md');
- for(const x of ['hold_active','不合并','不部署','001—038','STRICT','proposed-unimplemented'])
+ for(const x of ['hold_active','不合并','不部署','001—038','strictStaffMode','proposed-unimplemented'])
   assert.ok(doc.includes(x),'Missing M01 documentation warning: '+x);
 });
