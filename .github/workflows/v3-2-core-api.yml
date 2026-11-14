@@ -2,7 +2,7 @@ name: V3.2 isolated core business API
 
 on:
   pull_request:
-    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope, chatgpt/v3-2-09-scoped-read-business-api, chatgpt/v3-2-10-legacy-read-hardening, chatgpt/v3-2-11-student-access-governance, chatgpt/v3-2-12-chinese-access-ui-lowrisk-writes, chatgpt/v3-2-13-legacy-lowrisk-writes-trusted-ui, chatgpt/v3-2-14-scoped-contact-links-consultations, chatgpt/v3-2-15-scoped-identity-directory, chatgpt/v3-2-16-custody-withdrawals-disputes, chatgpt/v3-2-17-consultation-lead-candidate, chatgpt/v3-2-18-conversion-preflight-attribution-dispute, chatgpt/v3-2-19-final-approved-lead-conversion, chatgpt/v3-2-20-student-link-and-lead-corrections, chatgpt/v3-2-21-verified-student-link-withdrawal, chatgpt/v3-2-22-downstream-student-correction-hold, chatgpt/v3-2-23-downstream-reconciliation-release, chatgpt/v3-2-24-cross-module-correction-design, chatgpt/v3-2-25-three-party-plan-approvals, chatgpt/v3-2-26-compensation-manifest-preflight, chatgpt/v3-2-27-authority-contracts-readonly-gate, chatgpt/v3-2-28-readonly-source-trust-preparation, chatgpt/v3-2-29-source-registration-readiness, chatgpt/v3-2-30-isolated-source-recovery, chatgpt/v3-2-31-integration-readiness-hard-gates, chatgpt/v3-2-32-uat-handbook-blocker-report, chatgpt/v3-2-33-isolated-uat-preview-console]
+    branches: [main, chatgpt/v3-1-04-integration-review, chatgpt/v3-2-01-core-crm-business, chatgpt/v3-2-02-chinese-admin-ui, chatgpt/v3-2-03-identity-family-approval, chatgpt/v3-2-04-identity-governance, chatgpt/v3-2-05-isolated-runtime-rls, chatgpt/v3-2-06-principal-tenant-boundary, chatgpt/v3-2-07-trusted-identity-routing, chatgpt/v3-2-08-approved-routing-staff-scope, chatgpt/v3-2-09-scoped-read-business-api, chatgpt/v3-2-10-legacy-read-hardening, chatgpt/v3-2-11-student-access-governance, chatgpt/v3-2-12-chinese-access-ui-lowrisk-writes, chatgpt/v3-2-13-legacy-lowrisk-writes-trusted-ui, chatgpt/v3-2-14-scoped-contact-links-consultations, chatgpt/v3-2-15-scoped-identity-directory, chatgpt/v3-2-16-custody-withdrawals-disputes, chatgpt/v3-2-17-consultation-lead-candidate, chatgpt/v3-2-18-conversion-preflight-attribution-dispute, chatgpt/v3-2-19-final-approved-lead-conversion, chatgpt/v3-2-20-student-link-and-lead-corrections, chatgpt/v3-2-21-verified-student-link-withdrawal, chatgpt/v3-2-22-downstream-student-correction-hold, chatgpt/v3-2-23-downstream-reconciliation-release, chatgpt/v3-2-24-cross-module-correction-design, chatgpt/v3-2-25-three-party-plan-approvals, chatgpt/v3-2-26-compensation-manifest-preflight, chatgpt/v3-2-27-authority-contracts-readonly-gate, chatgpt/v3-2-28-readonly-source-trust-preparation, chatgpt/v3-2-29-source-registration-readiness, chatgpt/v3-2-30-isolated-source-recovery, chatgpt/v3-2-31-integration-readiness-hard-gates, chatgpt/v3-2-32-uat-handbook-blocker-report, chatgpt/v3-2-33-isolated-uat-preview-console, chatgpt/v3-2-34-uat-evidence-diff-audit]
   workflow_dispatch:
 
 permissions:
@@ -120,6 +120,7 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/034_preintegration_authority_hard_gates.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/035_readonly_integration_uat_report.sql
           psql -X -v ON_ERROR_STOP=1 -f db/migrations/036_scoped_uat_preview_reader.sql
+          psql -X -v ON_ERROR_STOP=1 -f db/migrations/037_immutable_fixture_uat_evidence_diff.sql
           psql -X -v ON_ERROR_STOP=1             -v "route_password=fictional_approved_route_2026_8136bc"             -v "assignee_password_a=fictional_assignee_a_2026_74e5a9"             -v "assignee_password_b=fictional_assignee_b_2026_129b6e"             -f tests/sql/create_v3_2_08_readonly_principals.sql
           psql -X -v ON_ERROR_STOP=1 -v "manager_password=fictional_assignee_manager_2026_0bc5ea" -f tests/sql/create_v3_2_10_manager_readonly_login.sql
           psql -X -v ON_ERROR_STOP=1             -v "pass_a=fictional_access_a_2026_982a1e"             -v "pass_b=fictional_access_b_2026_819a0f"             -v "pass_m=fictional_access_manager_2026_15be2c"             -f tests/sql/create_v3_2_11_access_operator_logins.sql
@@ -134,6 +135,7 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -f tests/sql/grant_v3_2_30_fixture_recovery_functions.sql
           psql -X -v ON_ERROR_STOP=1 -f tests/sql/grant_v3_2_31_integration_gate_functions.sql
           psql -X -v ON_ERROR_STOP=1 -v "preview_password_a=fictional_uat_preview_a_2026" -v "preview_password_b=fictional_uat_preview_b_2026" -f tests/sql/create_v3_2_33_uat_preview_readers.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/sql/grant_v3_2_34_fixture_evidence_reviewers.sql
       - name: Restricted runtime role and forbidden finance operations
         run: psql -X -v ON_ERROR_STOP=1 -f tests/sql/lowrisk_runtime_permissions.smoke.sql
       - name: Restricted actual LOGIN and tenant row-level security E2E
@@ -158,6 +160,7 @@ jobs:
           node --check src/cross-module-fixture-source-verifier.mjs
           node --check src/integration-uat-blocker-report.mjs
           node --check src/uat-preview-api.mjs
+          node --check src/uat-evidence-history.mjs
           node --check web/uat-preview.js
       - name: Core API, authorization, idempotency and Chinese audit E2E
         run: node --test --test-concurrency=1 tests/core/*.test.mjs tests/ui/*.test.mjs tests/security/*.test.mjs
