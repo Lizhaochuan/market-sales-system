@@ -184,6 +184,58 @@ test('V3.2-33 real DB LOGIN, signed identity and server-validated UAT export',as
    const crossDownload=await get('/api/v1/uat-preview/reports/'+sourceB+'/markdown',jwt());
    assert.equal(crossDownload.status,403);
   });
+  await t.test('late authorization denial blocks seven UAT paths without source disclosure',async()=>{
+   // The initial check uses the real nonowner DB LOGIN and returns true.
+   // Only the final, post-read identity recheck is simulated as revoked.
+   // No real test identity is revoked here; the following tests still need it.
+   const originalConnect=A.connect;
+   let deniedFinalChecks=0;
+   A.connect=async(...args)=>{
+    const underlying=await originalConnect.apply(A,args);
+    let identityChecks=0;
+    return {
+     query:async(...queryArgs)=>{
+      const sql=queryArgs[0];
+      if(typeof sql==='string'&&sql.includes('ms.scoped_employee_identity_valid(')){
+       identityChecks++;
+       if(identityChecks===2){
+        deniedFinalChecks++;
+        return {rows:[{permitted:false}]};
+       }
+      }
+      return underlying.query(...queryArgs);
+     },
+     release:()=>underlying.release()
+    };
+   };
+   try{
+    const targets=[
+     ['/api/v1/uat-preview/requests',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA,undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/markdown',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/freeze-state',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/history',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1',undefined],
+     ['/api/v1/uat-preview/reports/'+sourceA+'/diff/0/1/markdown',2]
+    ];
+    for(const [path,revision] of targets){
+     const response=await get(path,jwt(),revision);
+     assert.equal(response.status,403,'late identity denial must block '+path);
+     assert.equal(response.headers.get('cache-control'),'no-store, max-age=0');
+     assert.equal(response.headers.get('content-type'),'application/json; charset=utf-8');
+     const result=await response.json();
+     assert.equal(result.code,'FORBIDDEN');
+     assert.equal(result.data,undefined,'late denial must not include report data');
+     assert.doesNotMatch(JSON.stringify(result),new RegExp(sourceA,'i'));
+     assert.doesNotMatch(JSON.stringify(result),/fictional_api_history01|AUTH_HMAC_SECRET/);
+    }
+    assert.equal(deniedFinalChecks,targets.length,
+     'each protected route must invoke its own final identity check');
+   }finally{A.connect=originalConnect;}
+   // After restoring normal verification, the unchanged fixture identity works.
+   const recovered=await get('/api/v1/uat-preview/reports/'+sourceA,jwt());
+   assert.equal(recovered.status,200);
+  });
   await t.test('all six protected success paths fail closed when final DB identity recheck fails',async()=>{
    // Simulate a DB transport failure only on the second identity validation
    // inside an individual HTTP request: initial approval succeeds; final
