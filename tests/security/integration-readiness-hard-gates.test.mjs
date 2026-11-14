@@ -29,7 +29,8 @@ test('V3.2-31 independent four-department integration readiness is ALWAYS blocke
      'ms.integration_missing_evidence_events','ms.sales_orders',
      'ms.payment_allocations','ms.crm_entitlement_links']){
      await deny(p,'SELECT * FROM '+tb,[],'42501');
-     await deny(p,'UPDATE '+tb+' SET id=id WHERE FALSE',[],'42501');
+     const col=tb==='ms.integration_required_checks'?'check_code':'id';
+     await deny(p,'UPDATE '+tb+' SET '+col+'='+col+' WHERE FALSE',[],'42501');
     }
    }
    await deny(low,gap,[null,'finance_authority_owner','owner_not_confirmed',
