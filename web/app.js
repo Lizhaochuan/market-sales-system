@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -163,6 +163,60 @@ function paint(id,items,make){
   if(!items.length){parent.append(node('div','empty','暂无可查看的记录。可以先使用左侧表单新增虚构演示数据。'));return;}
   for(const x of items)parent.append(make(x));
 }
+function channelFormFields(){
+  const form=$('channel-request-form'),action=form.elements.action.value;
+  const create=action==='create',deactivate=action==='deactivate';
+  $('channel-target-row').hidden=create;
+  $('channel-name-row').hidden=deactivate;
+  $('channel-type-row').hidden=deactivate;
+  $('channel-parent-row').hidden=deactivate;
+  for(const field of ['name','channel_type']){
+    form.elements[field].disabled=deactivate;
+    form.elements[field].required=!deactivate;
+  }
+  form.elements.channel_id.disabled=create;
+  form.elements.channel_id.required=!create;
+  form.elements.parent_id.disabled=deactivate;
+}
+function renderChannelMaintenance(){
+  const strict=state.strict;
+  const ok=strict&&!state.channelRequestLoadError&&!state.channelLoadError;
+  $('channel-maintenance-workbench').hidden=!strict;
+  $('channel-request-card').hidden=!ok;
+  $('channel-review-card').hidden=!ok||state.capabilities.review_channel_change!==true;
+  $('channel-requests-total').textContent=state.channelRequests.length+' 条';
+  $('channel-requests-status').textContent=state.channelRequestLoadError
+    ?'无法确认申请及审批状态，旧记录已清空，禁止使用旧待办。'
+    :'只显示本人的维护记录，以及本机构有效销售主管有权查看的待审批申请。';
+  if(!ok){
+    $('channel-requests-list').replaceChildren();
+    $('channel-target-choice').replaceChildren();
+    $('channel-parent-choice').replaceChildren();
+    $('channel-review-choice').replaceChildren();
+    return;
+  }
+  paint('channel-requests-list',state.channelRequests,x=>record(
+    ({create:'新增渠道',edit:'编辑渠道',deactivate:'停用渠道'})[x.action]||'渠道申请',
+    (x.proposed_name||state.channels.find(c=>c.channel_id===x.channel_id)?.name||'指定渠道')+
+      ' · '+formatDate(x.created_at)+
+      (x.requested_by===state.user?.staff_id?' · 本人申请':' · 待独立主管复核'),
+    ({pending:'等待独立主管审核',applied:'审批通过，已在隔离数据执行',
+      rejected:'审核驳回，渠道未变'})[x.status]||'状态待核实','渠'));
+  const active=state.channels.filter(c=>c.effective_status==='active');
+  setSelect($('channel-target-choice'),active,'channel_id',c=>c.name);
+  const current=$('channel-target-choice').value;
+  setSelect($('channel-parent-choice'),active.filter(c=>c.channel_id!==current),
+    'channel_id',c=>c.name,true);
+  const reviewable=state.channelRequests.filter(x=>x.status==='pending'&&x.can_review===true);
+  setSelect($('channel-review-choice'),reviewable,'request_id',
+    x=>({create:'新增',edit:'编辑',deactivate:'停用'})[x.action]+' · '+
+      (x.proposed_name||state.channels.find(c=>c.channel_id===x.channel_id)?.name||'指定渠道'));
+  $('channel-review-choice').required=true;
+  $('channel-review-form').querySelector('button[type="submit"]').disabled=!reviewable.length;
+  $('channel-request-form').querySelector('button[type="submit"]').disabled=
+    !active.length&&$('channel-request-form').elements.action.value!=='create';
+  channelFormFields();
+}
 function render(){
   $('stat-students').textContent=state.students.length;
   $('stat-contacts').textContent=state.contacts.length;
@@ -187,6 +241,7 @@ function render(){
     x.effective_status==='active'?'正常使用':
       x.effective_status==='inactive'?'本渠道已停用':'因上级渠道停用而不可用',
     '渠'));
+  renderChannelMaintenance();
   paint('students-list',state.students,x=>record(
     x.display_name,'年级：'+(x.grade_label||'未填写')+' · 负责人：'+(x.owner_display_name||'待确认'),'独立档案','学'));
   paint('contacts-list',state.contacts,x=>record(
@@ -343,6 +398,7 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
 async function refresh(){
   const endpoints=state.strict?[
     ['channels','/api/v1/marketing-channels'],
+    ['channelRequests','/api/v1/marketing-channels/change-requests'],
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],
     ['custodyRequests','/api/v1/contact-custody/requests'],
@@ -374,7 +430,8 @@ async function refresh(){
   if(state.strict){
     for(const key of ['leads','opportunities','families'])state[key]=[];
   }
-  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
+  else {
+    state.channelRequests=[];state.channelRequestLoadError=false;state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     if(key==='channels'){
@@ -386,6 +443,15 @@ async function refresh(){
       state.channelCatalog=valid?data:null;
       state.channels=valid?data.channels:[];
       state.channelLoadError=!valid;
+    }else if(key==='channelRequests'){
+      const items=r.status==='fulfilled'?r.value?.items:null;
+      const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
+        x&&typeof x.request_id==='string'&&
+        ['create','edit','deactivate'].includes(x.action)&&
+        ['pending','applied','rejected'].includes(x.status)&&
+        typeof x.requested_by==='string'&&typeof x.can_review==='boolean');
+      state.channelRequests=valid?items:[];
+      state.channelRequestLoadError=!valid;
     }else state[key]=r.status==='fulfilled'?r.value.items||[]:[];
     if(r.status==='rejected'&&!((key==='families')&&!state.capabilities.review_family_audit)){
       toast('部分业务列表未能读取，请检查账号权限或数据库状态',true);
@@ -406,6 +472,14 @@ function setView(view){
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
+  state.channelRequests=[];state.channelRequestLoadError=false;
+  $('channel-maintenance-workbench').hidden=true;
+  $('channel-requests-list').replaceChildren();
+  $('channel-review-choice').replaceChildren();
+  $('channel-target-choice').replaceChildren();
+  $('channel-parent-choice').replaceChildren();
+  $('channel-requests-total').textContent='0 条';
+  $('channel-requests-status').textContent='未登录，渠道审批信息已清空。';
   $('channels-list').replaceChildren();
   $('channels-total').textContent='0 条';
   $('channels-status').textContent='未登录，渠道目录已清空。';
@@ -491,6 +565,53 @@ register('external-login-form',async d=>{
   setView('overview');
   await refresh();
   return state.strict?'已进入员工专属数据库严格权限测试模式':'已通过外部签名验证（隔离环境）';
+});
+$('channel-request-form').elements.action.addEventListener('change',()=>{
+  channelFormFields();
+  renderChannelMaintenance();
+});
+$('channel-target-choice').addEventListener('change',()=>{
+  const current=$('channel-target-choice').value;
+  setSelect($('channel-parent-choice'),state.channels.filter(c=>
+    c.effective_status==='active'&&c.channel_id!==current),
+    'channel_id',c=>c.name,true);
+});
+register('channel-request-form',async d=>{
+  if(!state.strict||state.channelLoadError||state.channelRequestLoadError)
+    throw Error('渠道请求状态无法确认，禁止提交');
+  const action=d.action;
+  const data={action,evidence_ref:d.evidence_ref.trim(),reason_zh:d.reason_zh.trim()};
+  if(action!=='create'){
+    if(!state.channels.some(c=>c.channel_id===d.channel_id&&c.effective_status==='active'))
+      throw Error('请选择本机构仍有效的渠道');
+    data.channel_id=d.channel_id;
+  }
+  if(action!=='deactivate'){
+    data.name=d.name.trim();
+    data.channel_type=d.channel_type.trim();
+    data.parent_id=d.parent_id||null;
+  }
+  const result=await api('/api/v1/marketing-channels/change-requests',{
+    method:'POST',body:data
+  });
+  return result.status==='pending'?'渠道维护申请已提交，尚未修改渠道，等待独立主管审核':
+    '已找到相同申请，当前状态：'+result.status;
+});
+register('channel-review-form',async d=>{
+  if(!state.strict||state.channelLoadError||state.channelRequestLoadError||
+      state.capabilities.review_channel_change!==true)
+    throw Error('当前没有经过核实的渠道审批权限');
+  const selected=state.channelRequests.find(x=>x.request_id===d.request_id&&
+    x.status==='pending'&&x.can_review===true);
+  if(!selected||selected.requested_by===state.user?.staff_id)
+    throw Error('只能审批本机构其他员工提交的待审核渠道申请');
+  const result=await api('/api/v1/marketing-channels/change-requests/'+
+    encodeURIComponent(d.request_id)+'/decision',{
+      method:'POST',body:{decision:d.decision,evidence_ref:d.evidence_ref.trim(),
+        reason_zh:d.reason_zh.trim()}
+    });
+  return result.status==='applied'?'独立主管已批准，隔离渠道变更已执行':
+    '渠道申请已被独立主管驳回，原渠道没有变更';
 });
 register('student-form',async d=>{
   await api('/api/v1/students',{method:'POST',body:{

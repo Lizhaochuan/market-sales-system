@@ -105,7 +105,70 @@
         <p id="channels-status" class="form-hint" role="status">当前仅为隔离只读目录，不代表实际获客渠道已经核实。</p>
         <div id="channels-list" class="record-list" aria-label="本机构渠道列表"></div>
       </article>
-      <p class="muted channel-scope-note">渠道维护、正式员工模式、跨渠道费用分摊、学生首次来源及商机归因金额尚未开放。这里没有新增、编辑、删除或启用渠道的操作。</p>
+      <div id="channel-maintenance-workbench" hidden>
+        <div class="two-col">
+          <article class="panel" id="channel-request-card">
+            <h3>渠道维护申请</h3>
+            <p class="form-hint">仅限已批准的严格员工测试身份。提交后不直接更改渠道，必须由另一位有效销售主管独立复核。</p>
+            <form id="channel-request-form" class="field-stack">
+              <label>申请类型
+                <select name="action" required>
+                  <option value="create">新增渠道</option>
+                  <option value="edit">编辑现有渠道</option>
+                  <option value="deactivate">停用现有渠道</option>
+                </select>
+              </label>
+              <label id="channel-target-row" hidden>目标渠道
+                <select name="channel_id" id="channel-target-choice"></select>
+              </label>
+              <label id="channel-name-row">渠道名称
+                <input name="name" maxlength="100" required placeholder="仅填写虚构渠道名称">
+              </label>
+              <label id="channel-type-row">渠道类别
+                <input name="channel_type" maxlength="60" required placeholder="例如 online">
+              </label>
+              <label id="channel-parent-row">上级渠道（可空）
+                <select name="parent_id" id="channel-parent-choice"></select>
+              </label>
+              <label>申请依据
+                <input name="evidence_ref" maxlength="200" minlength="2" required placeholder="仅填写虚构证据索引，不填写个人隐私">
+              </label>
+              <label>申请理由
+                <textarea name="reason_zh" minlength="2" maxlength="400" required placeholder="说明本次渠道变更的业务理由"></textarea>
+              </label>
+              <button class="primary" type="submit">提交渠道维护申请</button>
+            </form>
+          </article>
+          <article class="panel" id="channel-review-card" hidden>
+            <h3>独立主管审批</h3>
+            <p class="form-hint">申请人不能自批。批准将只修改隔离测试渠道，驳回不执行变更。</p>
+            <form id="channel-review-form" class="field-stack">
+              <label>待审批申请
+                <select name="request_id" id="channel-review-choice" required></select>
+              </label>
+              <label>复核结论
+                <select name="decision" required>
+                  <option value="approved">批准执行</option>
+                  <option value="rejected">驳回申请</option>
+                </select>
+              </label>
+              <label>独立审批凭据
+                <input name="evidence_ref" maxlength="200" minlength="2" required placeholder="虚构主管核查凭据">
+              </label>
+              <label>独立审批理由
+                <textarea name="reason_zh" minlength="2" maxlength="400" required></textarea>
+              </label>
+              <button class="primary" type="submit">保存独立渠道审批结论</button>
+            </form>
+          </article>
+        </div>
+        <article class="panel">
+          <div class="panel-header"><h3>渠道变更申请与审核进度</h3><span id="channel-requests-total" class="count">0 条</span></div>
+          <p id="channel-requests-status" class="form-hint" role="status">仅展示本人申请及本机构主管有权查看的待审批记录。</p>
+          <div id="channel-requests-list" class="record-list"></div>
+        </article>
+      </div>
+      <p class="muted channel-scope-note">渠道维护仅限隔离测试的严格签名员工及独立主管。未经审核不修改渠道；真实渠道、跨渠道费用分摊、学生首次来源和商机归因金额仍未开放。</p>
     </section>
 
     <section class="view" data-panel="students">

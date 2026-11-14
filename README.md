@@ -14,6 +14,7 @@
 - [V3.2-52 M01 中文获客渠道只读工作台](docs/V3.2-52_M01_CHINESE_CHANNEL_WORKBENCH.md)：在虚构业务演示中展示真实机构渠道树，区分自身停用与上级停用，并通过 Chromium 检查脚本注入、刷新失败清空、退出清空和移动窄屏；严格员工模式继续禁止。
 - [V3.2-53 M01 严格员工受限渠道目录](docs/V3.2-53_M01_STRICT_SCOPED_CHANNEL_READ.md)：后续独立增量在 CI 一次性数据库中通过 PostgreSQL SESSION_USER 安全视图与签名员工身份实现严格模式只读渠道目录；不复用宽权限登录、不增加数据库迁移或生产授权。
 - [V3.2-54 M01 渠道维护申请与独立主管审批](docs/V3.2-54_M01_CHANNEL_MAINTENANCE_APPROVAL.md)：在 CI 一次性数据库中使用受限员工写入函数，实际测试新增、编辑、停用的申请、复核、历史审计与防重复；只有不同销售主管批准后才会修改虚构渠道。尚未开放正式写入界面或生产迁移。
+- [V3.2-55 M01 中文渠道维护申请与主管审批工作台](docs/V3.2-55_M01_CHANNEL_REVIEW_WORKBENCH.md)：在原获客渠道页面接入严格签名员工申请与另一名销售主管审批表单；通过只读受限视图展示本人记录及同机构可审待办，退出与接口失败后清空数据，不开放真实渠道、生产权限或财务联调。
 - 上游 **PR #54** 在自身最新 HEAD `9f438cdbb9ab85cb0a3ea2686b8d927c2e7bcb0a` 的 [隔离 CI #43586142266](https://github.com/Lizhaochuan/market-sales-system/actions/runs/43586142266) 已成功。**不代表主分支已合并、业务 M01—M14 全部完成或真实财务/CRM UAT 通过。**
 - PostgreSQL 迁移仍限于 001—038；生产对接、正式收退款/课时、补偿与真正错绑的 `hold_active` 解除继续阻断。旧 `edu-management-system` 不改动，技术文档不提前融合。
 

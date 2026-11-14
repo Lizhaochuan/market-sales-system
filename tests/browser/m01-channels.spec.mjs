@@ -39,7 +39,8 @@ test('M01 Chromium Chinese read-only channel hierarchy, XSS safety, failed refre
   await expect(page.locator('#channels-list img')).toHaveCount(0);
   await expect(page.locator('#channels-status')).toContainText('仅供虚构数据演示');
   await expect(page.locator('[data-panel="channels"]')).not.toContainText('正式收款');
-  await expect(page.locator('[data-panel="channels"] button')).toHaveCount(0);
+  await expect(page.locator('[data-panel="channels"] button:visible')).toHaveCount(0);
+  await expect(page.locator('#channel-maintenance-workbench')).toBeHidden();
   await testInfo.attach('m01-channel-hierarchy-browser',{
    body:await page.screenshot({fullPage:true}),contentType:'image/png'});
   // A failed refresh must CLEAR rather than preserve cached channel names.

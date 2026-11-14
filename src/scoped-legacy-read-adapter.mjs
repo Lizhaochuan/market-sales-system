@@ -7,6 +7,7 @@ import {buildIsolatedChannelCatalog} from './marketing-channel-catalog.mjs';
 
 export const migratedLegacyReads=new Set([
   'listMarketingChannels',
+  'listChannelChangeRequests',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
   'getStudent','getLead','getOpportunity',
   'listContactCustodyRequests','listContactCustodyStaff',
@@ -17,6 +18,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listChannelChangeRequests:
+    'SELECT request_id,action,channel_id,proposed_name,proposed_parent_id,proposed_type,status,created_at,requested_by,can_review FROM ms.scoped_isolated_channel_change_requests ORDER BY created_at DESC,request_id LIMIT 101',
   listMarketingChannels:
     'SELECT id,organization_id,parent_id,name,channel_type,status FROM ms.scoped_marketing_channel_catalog ORDER BY id LIMIT 201',
   listDownstreamReconciliations:
@@ -130,6 +133,8 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
+      if(operation==='listChannelChangeRequests'&&r.rows.length>100)
+        throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)
         :{items:projectList(operation,r.rows,context.user)};
