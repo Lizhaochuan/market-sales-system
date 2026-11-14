@@ -1,7 +1,7 @@
 // Local-only UAT preview: no browser-persisted credentials or business writes.
 // All human-readable fields are rendered with textContent, never innerHTML.
 const $=id=>document.getElementById(id);
-const state={token:null,requests:[],requestId:null,markdown:null};
+const state={token:null,requests:[],requestId:null,markdown:null,history:null};
 const section={sales:'销售',finance:'财务',academic:'教务',security:'信息安全'};
 function status(text,error=false){
  $('status').textContent=text;
@@ -20,7 +20,13 @@ async function api(path,{raw=false}={}){
  return raw?response.text():(await response.json()).data;
 }
 function clearReport(){
- state.requestId=null;state.markdown=null;
+ state.requestId=null;state.markdown=null;state.history=null;
+ $('history-panel').hidden=true;
+ $('audit-events').replaceChildren();
+ $('audit-current').textContent='0';
+ $('audit-change').textContent='0 / 0';
+ $('audit-active').textContent='0 → 0';
+ $('audit-from').value='0';$('audit-to').value='0';
  $('report-panel').hidden=true;
  $('export-panel').hidden=true;
  $('task-rows').replaceChildren();
@@ -102,7 +108,9 @@ async function viewReport(){
  const markdown=await api('/api/v1/uat-preview/reports/'+id+'/markdown',{raw:true});
  if(data.report?.requestId!==id)throw Error('报告与所选来源编号不匹配');
  renderReport(data.report,markdown);
- status('已重新核对员工及机构权限。该报告仍然禁止真实联调和纠错执行。');
+ const history=await api('/api/v1/uat-preview/reports/'+id+'/history');
+ renderHistory(history.history,{initial:true});
+ status('已重新核对员工及机构权限。该报告和虚构历史仍然禁止真实联调和纠错执行。');
 }
 $('login-form').addEventListener('submit',async event=>{
  event.preventDefault();
