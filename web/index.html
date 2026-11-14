@@ -435,6 +435,55 @@
           <div id="lead-correction-notes-list" class="record-list"></div>
         </article>
       </div>
+      <div id="student-link-verification-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>指定学生与线索：正式人工核实及错误关联撤回</h2>
+          <p>只针对选择的一个学生，核实的是销售线索关联，不等于证明监护人身份，也不意味着其他孩子属于同一家庭。所有操作都需独立主管审核。</p>
+        </div>
+        <div class="two-col">
+          <article class="panel"><h3>申请核实或撤回单名学生的关联</h3>
+            <form id="student-link-verification-request-form" class="field-stack">
+              <label>选择操作 <select name="action">
+                <option value="verify">申请人工核实指定学生的线索关联</option>
+                <option value="withdraw">撤回错误学生关联（保留旧记录）</option>
+              </select></label>
+              <label>申请核实：选择仍在待核实状态的学生
+                <select name="verify_association" data-options="studentLinksPendingVerification"></select></label>
+              <label>申请撤回：选择待核实或已人工核实的学生
+                <select name="withdraw_association" data-options="studentLinksWithdrawable"></select></label>
+              <label>人工核实依据类型（仅申请核实时使用）
+                <select name="basis_kind">
+                  <option value="student_consultation">单名学生明确提及的实际咨询材料</option>
+                  <option value="independent_student_confirmation">指定学生关联的独立确认记录</option>
+                </select></label>
+              <label>人工确认材料编号或说明（仅申请核实时填写）
+                <input name="confirmation_ref" maxlength="200" placeholder="只填写虚构材料编号，不填敏感个人信息"></label>
+              <label>相关证据引用（虚构）<input name="evidence_ref" maxlength="200" required></label>
+              <label>申请原因<textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <p class="form-hint">核实前需要独立检查指定学生的证据，不能仅凭同一个家长电话。错误撤回是保留历史的状态更正，不删除原线索或改变合同、课时、财务。</p>
+              <button class="primary" type="submit">提交单学生核实／撤回申请</button>
+            </form>
+          </article>
+          <article class="panel" id="student-link-verification-decision-card" hidden>
+            <h3>独立主管审核核实或撤回</h3>
+            <form id="student-link-verification-decision-form" class="field-stack">
+              <label>待审的指定学生
+                <select name="review_id" data-options="pendingStudentLinkReviews" required></select></label>
+              <label>结论 <select name="decision">
+                <option value="approved">批准所选核实或撤回操作</option>
+                <option value="rejected">驳回申请，不修改关联</option>
+              </select></label>
+              <label>独立复核理由<textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <label>虚构独立核对材料<input name="evidence_ref" maxlength="200" required></label>
+              <p class="form-hint">批准核实不会认定监护身份；存在对应学生的下游商机时，不能直接批准撤回。</p>
+              <button class="primary" type="submit">保存独立核实或撤回结论</button>
+            </form>
+          </article>
+        </div>
+        <div class="two-col space-top">
+          <article class="panel"><h3>单学生关联的当前状态</h3><div id="student-link-current-list" class="record-list"></div></article>
+          <article class="panel"><h3>核实／撤回的审批历史</h3><div id="student-link-reviews-list" class="record-list"></div></article>
+        </div>
+      </div>
       <article class="panel space-top" id="strict-consultation-card" hidden>
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>
