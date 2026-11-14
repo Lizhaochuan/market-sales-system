@@ -24,11 +24,11 @@ test('V3.2-56 M01 event chronology requires staff-only scope and no raw audit fi
  assert.ok(!sql.includes('GRANT SELECT ON ms.audit_events'));
  assert.ok(!sql.includes('CREATE TABLE ms.audit_events'));
  const app=read('src/app.mjs'),adapter=read('src/scoped-legacy-read-adapter.mjs');
- for(const x of ['listChannelAuditHistory',"['listChannelChangeRequests','listChannelAuditHistory',",
+ for(const x of ['listChannelAuditHistory',"['listCampaignDrafts','createCampaignDraft','listChannelChangeRequests','listChannelAuditHistory',",
    '/api\\/v1\\/marketing-channels\\/change-requests\\/audit-history'])
   assert.ok(app.includes(x),'Strict audit route missing '+x);
  for(const x of ["'listChannelAuditHistory'","FROM ms.scoped_isolated_channel_audit_history",
-   "['listChannelChangeRequests','listChannelAuditHistory'].includes(operation)&&r.rows.length>100"])
+   "['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts'].includes(operation)&&r.rows.length>100"])
   assert.ok(adapter.includes(x),'Audit read bound missing '+x);
  const openapi=JSON.parse(read('api/openapi/m01-isolated-channel-maintenance.v3.2.json'));
  assert.ok(openapi.paths['/api/v1/marketing-channels/change-requests/audit-history'].get);
