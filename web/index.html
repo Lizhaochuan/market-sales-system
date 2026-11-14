@@ -206,6 +206,32 @@
               <button type="submit" class="primary">保存市场活动草稿</button>
             </form>
           </article>
+          <article class="panel" id="campaign-revise-panel">
+            <h3>修改我负责的活动草稿</h3>
+            <p class="form-hint">每次修改都检查版本，其他人或过期版本不能覆盖；修改仍不代表预算获批或活动启动。</p>
+            <form id="campaign-revise-form" class="field-stack">
+              <label>选择本人草稿
+                <select name="campaign_id" id="campaign-revise-choice" required></select>
+              </label>
+              <p id="campaign-revise-version" class="form-hint">请选择草稿查看当前版本。</p>
+              <label>修改名称
+                <input name="name" minlength="2" maxlength="100" required>
+              </label>
+              <label>计划开始时间（可空）
+                <input type="datetime-local" name="starts_at">
+              </label>
+              <label>计划结束时间（可空）
+                <input type="datetime-local" name="ends_at">
+              </label>
+              <label>计划预算（人民币元，仍未审批）
+                <input name="budget_yuan" inputmode="decimal" required>
+              </label>
+              <label>关联渠道（可多选）
+                <select name="channel_ids" id="campaign-revise-channel-choice" multiple size="5" required></select>
+              </label>
+              <button type="submit" class="primary">保存草稿修改</button>
+            </form>
+          </article>
           <article class="panel">
             <div class="panel-header"><h3>已授权活动草稿</h3><span id="campaigns-total" class="count">0 条</span></div>
             <p id="campaigns-status" role="status" class="form-hint">只显示自己负责的草稿；主管可查看同机构草稿。</p>
