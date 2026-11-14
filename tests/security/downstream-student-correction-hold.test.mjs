@@ -134,9 +134,12 @@ test('V3.2-22 downstream incorrect-student case: exact scope, audit and sales-pr
     [quote],'23514');
    // Receipt ingestion/accounting remains under the external finance authority;
    // never drop a real financial fact as a by-product of a sales dispute.
+   const additionalReceipt=(await root.query(
+    "INSERT INTO ms.payment_receipt_projections(authority_system,external_payment_id,amount_cents) VALUES('fictional-fixture',$1,900) RETURNING id",
+    ['fictional-'+randomUUID()])).rows[0].id;
    await root.query(
     'INSERT INTO ms.payment_allocations(receipt_id,order_id,allocated_cents) VALUES($1,$2,400)',
-    [receipt,order]);
+    [additionalReceipt,order]);
    assert.equal((await root.query('SELECT count(*)::int AS n FROM ms.payment_allocations WHERE order_id=$1',
     [order])).rows[0].n,2);
    assert.equal((await root.query('SELECT count(*)::int AS n FROM ms.sales_orders WHERE id=$1',
