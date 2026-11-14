@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-57",
-    "description": "仅虚构机构、经批准的签名员工和 CI 可销毁数据库。计划预算不是支出许可。"
+    "version": "v3.2-58",
+    "description": "Isolated fictional campaigns: creation and owner-only optimistic-lock draft revisions. No campaign launch, approved spending or production integration."
   },
   "x-contract-status": "isolated-implemented",
   "x-production-integration-allowed": false,
@@ -136,6 +136,102 @@
           },
           "500": {
             "description": "不可确定结果时拒绝返回敏感数据"
+          }
+        }
+      }
+    },
+    "/api/v1/marketing-campaigns/drafts/{campaign_id}/revisions": {
+      "post": {
+        "operationId": "reviseOwnScopedCampaignDraft",
+        "summary": "仅草稿原负责人可用当前版本安全修改虚构活动的计划字段",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "campaign_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected_version",
+                  "name",
+                  "budget_cents",
+                  "channel_ids"
+                ],
+                "properties": {
+                  "expected_version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483645
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 100
+                  },
+                  "starts_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "ends_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true
+                  },
+                  "budget_cents": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100000000000
+                  },
+                  "channel_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "返回草稿版本 +1 的结果；同一请求编号重放返回原版本"
+          },
+          "403": {
+            "description": "非草稿原负责人、授权失效或跨机构"
+          },
+          "409": {
+            "description": "版本已过期或防重复编号冲突，不覆盖当前数据"
+          },
+          "422": {
+            "description": "非法计划字段、非本机构或停用渠道、非草稿状态"
+          },
+          "500": {
+            "description": "隔离环境后端错误时不返回业务数据"
           }
         }
       }
