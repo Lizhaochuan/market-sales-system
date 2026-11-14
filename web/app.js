@@ -230,7 +230,8 @@ function render(){
         '项退款分配、'+x.trial_count+'项试课',
       ({pending:'待核查：已阻止新的销售推进',
         hold_active:'已批准隔离：下游纠错尚未完成',
-        rejected:'隔离已驳回：未修改原业务'})[x.status]||'需进一步核查','险'));
+        rejected:'隔离已驳回：未修改原业务',
+        released:'误报经过第二位独立主管核实：隔离已解除'})[x.status]||'需进一步核查','险'));
   }
   $('student-link-verification-workbench').hidden=!state.strict;
   $('student-link-verification-decision-card').hidden=!state.strict||
