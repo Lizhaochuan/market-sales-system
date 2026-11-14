@@ -69,8 +69,10 @@ BEGIN
     'missing_events',
      (SELECT count(*)::integer FROM ms.integration_missing_evidence_events e
       WHERE e.check_code=c.check_code AND e.organization_id=org AND
-       e.source_request_id=CASE c.department
-        WHEN 'academic' THEN a.id ELSE f.id END)
+        ((c.department='academic' AND e.source_request_id=a.id) OR
+         (c.department='finance' AND e.source_request_id=f.id) OR
+         (c.department IN('sales','security') AND
+          e.source_request_id IN (f.id,a.id))))
    ) ORDER BY c.department,c.check_code),'[]'::jsonb),
   count(*)::integer
  INTO checklist,total_count
