@@ -123,6 +123,18 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
    if(permission.rows[0]?.permitted!==true){
     send(res,403,'FORBIDDEN','签名身份与本机构数据库员工未绑定或已撤销',trace);return;
    }
+   // Recheck after each protected read, immediately before sending its result.
+   // This closes the tested gap when a bound identity is revoked during a read.
+   // It does not claim cancellation of previously delivered responses.
+   const confirmStillAuthorized=async()=>{
+    const recheck=await client.query(
+     'SELECT ms.scoped_employee_identity_valid($1,$2) AS permitted',
+     [claims.issuer,claims.subject]);
+    if(recheck.rows[0]?.permitted!==true){
+     send(res,403,'FORBIDDEN','签名身份已撤销，不能返回只读内容',trace);return false;
+    }
+    return true;
+   };
    if(isList){
     const result=await client.query(
      'SELECT source_request_id,department,required_gate_count,'+
@@ -132,6 +144,7 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
     if(result.rows.some(r=>r.production_integration_allowed!==false||
       r.execution_allowed!==false||r.release_allowed!==false))
       throw Error('Preview must remain blocked');
+    if(!(await confirmStillAuthorized()))return;
     send(res,200,'OK','已查询本机构受限待办清单',trace,{
      items:result.rows.map(r=>({
       request_id:r.source_request_id,department:r.department,
@@ -148,6 +161,7 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
     const state=value.rows[0]?.result;
     if(!state||state.execution_allowed!==false||state.release_allowed!==false||
       state.production_integration_allowed!==false)throw Error('Unsafe freeze state');
+    if(!(await confirmStillAuthorized()))return;
     send(res,200,'OK','历史冻结状态仅供只读审计',trace,{freeze_state:state});return;
    }
    if(historyMatch||diffMatch){
@@ -182,10 +196,12 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
     const history=verifyBlockedFixtureHistory(historyRaw);
     if(diffMatch?.[4]){
      const markdown=renderBlockedFixtureHistoryMarkdown(historyRaw);
+     if(!(await confirmStillAuthorized()))return;
      res.writeHead(200,{...headers('text/markdown; charset=utf-8'),
       'Content-Disposition':'attachment; filename="uat-audit-'+reportId+'-'+from+'-'+to+'.md"'});
      res.end(markdown);return;
     }
+    if(!(await confirmStillAuthorized()))return;
     send(res,200,'OK','虚构证据历史差异只读预览，真实联调仍被阻断',trace,{history});return;
    }
    const result=await client.query(
@@ -195,10 +211,12 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
    const report=buildBlockedUatTasks(raw);
    if(match[2]){
     const markdown=renderBlockedUatMarkdown(raw);
+    if(!(await confirmStillAuthorized()))return;
     res.writeHead(200,{...headers('text/markdown; charset=utf-8'),
      'Content-Disposition':'attachment; filename="uat-blockers-'+match[1]+'.md"'});
     res.end(markdown);return;
    }
+   if(!(await confirmStillAuthorized()))return;
    send(res,200,'OK','只读待办预览，真实联调仍被阻断',trace,{report});
   }catch(error){
    const code=String(error?.code||'');
