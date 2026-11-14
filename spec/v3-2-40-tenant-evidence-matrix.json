@@ -1,0 +1,88 @@
+{
+  "schema_version": "v3.2-40-evidence-matrix-v1",
+  "parent_pr": 46,
+  "scope": "fixture-only",
+  "evidence_classification": "EXISTING_TEST_SOURCE_INSPECTED_NOT_LIVE_UAT",
+  "ci_latest_head_required": true,
+  "production_integration_allowed": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "real_business_uat_completed": false,
+  "new_migration": false,
+  "hold_active_required": true,
+  "checks": [
+    {
+      "id": "T01",
+      "claim": "restricted_role_denies_direct_business_table_access",
+      "evidence": "tests/security/uat-preview-api.test.mjs",
+      "anchor": "dedicated login has read-only access and no raw business or write privilege",
+      "status": "EXISTING_FIXTURE_TEST"
+    },
+    {
+      "id": "T02",
+      "claim": "two_tenants_source_list_and_report_isolated",
+      "evidence": "tests/security/uat-preview-api.test.mjs",
+      "anchor": "A sees only A; B sees only B, including direct report calls",
+      "status": "EXISTING_FIXTURE_TEST"
+    },
+    {
+      "id": "T03",
+      "claim": "signed_identity_and_unbound_actor_denied",
+      "evidence": "tests/security/uat-preview-api.test.mjs",
+      "anchor": "no bearer, wrong signature and wrong approved user denied",
+      "status": "EXISTING_FIXTURE_TEST"
+    },
+    {
+      "id": "T04",
+      "claim": "finance_academic_12_checks_stay_blocked",
+      "evidence": "tests/security/integration-uat-readonly-db.test.mjs",
+      "anchor": "finance and academic each receive 12 applicable blocked UAT steps",
+      "status": "EXISTING_FIXTURE_TEST"
+    },
+    {
+      "id": "T05",
+      "claim": "direct_payment_and_lesson_mutation_denied",
+      "evidence": "tests/security/integration-uat-readonly-db.test.mjs",
+      "anchor": "UPDATE ms.payment_allocations SET id=id WHERE FALSE",
+      "status": "EXISTING_FIXTURE_TEST"
+    },
+    {
+      "id": "T06",
+      "claim": "fixture_source_approval_cannot_escalate",
+      "evidence": "tests/security/fixture-source-registration-readiness.test.mjs",
+      "anchor": "production_source_approved",
+      "status": "EXISTING_FIXTURE_TEST"
+    },
+    {
+      "id": "T07",
+      "claim": "real_role_revocation_and_external_permissions",
+      "evidence": null,
+      "anchor": null,
+      "status": "NOT_PROVEN"
+    },
+    {
+      "id": "T08",
+      "claim": "production_finance_crm_tenant_mapping",
+      "evidence": null,
+      "anchor": null,
+      "status": "NOT_PROVEN"
+    },
+    {
+      "id": "T09",
+      "claim": "recovery_backup_restore_and_authority_watermark",
+      "evidence": null,
+      "anchor": null,
+      "status": "NOT_PROVEN"
+    },
+    {
+      "id": "T10",
+      "claim": "independent_real_uat_signoff",
+      "evidence": null,
+      "anchor": null,
+      "status": "NOT_PROVEN"
+    }
+  ],
+  "audit_assertion": "SOURCES_AND_GATES_ONLY_NOT_REAL_SECURITY_CERTIFICATION"
+}
