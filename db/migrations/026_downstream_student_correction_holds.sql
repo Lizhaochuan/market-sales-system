@@ -298,14 +298,14 @@ BEGIN
     opportunity_id:=NULLIF(src->>'opportunity_id','')::uuid;
    ELSIF TG_TABLE_NAME IN('quote_items','discount_approvals') THEN
     quote_id:=NULLIF(src->>'quote_id','')::uuid;
-    SELECT opportunity_id INTO opportunity_id FROM ms.quotes WHERE id=quote_id;
+    SELECT q.opportunity_id INTO opportunity_id FROM ms.quotes q WHERE q.id=quote_id;
    ELSIF TG_TABLE_NAME='sales_order_items' THEN
     order_id:=NULLIF(src->>'order_id','')::uuid;
-    SELECT opportunity_id INTO opportunity_id FROM ms.sales_orders WHERE id=order_id;
+    SELECT so.opportunity_id INTO opportunity_id FROM ms.sales_orders so WHERE so.id=order_id;
    END IF;
    IF opportunity_id IS NOT NULL THEN
-    SELECT originating_lead_id,student_id INTO lead_id,student_id
-    FROM ms.opportunities WHERE id=opportunity_id;
+    SELECT o.originating_lead_id,o.student_id INTO lead_id,student_id
+    FROM ms.opportunities o WHERE o.id=opportunity_id;
    END IF;
   END IF;
   IF ms.student_downstream_pair_on_hold(lead_id,student_id) THEN
