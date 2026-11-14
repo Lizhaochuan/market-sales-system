@@ -19,8 +19,11 @@ const denied=reason_code=>Object.freeze({reason_code,
  production_integration_allowed:false});
 function validateSnapshot(snapshot,org,incident){
  if(!exact(snapshot,['organization_id','incident_id','generation','sources'])||
-  snapshot.organization_id?.toLowerCase()!==org||
-  snapshot.incident_id?.toLowerCase()!==incident||
+  typeof snapshot.organization_id!=='string'||
+  typeof snapshot.incident_id!=='string'||
+  !UUID.test(snapshot.organization_id)||!UUID.test(snapshot.incident_id)||
+  snapshot.organization_id.toLowerCase()!==org||
+  snapshot.incident_id.toLowerCase()!==incident||
   !pos(snapshot.generation)||!Array.isArray(snapshot.sources)||
   snapshot.sources.length!==REQUIRED.length)return null;
  const seen=new Set(),sources=[];
@@ -102,7 +105,8 @@ export function createIsolatedRecoveryReconfirmation({getFixtureSnapshot,getFixt
   return record;
  }
  function check({organization_id,incident_id,source_digest}={}){
-  if(!UUID.test(organization_id)||!UUID.test(incident_id)||!SHA.test(source_digest))
+  if(!exact(arguments[0],['organization_id','incident_id','source_digest'])||
+   !UUID.test(organization_id)||!UUID.test(incident_id)||!SHA.test(source_digest))
    return denied('INVALID_RECONFIRMATION_REFERENCE');
   const org=organization_id.toLowerCase(),incident=incident_id.toLowerCase();
   let current;
