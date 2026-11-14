@@ -1,0 +1,50 @@
+{
+  "schema_version": "v3.2-52-m01-chinese-channel-workbench-v1",
+  "parent_pr": 58,
+  "verified_parent_head": "1b2c67e96ab6502c0cf8e82fe7c7d8e00f9aa79d",
+  "verified_parent_ci": {
+    "run_id": 43589267498,
+    "conclusion": "success",
+    "classification": "ISOLATED_CI_ONLY"
+  },
+  "module": "M01",
+  "scope": "ISOLATED_DEMO_UI_CHANNEL_DIRECTORY",
+  "html": "web/index.html",
+  "js": "web/app.js",
+  "catalog_source": "src/marketing-channel-catalog.mjs",
+  "browser_regression": "tests/browser/m01-channels.spec.mjs",
+  "http_route": "GET /api/v1/marketing-channels",
+  "openapi": "api/openapi/m01-isolated-channel-catalog.v3.2.json",
+  "channel_status_enum": [
+    "active",
+    "inactive",
+    "inactive_inherited"
+  ],
+  "source_read_scope": "SAME_ORGANIZATION_FROM_AUTHENTICATED_DEMO_EMPLOYEE",
+  "ui_data_built_with_textContent": true,
+  "browser_security_cases": [
+    "script_name_escaped",
+    "explicit_inactive_vs_inherited_inactive",
+    "failed_refresh_clears_previous_names",
+    "logout_clears_cached_names",
+    "narrow_screen"
+  ],
+  "strict_staff_mode_visible": false,
+  "strict_staff_read_enabled": false,
+  "new_marketing_channel_write_api": false,
+  "official_marketing_attribution_completed": false,
+  "real_finance_crm_connected": false,
+  "production_integration_allowed": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "student_primary": true,
+  "family_optional": true,
+  "wrong_student_with_downstream_hold_active_required": true,
+  "preserve_original_orders_payments_saleevents_lessons": true,
+  "external_contract_status": "proposed-unimplemented",
+  "new_migration": false,
+  "expected_migrations": 38,
+  "latest_head_ci": "PENDING"
+}
