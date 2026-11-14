@@ -21,7 +21,7 @@ export const migratedLegacyReads=new Set([
 
 const listQueries={
   listCampaignDrafts:
-    'SELECT campaign_id,name,starts_at,ends_at,owner_user_id,budget_cents,status,channel_ids FROM ms.scoped_isolated_campaign_drafts ORDER BY name,campaign_id LIMIT 101',
+    'SELECT campaign_id,name,starts_at,ends_at,owner_user_id,budget_cents,status,channel_ids,version FROM ms.scoped_isolated_campaign_drafts ORDER BY name,campaign_id LIMIT 101',
   listChannelAuditHistory:
     'SELECT audit_id,request_id,event_name,actor_user_id,happened_at,action,status,requested_by FROM ms.scoped_isolated_channel_audit_history ORDER BY happened_at DESC,audit_id LIMIT 101',
   listChannelChangeRequests:
