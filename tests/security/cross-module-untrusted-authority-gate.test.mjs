@@ -19,6 +19,7 @@ const preflight='SELECT ms.record_cross_module_blocked_preflight($1,$2,$3) AS re
 const candidate='SELECT ms.record_cross_module_untrusted_source_candidate('+
  '$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result';
 const gate='SELECT ms.cross_module_readonly_authority_gate($1) AS result';
+const trustGate='SELECT ms.cross_module_readonly_source_trust_gate($1) AS result';
 
 test('V3.2-27 unverified source contracts cannot grant execution or unlock quarantine',async t=>{
  const root=pool('DATABASE_URL'),a=pool('DATABASE_URL_WRITE_A'),
@@ -134,6 +135,14 @@ test('V3.2-27 unverified source contracts cannot grant execution or unlock quara
 
   await t.test('no recording before local inventory is sealed and complete',async()=>{
    await deny(finance,candidate,financeArgs,'23514');
+   const initialTrust=await one(planA,trustGate,[mid]);
+   assert.equal(initialTrust.execution_allowed,false);
+   assert.equal(initialTrust.release_allowed,false);
+   assert.equal(initialTrust.production_finance_source_bound,false);
+   assert.equal(initialTrust.production_crm_source_bound,false);
+   assert.equal(initialTrust.production_durable_replay_ledger_ready,false);
+   assert.equal(initialTrust.readonly_fixture_signature_test_available,true);
+   await deny(financeB,trustGate,[mid],'42501');
    const initial=await one(planA,gate,[mid]);
    assert.equal(initial.execution_allowed,false);
    assert.equal(initial.release_allowed,false);
@@ -195,6 +204,15 @@ test('V3.2-27 unverified source contracts cannot grant execution or unlock quara
    assert.equal(result.three_party_plan_approved,true);
    assert.equal(result.execution_allowed,false);
    assert.equal(result.release_allowed,false);
+   const trust=await one(independent,trustGate,[mid]);
+   assert.equal(trust.production_source_signatures_authenticated,false);
+   assert.equal(trust.production_complete_watermark_verified,false);
+   assert.equal(trust.production_finance_reconciled,false);
+   assert.equal(trust.production_crm_reconciled,false);
+   assert.equal(trust.production_compensation_authorized,false);
+   assert.equal(trust.execution_allowed,false);
+   assert.equal(trust.release_allowed,false);
+   assert.equal(trust.additional_blockers_zh.length,3);
    assert.equal((await root.query('SELECT student_id FROM ms.sales_orders WHERE id=$1',[c.order])).rows[0].student_id,c.wrong);
    assert.equal((await root.query('SELECT status FROM ms.lead_student_downstream_correction_cases WHERE id=$1',[c.caseId])).rows[0].status,'hold_active');
   });
