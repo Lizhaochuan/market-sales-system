@@ -13,6 +13,7 @@ export const migratedLegacyReads=new Set([
   'listCampaignFinanceIncidents',
   'listCampaignFinanceIncidentHistory',
   'listCampaignFinanceEscalationFollowups',
+  'listCampaignFinanceEscalationEvidenceGates',
   'listChannelChangeRequests',
   'listChannelAuditHistory',
   'listStudents','listContacts','listEvents','listLeads','listOpportunities',
@@ -25,6 +26,8 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listCampaignFinanceEscalationEvidenceGates:
+    'SELECT incident_id,review_id,incident_status,reporter_evidence_present,independent_sales_review_present,finance_requirements_documented,sales_packet_complete,sales_packet_status,finance_acceptance_verified,academic_acceptance_verified,cross_department_accepted,hold_active,finance_authorized,execution_allowed FROM ms.scoped_isolated_campaign_escalation_evidence_gates ORDER BY incident_id LIMIT 101',
   listCampaignFinanceEscalationFollowups:
     'SELECT followup_id,incident_id,review_id,recorded_by,responsibility_boundary,note_type,created_at,incident_status,finance_authorized,execution_allowed,external_authority_state FROM ms.scoped_isolated_campaign_finance_escalation_followups ORDER BY created_at DESC,followup_id LIMIT 101',
   listCampaignFinanceIncidentHistory:
@@ -154,7 +157,7 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
-      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups'].includes(operation)&&r.rows.length>100)
+      if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');
       data=operation==='listMarketingChannels'
         ?buildIsolatedChannelCatalog(r.rows,context.user.organization_id)
