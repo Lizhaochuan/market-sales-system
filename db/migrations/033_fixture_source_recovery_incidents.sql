@@ -1,6 +1,8 @@
 -- V3.2-30 isolated source interruption and recovery review ONLY.
 -- No data fetch, credential, external job, finance/CRM writes or release.
 BEGIN;
+CREATE ROLE ms_fixture_recovery_writer NOLOGIN;
+GRANT USAGE ON SCHEMA ms TO ms_fixture_recovery_writer;
 CREATE TABLE ms.fixture_source_recovery_incidents(
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
  organization_id uuid NOT NULL REFERENCES ms.organizations(id),
@@ -153,7 +155,7 @@ REVOKE ALL ON FUNCTION ms.report_fixture_source_interruption(
 GRANT EXECUTE ON FUNCTION ms.report_fixture_source_interruption(
  uuid,text,bigint,bigint,text,text,text),
  ms.review_fixture_source_interruption(uuid,text,text,text,text,text)
- TO ms_cross_module_plan_writer;
+ TO ms_fixture_recovery_writer;
 
 CREATE VIEW ms.scoped_fixture_source_recovery WITH(security_barrier=true) AS
 SELECT i.id AS incident_id,i.source_request_id,i.incident_kind,i.reported_at,
