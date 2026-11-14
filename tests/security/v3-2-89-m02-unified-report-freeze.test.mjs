@@ -89,3 +89,13 @@ test('V3.2-89 concurrent identical freezes write only one immutable record',asyn
  assert.equal(b.reason_code,'BLOCKED_HISTORICAL_FREEZE_REPLAY');
  assert.equal(f.ledger.audit({organization_id:org,incident_id:incident}).length,1);
 });
+
+test('V3.2-89 identical nonce with changed reference is a conflict, not a valid replay',async()=>{
+ const f=fixture();
+ const first=await f.ledger.freeze(f.input());safe(first);
+ const changed={...f.input(),final_reference:{
+  source_digest:'e'.repeat(64),revocation_reference:{}}};
+ const conflict=await f.ledger.freeze(changed);safe(conflict);
+ assert.equal(conflict.reason_code,'FREEZE_IDEMPOTENCY_CONFLICT');
+ assert.equal(f.ledger.audit({organization_id:org,incident_id:incident}).length,1);
+});
