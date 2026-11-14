@@ -138,14 +138,14 @@ export function createIsolatedFreezeInvalidationPlan({freezeRegistry,unifiedRepo
    return deny('INVALID_INVALIDATION_PLAN_INPUT');
   const org=input.organization_id.toLowerCase(),incident=input.incident_id.toLowerCase();
   const scope={organization_id:org,incident_id:incident};
-  let list,verification,current,report,watermark2;
+  let list,verification,current,report,watermark2,found;
   try{
    list=freezeRegistry.audit(scope);
    if(!Array.isArray(list))return deny('FREEZE_AUDIT_UNAVAILABLE');
    verification=await freezeRegistry.verify({...input,organization_id:org,incident_id:incident});
    if(!plain(verification)||verification.hold_active!==true||
     verification.handoff_allowed!==false)return deny('FREEZE_VERIFICATION_PROTOCOL_VIOLATION');
-   const found=list.find(x=>x?.freeze_digest===input.freeze_digest);
+   found=list.find(x=>x?.freeze_digest===input.freeze_digest);
    if(!found||!found.fixture_only||found.organization_id!==org||
     found.incident_id!==incident||!plain(found.observation)||
     !plain(found.observation.watermark)||!plain(found.observation.report)||
