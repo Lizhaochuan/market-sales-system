@@ -271,6 +271,47 @@
               <button type="submit" class="primary">保存销售审核结论</button>
             </form>
           </article>
+          <article class="panel" id="campaign-incident-report-panel" hidden>
+            <h3>登记财务交接资料异常</h3>
+            <p class="form-hint">只登记销售侧资料问题，不代表真实财务部门已接收。</p>
+            <form id="campaign-incident-report-form" class="field-stack">
+              <label>有权访问的交接计划
+                <select name="review_id" id="campaign-incident-report-choice" required></select>
+              </label>
+              <label>异常类型
+                <select name="issue_kind" required>
+                  <option value="supporting_materials_gap">佐证材料缺口</option>
+                  <option value="integrity_mismatch">冻结版本与当前资料不一致</option>
+                </select>
+              </label>
+              <label>问题材料索引<input name="evidence_ref" minlength="2" maxlength="200" required></label>
+              <label>登记原因<textarea name="reason_zh" minlength="2" maxlength="400" required></textarea></label>
+              <button type="submit" class="primary">登记销售侧交接异常</button>
+            </form>
+          </article>
+          <article class="panel" id="campaign-incident-triage-panel" hidden>
+            <h3>独立销售主管异常复核</h3>
+            <p class="form-hint">不得复核本人登记的异常。快照差异必须升级，不得直接关闭。</p>
+            <form id="campaign-incident-triage-form" class="field-stack">
+              <label>有权复核的异常
+                <select name="incident_id" id="campaign-incident-triage-choice" required></select>
+              </label>
+              <label>销售侧处理结论
+                <select name="action" required>
+                  <option value="escalate_manual">人工升级并持续阻断</option>
+                  <option value="close_for_recheck">结束佐证材料核查，仍待真实财务复核</option>
+                </select>
+              </label>
+              <label>复核材料索引<input name="evidence_ref" minlength="2" maxlength="200" required></label>
+              <label>复核理由<textarea name="reason_zh" minlength="2" maxlength="400" required></textarea></label>
+              <button type="submit" class="primary">保存独立销售侧处理</button>
+            </form>
+          </article>
+          <article class="panel" id="campaign-incident-queue-panel">
+            <div class="panel-header"><h3>交接异常记录</h3><span id="campaign-incident-total" class="count">0 条</span></div>
+            <p id="campaign-incident-status" class="form-hint" role="status">异常不得释放财务支出或活动投放权限。</p>
+            <div id="campaign-incident-list" class="record-list"></div>
+          </article>
           <article class="panel" id="campaign-finance-queue-panel">
             <div class="panel-header"><h3>财务交接清单（只读、未授权）</h3><span id="campaign-finance-total" class="count">0 条</span></div>
             <p id="campaign-finance-status" class="form-hint" role="status">销售审核通过后，仅准备计划资料；真实财务核验尚未接入。</p>

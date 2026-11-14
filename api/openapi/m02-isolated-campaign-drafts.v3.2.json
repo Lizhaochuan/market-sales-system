@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-61",
+    "version": "v3.2-62",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -424,6 +424,176 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents": {
+      "get": {
+        "operationId": "listIsolatedFinanceIncidents",
+        "summary": "Employee-scoped sales-side incident records, never finance approval",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "100 or fewer minimal scoped records; no raw evidence"
+          },
+          "403": {
+            "description": "Restricted staff identity required"
+          },
+          "500": {
+            "description": "Fail closed on projection errors"
+          }
+        }
+      }
+    },
+    "/api/v1/marketing-campaigns/finance-handoffs/{review_id}/incidents": {
+      "post": {
+        "operationId": "reportIsolatedFinanceIncident",
+        "summary": "CI-only sales-side triage; no finance authorization",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "issue_kind",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "issue_kind": {
+                    "type": "string",
+                    "enum": [
+                      "integrity_mismatch",
+                      "supporting_materials_gap"
+                    ]
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "reason_zh": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 400
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Incident status only; finance_authorized=false"
+          },
+          "403": {
+            "description": "Unapproved employee or self review"
+          },
+          "409": {
+            "description": "Conflicting replay or active incident"
+          },
+          "422": {
+            "description": "Invalid triage request"
+          }
+        }
+      }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/{incident_id}/decision": {
+      "post": {
+        "operationId": "triageIsolatedFinanceIncident",
+        "summary": "CI-only sales-side triage; no finance authorization",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "escalate_manual",
+                      "close_for_recheck"
+                    ]
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "reason_zh": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 400
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Incident status only; finance_authorized=false"
+          },
+          "403": {
+            "description": "Unapproved employee or self review"
+          },
+          "409": {
+            "description": "Conflicting replay or active incident"
+          },
+          "422": {
+            "description": "Invalid triage request"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
@@ -431,5 +601,6 @@
   "x-campaign-publishing-implemented": false,
   "x-finance-handoff-readonly": true,
   "x-finance-handoff-execution-allowed": false,
-  "x-finance-readiness-does-not-authorize-spend": true
+  "x-finance-readiness-does-not-authorize-spend": true,
+  "x-finance-incidents-never-authorize-spend": true
 }
