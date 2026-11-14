@@ -83,7 +83,7 @@ CREATE FUNCTION ms.request_custody_review(
 ) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,ms AS $f$
 DECLARE actor uuid;org uuid;a ms.contact_custody_assignments%ROWTYPE;
- c ms.contacts%ROWTYPE; prior_request ms.contact_custody_requests%ROWTYPE;
+ c ms.contacts%ROWTYPE;contact_ref uuid; prior_request ms.contact_custody_requests%ROWTYPE;
  old ms.contact_custody_reviews%ROWTYPE;new_id uuid;
 BEGIN
  SELECT staff_id,org_id INTO actor,org FROM ms.access_actor();
@@ -102,12 +102,12 @@ BEGIN
    RAISE EXCEPTION '防重复编号发生冲突' USING ERRCODE='23505';
  END IF;
  -- The contact lock serializes against subsequent custody approvals.
- SELECT a.contact_id INTO a.contact_id
- FROM ms.contact_custody_assignments a WHERE a.id=p_assignment;
- IF a.contact_id IS NULL THEN RAISE EXCEPTION '无权复核该项交接'
+ SELECT x.contact_id INTO contact_ref
+ FROM ms.contact_custody_assignments x WHERE x.id=p_assignment;
+ IF contact_ref IS NULL THEN RAISE EXCEPTION '无权复核该项交接'
    USING ERRCODE='42501'; END IF;
  SELECT * INTO c FROM ms.contacts
- WHERE id=a.contact_id AND organization_id=org AND archived_at IS NULL FOR UPDATE;
+ WHERE id=contact_ref AND organization_id=org AND archived_at IS NULL FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION '联系人不在当前机构'
    USING ERRCODE='42501'; END IF;
  SELECT * INTO a FROM ms.contact_custody_assignments
