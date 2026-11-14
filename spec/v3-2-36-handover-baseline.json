@@ -1,0 +1,291 @@
+{
+  "schema_version": "v3.2-36-handover-v1",
+  "repository": "Lizhaochuan/market-sales-system",
+  "baseline_sha": "f412d95ae01cbe7a108a006c637b34587cad4f57",
+  "baseline_draft_pr": 42,
+  "scope": "independent-market-sales-only",
+  "production_integration_allowed": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "real_finance_source_connected": false,
+  "real_crm_source_connected": false,
+  "live_authority_verified": false,
+  "real_business_uat_completed": false,
+  "production_release_authorized": false,
+  "student_primary_management_unit": true,
+  "family_relation_optional": true,
+  "original_order_mutation_allowed": false,
+  "original_payment_allocation_mutation_allowed": false,
+  "original_lesson_history_mutation_allowed": false,
+  "wrong_student_downstream_hold_required": true,
+  "v3_2_23_mistaken_link_release_usable_for_downstream_wrong_student": false,
+  "contract_state": "proposed-unimplemented",
+  "phase_range": {
+    "first": "V3.2-24",
+    "last": "V3.2-35",
+    "phase_count": 12
+  },
+  "migrations": {
+    "first": "001",
+    "last": "038",
+    "expected_count": 38,
+    "new_migration_this_stage": false
+  },
+  "phases": [
+    {
+      "version": "V3.2-24",
+      "kind": "design_only",
+      "migration": null,
+      "docs": [
+        "docs/V3.2-24_CROSS_MODULE_WRONG_STUDENT_CORRECTION_DESIGN.md",
+        "docs/V3.2-24_CROSS_MODULE_CORRECTION_ACCEPTANCE.md"
+      ],
+      "scope": "错误学生已有订单/资金/履约时三方职责、R01-R10 和预期验收 C01-C29；未实际执行"
+    },
+    {
+      "version": "V3.2-25",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/028_three_party_correction_plan_approvals.sql",
+      "docs": [
+        "docs/V3.2-25_THREE_PARTY_PLAN_APPROVALS_ISOLATED.md"
+      ],
+      "scope": "同版三方独立方案审批；审批不等于执行"
+    },
+    {
+      "version": "V3.2-26",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/029_compensation_scope_and_blocked_preflight.sql",
+      "docs": [
+        "docs/V3.2-26_COMPENSATION_MANIFEST_AND_BLOCKED_PREFLIGHT.md"
+      ],
+      "scope": "只追加拟议补偿清单，预审恒为阻断"
+    },
+    {
+      "version": "V3.2-27",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/030_untrusted_authority_candidates_and_readonly_gate.sql",
+      "docs": [
+        "docs/V3.2-27_FINANCE_CRM_AUTHORITY_CONTRACT_READONLY_GATE.md"
+      ],
+      "scope": "不可信财务/CRM候选与只读拒绝执行"
+    },
+    {
+      "version": "V3.2-28",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/031_readonly_source_trust_readiness_gate.sql",
+      "docs": [
+        "docs/V3.2-28_READONLY_SOURCE_TRUST_AND_WATERMARK_PREPARATION.md"
+      ],
+      "scope": "签名信任与来源水位准备；未可信接入"
+    },
+    {
+      "version": "V3.2-29",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/032_fixture_source_registration_readiness.sql",
+      "docs": [
+        "docs/V3.2-29_FIXTURE_SOURCE_REGISTRATION_READINESS.md"
+      ],
+      "scope": "虚构来源登记及独立模拟审核"
+    },
+    {
+      "version": "V3.2-30",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/033_fixture_source_recovery_incidents.sql",
+      "docs": [
+        "docs/V3.2-30_FIXTURE_SOURCE_INTERRUPTION_RECOVERY.md"
+      ],
+      "scope": "虚构来源故障登记及独立恢复复核；保持未知与隔离"
+    },
+    {
+      "version": "V3.2-31",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/034_preintegration_authority_hard_gates.sql",
+      "docs": [
+        "docs/V3.2-31_REAL_AUTHORITY_PREINTEGRATION_HARD_GATES.md"
+      ],
+      "scope": "16项跨销售财务教务安全真实联调准入永远阻断"
+    },
+    {
+      "version": "V3.2-32",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/035_readonly_integration_uat_report.sql",
+      "docs": [
+        "docs/V3.2-32_CROSS_DEPARTMENT_UAT_MANUAL_AND_BLOCKER_REPORT.md"
+      ],
+      "scope": "只读 UAT 任务报告、证据/负责人/拒绝条件"
+    },
+    {
+      "version": "V3.2-33",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/036_scoped_uat_preview_reader.sql",
+      "docs": [
+        "docs/V3.2-33_CHINESE_UAT_PREVIEW_AND_RESTRICTED_EXPORT.md"
+      ],
+      "scope": "本机隔离的受限中文 UAT 页面及 Markdown 预览"
+    },
+    {
+      "version": "V3.2-34",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/037_immutable_fixture_uat_evidence_diff.sql",
+      "docs": [
+        "docs/V3.2-34_UAT_FIXTURE_EVIDENCE_DIFF_IMMUTABLE_AUDIT.md"
+      ],
+      "scope": "虚构引用新增/撤销不可变历史及版本差异"
+    },
+    {
+      "version": "V3.2-35",
+      "kind": "isolated_fixture",
+      "migration": "db/migrations/038_fixture_uat_security_freeze_and_consistent_export.sql",
+      "docs": [
+        "docs/V3.2-35_ONE_WAY_UAT_FREEZE_REVOCATION_CONSISTENT_EXPORT.md"
+      ],
+      "scope": "虚构审计单向冻结、权限撤销与历史版本一致性导出"
+    }
+  ],
+  "responsibility_checks": {
+    "sales": [
+      "sales_contract_party",
+      "sales_attribution_policy",
+      "sales_release_responsibility"
+    ],
+    "finance": [
+      "finance_authority_owner",
+      "finance_tenant_order_mapping",
+      "finance_readonly_credentials",
+      "finance_reconciliation"
+    ],
+    "academic": [
+      "academic_authority_owner",
+      "academic_tenant_student_mapping",
+      "academic_readonly_credentials",
+      "academic_attendance_balance"
+    ],
+    "security": [
+      "security_source_trust",
+      "security_durable_replay",
+      "security_complete_watermark",
+      "security_incident_recovery",
+      "security_independent_uat"
+    ]
+  },
+  "release_requirements": [
+    {
+      "id": "R01",
+      "description": "指定原案件且错绑下游 hold_active，历史完整",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R02",
+      "description": "原学生/目标学生与合同权利义务经独立确证；不从家庭推断",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R03",
+      "description": "不同自然人的销售/财务/教务最新同版真实签署，角色持续有效",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R04",
+      "description": "订单、收退款、SaleEvent、课包、实授消课等原始事实及变更历史齐全",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R05",
+      "description": "每项补偿已由正式权威系统执行且终局回执可验证，未知不得算成功",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R06",
+      "description": "财务账套/资金来源/退款/拒付/分配一致，金额守恒且无未解争议",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R07",
+      "description": "CRM 课包、实上/已消、剩余权益与原始学生均由权威核对，无重复发课",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R08",
+      "description": "销售新旧关联/订单/归因和佣金按合法政策一致，历史 SaleEvent 不重计",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R09",
+      "description": "末次版本/来源水位/并发锁/账号权限复核，无迟到或未解决事件",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    },
+    {
+      "id": "R10",
+      "description": "三方执行后核账独立签署且终审人授权，另有不可变释放决定，仅解除指定销售关联隔离",
+      "acceptance": "BLOCKED_NOT_RUN",
+      "production_pass": false
+    }
+  ],
+  "blocked_dependencies": [
+    {
+      "code": "AUTH-FIN",
+      "owner": "财务负责人 + 支付系统所有人",
+      "request": "正式权威收款/退款来源、机构账套与用途分配、只读授权及实际交易幂等回执",
+      "status": "MISSING_EXTERNAL_APPROVAL"
+    },
+    {
+      "code": "AUTH-CRM",
+      "owner": "教务负责人 + CRM 系统所有人",
+      "request": "正式 CRM tenant/学生/课包映射、已上/已消/余额权威接口、只读授权与超时结果查询",
+      "status": "MISSING_EXTERNAL_APPROVAL"
+    },
+    {
+      "code": "AUTH-CONTRACT",
+      "owner": "销售负责人 + 合同签约责任人",
+      "request": "正确学生独立确权、合同主体与更正/撤销、佣金与多学生家庭付款政策",
+      "status": "MISSING_EXTERNAL_APPROVAL"
+    },
+    {
+      "code": "AUTH-SEC",
+      "owner": "信息安全负责人",
+      "request": "真实可信签名/密钥撤销、受众、完整分页水位、持久防重放、跨租户演练",
+      "status": "MISSING_EXTERNAL_APPROVAL"
+    },
+    {
+      "code": "EXEC-FIN",
+      "owner": "财务负责人 + 数据与资金系统所有人",
+      "request": "实际补偿命令、原始经济事件留存、原子守恒与冲正/退款执行权限，必须独立实现",
+      "status": "NOT_IMPLEMENTED"
+    },
+    {
+      "code": "EXEC-CRM",
+      "owner": "教务负责人 + CRM 系统所有人",
+      "request": "实际课包权益补偿命令、领域幂等与回执、已上课留痕与未知结果恢复，必须独立实现",
+      "status": "NOT_IMPLEMENTED"
+    },
+    {
+      "code": "RELEASE",
+      "owner": "销售/财务/教务各自真实负责人 + 独立终审",
+      "request": "R01—R10 全部真实验收并取得新版特权释放决策链，旧 V3.2-23 误报不能复用",
+      "status": "NOT_IMPLEMENTED"
+    },
+    {
+      "code": "OPERATIONS",
+      "owner": "产品/实施负责人 + 安全运维",
+      "request": "生产人员权限审批、合同与安全合规、脱敏审计留存、回滚和灾备、正式跨系统 UAT",
+      "status": "NOT_RUN"
+    }
+  ],
+  "deliverables": {
+    "tech_doc": "docs/V3.2-36_MARKET_SALES_CROSS_MODULE_TECHNICAL_HANDOVER.md",
+    "integration_checklist": "docs/V3.2-36_INTEGRATION_READINESS_AND_DECISION_REGISTER.md",
+    "self": "spec/v3-2-36-handover-baseline.json"
+  },
+  "requires_manual_external_approval": true,
+  "merge_authorized": false,
+  "deploy_authorized": false
+}
