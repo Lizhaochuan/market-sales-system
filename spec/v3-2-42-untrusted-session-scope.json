@@ -1,0 +1,30 @@
+{
+  "schema_version": "v3.2-42-untrusted-session-scope-v1",
+  "parent_pr": 48,
+  "scope": "isolated-postgresql-fixture-regression",
+  "candidate_untrusted_contexts": [
+    "app.tenant_id",
+    "app.organization_id",
+    "app.staff_id",
+    "app.role",
+    "request.jwt.claims"
+  ],
+  "expected_source_of_trust": "SESSION_USER_AND_DATABASE_SCOPED_PRINCIPAL",
+  "expected_cross_tenant_sqlstate": "42501",
+  "test_uses_fictional_source_request": true,
+  "production_integration_allowed": false,
+  "execution_allowed": false,
+  "release_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "live_authority_verified": false,
+  "real_business_uat_completed": false,
+  "real_finance_source_connected": false,
+  "real_crm_source_connected": false,
+  "new_migration": false,
+  "wrong_student_downstream_hold_required": true,
+  "student_primary": true,
+  "family_optional": true,
+  "ci_status": "UNVERIFIED_PENDING_LATEST_HEAD",
+  "contracts": "proposed-unimplemented"
+}
