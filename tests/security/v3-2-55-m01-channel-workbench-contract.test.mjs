@@ -24,7 +24,7 @@ test('V3.2-55 channel approval UI only reads scoped SQL minimal pending and owns
   "if(!strictStaffMode&&['listCampaignDrafts','createCampaignDraft','listChannelChangeRequests','listChannelAuditHistory','requestChannelChange','reviewChannelChange'].includes(route.op))"])
   assert.ok(app.includes(x),'Missing staff restricted route '+x);
  assert.ok(adapter.includes('FROM ms.scoped_isolated_channel_change_requests'));
- assert.ok(adapter.includes("if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts'].includes(operation)&&r.rows.length>100)"));
+ assert.ok(adapter.includes("if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews'].includes(operation)&&r.rows.length>100)"));
  const html=read(m.web_html),js=read(m.web_js);
  for(const x of ['id="channel-maintenance-workbench" hidden',
   'id="channel-request-form"','id="channel-review-form"',
