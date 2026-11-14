@@ -42,6 +42,12 @@ export async function assertUatPreviewPool(pool){
   "has_function_privilege(current_user,"+
     "'ms.readonly_fixture_uat_diff(uuid,integer,integer)','EXECUTE') AS can_audit,"+
   "has_function_privilege(current_user,"+
+    "'ms.readonly_fixture_uat_diff_guarded(uuid,integer,integer,integer)','EXECUTE') AS can_guard_export,"+
+  "has_function_privilege(current_user,"+
+    "'ms.readonly_fixture_uat_freeze_state(uuid)','EXECUTE') AS can_read_freeze,"+
+  "has_function_privilege(current_user,"+
+    "'ms.freeze_fixture_uat_source(uuid,text,text,text)','EXECUTE') AS can_freeze,"+
+  "has_function_privilege(current_user,"+
     "'ms.scoped_employee_identity_valid(text,text)','EXECUTE') AS can_validate_identity,"+
   "has_function_privilege(current_user,"+
     "'ms.readonly_integration_uat_report(uuid)','EXECUTE') AS can_report,"+
@@ -52,7 +58,8 @@ export async function assertUatPreviewPool(pool){
  if(!x||x.principal!==x.login||x.rolsuper||x.rolbypassrls||
   x.raw_orders||x.raw_finance||x.raw_crm||x.raw_uat||x.raw_evidence||x.update_orders||
   x.can_write_gap||x.can_propose||x.can_write_evidence||!x.can_validate_identity||
-  !x.can_report||!x.can_list||!x.can_audit)
+  !x.can_report||!x.can_list||!x.can_audit||!x.can_guard_export||
+  !x.can_read_freeze||x.can_freeze)
    throw Error('UAT preview must use a dedicated function-only and read-only DB LOGIN');
  const p=await pool.query(
    'SELECT ms.current_scoped_staff_id() AS staff_id,'+
@@ -95,10 +102,11 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
    const match=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})(\/markdown)?$/.exec(url.pathname);
    const historyMatch=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})\/history$/.exec(url.pathname);
    const diffMatch=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})\/diff\/([0-9]{1,8})\/([0-9]{1,8})(\/markdown)?$/.exec(url.pathname);
-   if(!isList&&!match&&!historyMatch&&!diffMatch){
+   const freezeMatch=/^\/api\/v1\/uat-preview\/reports\/([0-9a-f-]{36})\/freeze-state$/.exec(url.pathname);
+   if(!isList&&!match&&!historyMatch&&!diffMatch&&!freezeMatch){
     send(res,404,'NOT_FOUND','没有开放该只读操作',trace);return;
    }
-   const reportId=match?.[1]||historyMatch?.[1]||diffMatch?.[1];
+   const reportId=match?.[1]||historyMatch?.[1]||diffMatch?.[1]||freezeMatch?.[1];
    if(reportId&&!UUID.test(reportId)){
     send(res,422,'VALIDATION_ERROR','来源申请编号格式不正确',trace);return;
    }
@@ -135,12 +143,41 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
      }))
     });return;
    }
+   if(freezeMatch){
+    const value=await client.query('SELECT ms.readonly_fixture_uat_freeze_state($1) AS result',[reportId]);
+    const state=value.rows[0]?.result;
+    if(!state||state.execution_allowed!==false||state.release_allowed!==false||
+      state.production_integration_allowed!==false)throw Error('Unsafe freeze state');
+    send(res,200,'OK','历史冻结状态仅供只读审计',trace,{freeze_state:state});return;
+   }
    if(historyMatch||diffMatch){
-    const from=diffMatch?Number(diffMatch[2]):0;
-    const to=diffMatch?Number(diffMatch[3]):null;
-    const result=await client.query(
-     'SELECT ms.readonly_fixture_uat_diff($1,$2,$3) AS report',
-     [reportId,from,to]);
+    let from=diffMatch?Number(diffMatch[2]):0;
+    let to=diffMatch?Number(diffMatch[3]):null;
+    if(historyMatch){
+     const head=await client.query(
+      'SELECT ms.readonly_fixture_uat_freeze_state($1) AS result',[reportId]);
+     const seq=head.rows[0]?.result?.current_sequence;
+     if(!Number.isSafeInteger(seq)||seq<0)throw Error('Invalid history watermark');
+     // Bound this preview to the newest 200 events. Older records remain
+     // available through explicit version-window requests, never truncated.
+     from=Math.max(0,seq-200);to=seq;
+    }
+    const exportAudit=Boolean(diffMatch?.[4]);
+    let result;
+    if(exportAudit){
+     const etag=req.headers['if-match'];
+     if(typeof etag!=='string'||!/^\"(0|[1-9][0-9]{0,7})\"$/.test(etag)){
+      send(res,428,'PRECONDITION_REQUIRED','必须提供预览时的准确历史水位',trace);return;
+     }
+     const expected=Number(etag.slice(1,-1));
+     result=await client.query(
+      'SELECT ms.readonly_fixture_uat_diff_guarded($1,$2,$3,$4) AS report',
+      [reportId,from,to,expected]);
+    }else{
+     result=await client.query(
+      'SELECT ms.readonly_fixture_uat_diff($1,$2,$3) AS report',
+      [reportId,from,to]);
+    }
     const historyRaw=result.rows[0]?.report;
     const history=verifyBlockedFixtureHistory(historyRaw);
     if(diffMatch?.[4]){
@@ -165,14 +202,15 @@ export function createUatPreviewApi(pool,{externalIdentity}={}){
    send(res,200,'OK','只读待办预览，真实联调仍被阻断',trace,{report});
   }catch(error){
    const code=String(error?.code||'');
-   const status=code==='42501'?403:
+   const status=code==='42501'?403:code==='55000'?412:
     code==='AUTH_REQUIRED'||error?.status===401?401:
     code==='22P02'||code==='23514'?422:500;
    const message=status===403?'机构或员工无权查看该来源报告':
     status===401?'员工签名测试凭据无效':
-    status===422?'请求或来源报告无效':'当前只读预览无法完成，请核实隔离环境';
+    status===422?'请求或来源报告无效':
+    status===412?'历史版本已变化或冻结状态不一致':'当前只读预览无法完成，请核实隔离环境';
    send(res,status,status===403?'FORBIDDEN':status===401?'AUTH_REQUIRED':
-    status===422?'VALIDATION_ERROR':'INTERNAL_ERROR',message,trace);
+    status===422?'VALIDATION_ERROR':status===412?'STALE_SNAPSHOT':'INTERNAL_ERROR',message,trace);
   }finally{if(client)client.release();}
  });
 }

@@ -19,6 +19,7 @@ test('真实 Chromium：受限中文 UAT 页面显示待办及脱敏导出、跨
  const restricted=new pg.Pool({connectionString:process.env.DATABASE_URL_UAT_PREVIEW_A,max:2});
  const finance=new pg.Pool({connectionString:process.env.DATABASE_URL_PLAN_FINANCE,max:2});
  const financeB=new pg.Pool({connectionString:process.env.DATABASE_URL_PLAN_B,max:2});
+ const security=new pg.Pool({connectionString:process.env.DATABASE_URL_SOURCE_SECURITY,max:2});
  const keys=generateKeyPairSync('rsa',{modulusLength:2048});
  const jwk={...keys.publicKey.export({format:'jwk'}),kid:'browser-uat-2026',alg:'RS256',use:'sig'};
  const externalIdentity={issuer,audience,jwks:{keys:[jwk]}};
@@ -146,7 +147,18 @@ test('真实 Chromium：受限中文 UAT 页面显示待办及脱敏导出、跨
   expect(auditMd).toContain('禁止解除学生错误关联隔离');
   expect(auditMd).toContain('fictional_browser_history01');
   expect(auditMd).not.toContain(subject);
-    await page.setViewportSize({width:390,height:844});
+  const freezeId=(await security.query(
+   'SELECT ms.freeze_fixture_uat_source($1,$2,$3,$4) AS result',
+   [sourceA,'fixture_security_lock','fictional_browser_freeze',
+    randomUUID().replaceAll('-','')])).rows[0].result;
+  expect(freezeId).toBeTruthy();
+  await page.getByRole('button',{name:'查看待办报告'}).click();
+  await expect(page.locator('#audit-freeze-state')).toContainText('已单向冻结');
+  await expect(page.locator('#audit-current')).toHaveText('2');
+  const blockedAppend=await restricted.query(
+   'SELECT ms.readonly_fixture_uat_diff($1,$2,$3) AS result',[sourceA,0,2]);
+  expect(blockedAppend.rows[0].result.release_allowed).toBe(false);
+  await page.setViewportSize({width:390,height:844});
   await expect(page.getByRole('heading',{name:'跨部门 UAT 待办报告'})).toBeVisible();
   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(1);
@@ -160,6 +172,6 @@ test('真实 Chromium：受限中文 UAT 页面显示待办及脱敏导出、跨
  }finally{
   if(context)await context.close();
   if(server?.listening)await close(server);
-  await Promise.all([owner.end(),restricted.end(),finance.end(),financeB.end()]);
+  await Promise.all([owner.end(),restricted.end(),finance.end(),financeB.end(),security.end()]);
  }
 });
