@@ -1,9 +1,9 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
-  overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],students:['客户管理','学生客户'],
+  overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],campaigns:['获客管理','市场活动'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
   opportunities:['销售管理','销售商机'],interactions:['客户沟通','跟进记录'],
   families:['客户管理','家庭关系核实'],audit:['操作历史','业务变更记录'],identity:['访问安全','员工身份审批']
@@ -256,6 +256,28 @@ function render(){
       x.effective_status==='inactive'?'本渠道已停用':'因上级渠道停用而不可用',
     '渠'));
   renderChannelMaintenance();
+  $('campaign-workbench').hidden=!state.strict;
+  $('campaigns-total').textContent=state.campaignDrafts.length+' 条';
+  $('campaigns-status').textContent=state.campaignLoadError||state.channelLoadError
+    ?'活动草稿或渠道目录读取失败，旧数据已清空，禁止新建。'
+    :'只显示本人负责的草稿和主管有权查看的本机构草稿。预算均为未审批的计划金额。';
+  if(!state.strict||state.campaignLoadError||state.channelLoadError){
+    $('campaigns-list').replaceChildren();
+    $('campaign-channel-choice').replaceChildren();
+    $('campaign-create-panel').hidden=true;
+  }else{
+    $('campaign-create-panel').hidden=false;
+    paint('campaigns-list',state.campaignDrafts,x=>record(
+      x.name,
+      '负责人：'+(x.owner_user_id===state.user?.staff_id?'本人':'同机构授权员工')+
+       ' · 关联渠道：'+x.channel_ids.length+' 个'+
+       ' · 计划开始：'+formatDate(x.starts_at)+
+       ' · 计划结束：'+formatDate(x.ends_at),
+      '草稿 · 计划预算 '+yuan(x.budget_cents)+'（未审批）','活'));
+    const active=state.channels.filter(x=>x.effective_status==='active');
+    setSelect($('campaign-channel-choice'),active,'channel_id',x=>x.name);
+    $('campaign-draft-form').querySelector('button[type="submit"]').disabled=!active.length;
+  }
   paint('students-list',state.students,x=>record(
     x.display_name,'年级：'+(x.grade_label||'未填写')+' · 负责人：'+(x.owner_display_name||'待确认'),'独立档案','学'));
   paint('contacts-list',state.contacts,x=>record(
@@ -411,6 +433,7 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
 }
 async function refresh(){
   const endpoints=state.strict?[
+    ['campaignDrafts','/api/v1/marketing-campaigns/drafts'],
     ['channels','/api/v1/marketing-channels'],
     ['channelRequests','/api/v1/marketing-channels/change-requests'],
     ['channelAuditHistory','/api/v1/marketing-channels/change-requests/audit-history'],
@@ -446,11 +469,28 @@ async function refresh(){
     for(const key of ['leads','opportunities','families'])state[key]=[];
   }
   else {
+    state.campaignDrafts=[];state.campaignLoadError=false;
     state.channelRequests=[];state.channelRequestLoadError=false;
     state.channelAuditHistory=[];state.channelAuditLoadError=false;state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];state.downstreamCorrectionCases=[];state.downstreamCorrectionEligible=[];state.downstreamReconciliations=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
-    if(key==='channels'){
+    if(key==='campaignDrafts'){
+      const items=r.status==='fulfilled'?r.value?.items:null;
+      const valid=Array.isArray(items)&&items.length<=100&&items.every(x=>
+        x&&typeof x.campaign_id==='string'&&
+        typeof x.name==='string'&&x.name.length<=100&&
+        x.status==='draft'&&typeof x.owner_user_id==='string'&&
+        Array.isArray(x.channel_ids)&&x.channel_ids.length>=1&&
+        x.channel_ids.length<=20&&
+        x.channel_ids.every(v=>typeof v==='string')&&
+        (x.starts_at===null||typeof x.starts_at==='string')&&
+        (x.ends_at===null||typeof x.ends_at==='string')&&
+        (typeof x.budget_cents==='number'||typeof x.budget_cents==='string')&&
+        Number.isSafeInteger(Number(x.budget_cents))&&
+        Number(x.budget_cents)>=0&&Number(x.budget_cents)<=100000000000);
+      state.campaignDrafts=valid?items:[];
+      state.campaignLoadError=!valid;
+    }else if(key==='channels'){
       const data=r.status==='fulfilled'?r.value:null;
       const valid=data?.schema_version==='m01-isolated-channel-catalog-v1'&&
         data?.status==='isolated_readonly_not_production'&&
@@ -501,6 +541,12 @@ function setView(view){
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
+  state.campaignDrafts=[];state.campaignLoadError=false;
+  $('campaign-workbench').hidden=true;
+  $('campaigns-list').replaceChildren();
+  $('campaign-channel-choice').replaceChildren();
+  $('campaigns-total').textContent='0 条';
+  $('campaigns-status').textContent='未登录，市场活动草稿已清空。';
   state.channelRequests=[];state.channelRequestLoadError=false;
   state.channelAuditHistory=[];state.channelAuditLoadError=false;
   $('channel-audit-list').replaceChildren();
@@ -524,9 +570,10 @@ function logout(notice=true){
   if(notice)toast('已退出演示账号');
 }
 function applyStrictLayout(){
-  const allowed=new Set(['overview','students','contacts','leads','channels']);
+  const allowed=new Set(['overview','students','contacts','leads','channels','campaigns']);
   for(const nav of document.querySelectorAll('button[data-view]')){
-    nav.hidden=state.strict&&!allowed.has(nav.dataset.view);
+    nav.hidden=(state.strict&&!allowed.has(nav.dataset.view))||
+      (!state.strict&&nav.dataset.view==='campaigns');
   }
   const contactLink=$('contact-link-form');
   if(contactLink)contactLink.closest('.panel').hidden=false;
@@ -608,6 +655,27 @@ $('channel-target-choice').addEventListener('change',()=>{
   setSelect($('channel-parent-choice'),state.channels.filter(c=>
     c.effective_status==='active'&&c.channel_id!==current),
     'channel_id',c=>c.name,true);
+});
+register('campaign-draft-form',async d=>{
+  if(!state.strict||state.campaignLoadError||state.channelLoadError||
+     state.capabilities.create_campaign_draft!==true)
+    throw Error('活动草稿数据或员工权限尚未核实');
+  const ids=[...$('campaign-channel-choice').selectedOptions].map(o=>o.value);
+  if(ids.length<1||ids.length>20||ids.some(id=>
+    !state.channels.some(c=>c.channel_id===id&&c.effective_status==='active')))
+    throw Error('请选择一至二十个本机构有效渠道');
+  const budget=cents(d.budget_yuan);
+  if(budget>100000000000)throw Error('计划预算超出限制');
+  const start=d.starts_at?localIso(d.starts_at):null;
+  const end=d.ends_at?localIso(d.ends_at):null;
+  if(start&&end&&new Date(end)<new Date(start))
+    throw Error('结束时间不能早于开始时间');
+  const result=await api('/api/v1/marketing-campaigns/drafts',{
+    method:'POST',
+    body:{name:d.name.trim(),starts_at:start,ends_at:end,
+      budget_cents:budget,channel_ids:ids}
+  });
+  return '活动草稿已保存；负责人为本人，预算未审批，禁止实际支出或投放';
 });
 register('channel-request-form',async d=>{
   if(!state.strict||state.channelLoadError||state.channelRequestLoadError||state.channelAuditLoadError)

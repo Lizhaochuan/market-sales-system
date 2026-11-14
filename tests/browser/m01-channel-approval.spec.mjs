@@ -12,7 +12,7 @@ const audience='m01-browser-approved-channel-maintenance';
 const signingSecret='fictional-test-only-strong-token-secret-9c92789dc3b9';
 
 test('M01 Chinese strict workbench: employee request, independent manager approval, channel history and logout',async({browser},testInfo)=>{
- test.setTimeout(90000);
+ test.setTimeout(120000);
  process.env.MS_STAGE='isolated-test';
  const admin=new pg.Pool({connectionString:process.env.DATABASE_URL,max:4});
  const directory=new pg.Pool({connectionString:process.env.DATABASE_URL_AUTH_DIRECTORY,max:2});
@@ -52,7 +52,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
    "VALUES($1,$2,$3,$4,$5)",
    [target,issuer,subjects.get(target),M2,q.rows[0].id]);
  }
- let app,staffPage,managerPage,createdId;
+ let app,staffPage,managerPage,createdId,campaignId;
  const name='隔离界面渠道-'+randomUUID();
  const changedName=name+'-改名';
  const login=async(staff)=>{
@@ -119,6 +119,41 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   createdId=(await admin.query('SELECT id FROM ms.marketing_channels WHERE name=$1',[name])).rows[0]?.id;
   expect(createdId).toBeTruthy();
 
+  // M02: plan a fictional marketing campaign; draft budget is NOT an approved expense.
+  await staffPage.getByRole('button',{name:'市场活动'}).click();
+  await expect(staffPage.locator('#campaign-workbench')).toBeVisible();
+  await staffPage.locator('#campaign-draft-form input[name="name"]').fill(name+'-活动');
+  await staffPage.locator('#campaign-draft-form input[name="budget_yuan"]').fill('1250.50');
+  await staffPage.locator('#campaign-channel-choice').selectOption([createdId]);
+  await staffPage.getByRole('button',{name:'保存市场活动草稿'}).click();
+  await expect(staffPage.locator('#toast')).toContainText('预算未审批');
+  await expect(staffPage.locator('#campaigns-list')).toContainText(name+'-活动');
+  await expect(staffPage.locator('#campaigns-list')).toContainText('草稿');
+  campaignId=(await admin.query('SELECT id FROM ms.marketing_campaigns WHERE name=$1',
+    [name+'-活动'])).rows[0]?.id;
+  expect(campaignId).toBeTruthy();
+  const campaign=await admin.query('SELECT owner_user_id,status,budget_cents FROM ms.marketing_campaigns WHERE id=$1',
+    [campaignId]);
+  expect(campaign.rows[0].owner_user_id).toBe(A);
+  expect(campaign.rows[0].status).toBe('draft');
+  expect(Number(campaign.rows[0].budget_cents)).toBe(125050);
+  await managerPage.getByRole('button',{name:'市场活动'}).click();
+  // Manager signed in before the employee saved this draft; fetch fresh scope.
+  await managerPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(managerPage.locator('#campaigns-list')).toContainText(name+'-活动');
+  await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
+    status:500,contentType:'application/json',
+    body:JSON.stringify({code:'INTERNAL_ERROR',message:'隔离活动读取故障'})
+  }));
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaigns-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-create-panel')).toBeHidden();
+  await staffPage.unroute('**/api/v1/marketing-campaigns/drafts');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaigns-list')).toContainText(name+'-活动');
+  await staffPage.getByRole('button',{name:'获客渠道'}).click();
+  await managerPage.getByRole('button',{name:'获客渠道'}).click();
+
   // Same user cannot self-approve; no direct SQL write or unsafe HTML injection.
   await staffPage.locator('#channel-request-form select[name="action"]').selectOption('edit');
   await staffPage.locator('#channel-target-choice').selectOption(createdId);
@@ -153,6 +188,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
     body:JSON.stringify({code:'INTERNAL_ERROR',message:'虚构审计投影故障'})}));
   await staffPage.getByRole('button',{name:'刷新数据'}).click();
   await expect(staffPage.locator('#channel-audit-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaigns-list')).toContainText(name+'-活动');
   await expect(staffPage.locator('#channel-audit-status')).toContainText('已清空旧记录');
   await expect(staffPage.locator('#channel-request-card')).toBeHidden();
   await staffPage.unroute('**/api/v1/marketing-channels/change-requests/audit-history');
@@ -166,12 +202,19 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#workspace')).toBeHidden();
   await expect(staffPage.locator('#channel-requests-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-audit-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaigns-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{
   await Promise.allSettled([staffPage,managerPage].filter(Boolean).map(x=>x.close()));
   if(app?.listening)await new Promise(ok=>app.close(ok));
-  // Fixture never touches live records; delete ephemeral own test channel only.
+  // Release only temporary CI fixture records in FK-safe order.
+  if(campaignId){
+   await admin.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign' AND target_id=$1",[campaignId]);
+   await admin.query('DELETE FROM ms.isolated_campaign_draft_idempotency WHERE campaign_id=$1',[campaignId]);
+   await admin.query('DELETE FROM ms.campaign_channels WHERE campaign_id=$1',[campaignId]);
+   await admin.query('DELETE FROM ms.marketing_campaigns WHERE id=$1',[campaignId]);
+  }
   if(createdId){
    await admin.query('DELETE FROM ms.isolated_channel_change_requests WHERE channel_id=$1 OR result_channel_id=$1',[createdId]);
    await admin.query('DELETE FROM ms.marketing_channels WHERE id=$1',[createdId]);

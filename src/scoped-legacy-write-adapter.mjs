@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
+export const migratedLegacyWrites=new Set(['createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,33 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='createCampaignDraft'){
+    only(body,['name','starts_at','ends_at','budget_cents','channel_ids']);
+    const name=cleanName(body.name,'活动名称');
+    if(name.length<2||/[\u0000-\u001f\u007f]/.test(name))
+      fail(422,'VALIDATION_ERROR','活动名称至少2字且不包含控制字符');
+    if(!Number.isSafeInteger(body.budget_cents)||
+        body.budget_cents<0||body.budget_cents>100000000000)
+      fail(422,'VALIDATION_ERROR','计划预算必须为有效的非负整数分且不能超过上限');
+    const parseTime=(value,label)=>{
+      if(value===undefined||value===null||value==='')return null;
+      if(typeof value!=='string'||!/\d{4}-\d\d-\d\dT/.test(value))
+        fail(422,'VALIDATION_ERROR',label+'格式错误');
+      const d=new Date(value);
+      if(!Number.isFinite(d.getTime()))fail(422,'VALIDATION_ERROR',label+'不是有效时间');
+      return d;
+    };
+    const start=parseTime(body.starts_at,'开始时间');
+    const end=parseTime(body.ends_at,'结束时间');
+    if(start&&end&&end.getTime()<start.getTime())
+      fail(422,'VALIDATION_ERROR','活动结束时间不得早于开始时间');
+    if(!Array.isArray(body.channel_ids)||body.channel_ids.length<1||
+       body.channel_ids.length>20||
+       new Set(body.channel_ids).size!==body.channel_ids.length)
+      fail(422,'VALIDATION_ERROR','必须选择1至20个不重复渠道');
+    const channels=body.channel_ids.map(x=>uuid(x,'关联渠道'));
+    return {params:[name,start,end,body.budget_cents,channels]};
+  }
   if(op==='requestChannelChange'){
     only(body,['action','channel_id','name','parent_id','channel_type','evidence_ref','reason_zh']);
     if(!['create','edit','deactivate'].includes(body.action))
@@ -334,6 +361,10 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'createCampaignDraft':
+        result=await client.query(
+          'SELECT ms.create_isolated_campaign_draft($1,$2,$3,$4,$5,$6) AS result',
+          [...parsed.params,idempotencyKey]);break;
       case 'requestChannelChange':
         result=await client.query(
           'SELECT ms.request_isolated_channel_change($1,$2,$3,$4,$5,$6,$7,$8) AS result',
