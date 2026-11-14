@@ -67,6 +67,17 @@ test('V3.2-50 refuses forged signoff, missing checks, swapped roles and mismatch
  const rendered=renderBlockedJointUatMarkdown(buildBlockedJointUatReport(original,changed));
  assert.ok(!rendered.includes('<script>'));
  assert.ok(rendered.includes('\\| &lt;script&gt;'));
+ const valid=buildBlockedJointUatReport(fixture('finance',idF),fixture('academic',idA));
+ {const forged=JSON.parse(JSON.stringify(valid));
+  forged.tasks[0].sources.finance='<script>fake</script>';
+  assert.throws(()=>renderBlockedJointUatMarkdown(forged),TypeError);}
+ {const forged=JSON.parse(JSON.stringify(valid));
+  forged.tasks[0].code=forged.tasks[1].code;
+  assert.throws(()=>renderBlockedJointUatMarkdown(forged),TypeError);}
+ {const forged=JSON.parse(JSON.stringify(valid));
+  forged.real_owner_approval_complete=true;
+  assert.throws(()=>renderBlockedJointUatMarkdown(forged),TypeError);}
+
 });
 const db=name=>new pg.Pool({connectionString:process.env[name],max:2});
 const one=async(pool,sql,args)=>(await pool.query(sql,args)).rows[0]?.result;
