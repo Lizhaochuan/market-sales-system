@@ -52,7 +52,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
    "VALUES($1,$2,$3,$4,$5)",
    [target,issuer,subjects.get(target),M2,q.rows[0].id]);
  }
- let app,staffPage,managerPage,createdId,campaignId,salesReviewId,financeIncidentId;
+ let app,staffPage,managerPage,createdId,campaignId,salesReviewId,financeIncidentId,escalationIncidentId;
  const name='隔离界面渠道-'+randomUUID();
  const changedName=name+'-改名';
  const login=async(staff)=>{
@@ -254,6 +254,60 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   expect((await admin.query('SELECT status FROM ms.marketing_campaigns WHERE id=$1',
     [campaignId])).rows[0].status).toBe('draft');
 
+  // V3.2-64: a second incident is explicitly escalated and receives sales-only evidence.
+  await staffPage.locator('#campaign-incident-report-choice').selectOption(salesReviewId);
+  await staffPage.locator('#campaign-incident-report-form select[name="issue_kind"]')
+    .selectOption('supporting_materials_gap');
+  await staffPage.locator('#campaign-incident-report-form input[name="evidence_ref"]')
+    .fill('虚构第二次交接佐证缺口');
+  await staffPage.locator('#campaign-incident-report-form textarea[name="reason_zh"]')
+    .fill('这次改为人工升级后继续补正');
+  await staffPage.getByRole('button',{name:'登记销售侧交接异常'}).click();
+  await expect(staffPage.locator('#toast')).toContainText('活动及预算仍未获授权');
+  escalationIncidentId=(await admin.query(
+    "SELECT id FROM ms.isolated_campaign_finance_incidents WHERE review_id=$1 AND status='open'",
+    [salesReviewId])).rows[0]?.id;
+  expect(escalationIncidentId).toBeTruthy();
+  await managerPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(managerPage.locator('#campaign-incident-triage-panel')).toBeVisible();
+  await managerPage.locator('#campaign-incident-triage-choice').selectOption(escalationIncidentId);
+  await managerPage.locator('#campaign-incident-triage-form select[name="action"]')
+    .selectOption('escalate_manual');
+  await managerPage.locator('#campaign-incident-triage-form input[name="evidence_ref"]')
+    .fill('虚构人工升级复核材料');
+  await managerPage.locator('#campaign-incident-triage-form textarea[name="reason_zh"]')
+    .fill('必须等待真实外部权威，此处不能放行');
+  await managerPage.getByRole('button',{name:'保存独立销售侧处理'}).click();
+  await expect(managerPage.locator('#toast')).toContainText('没有财务审批或支出权限');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-escalation-followup-panel')).toBeVisible();
+  await staffPage.locator('#campaign-escalation-choice').selectOption(escalationIncidentId);
+  await staffPage.locator('#campaign-escalation-followup-form select[name="note_type"]')
+    .selectOption('external_finance_requirements_pending');
+  await staffPage.locator('#campaign-escalation-followup-form input[name="evidence_ref"]')
+    .fill('模拟外部财务审核仍未接入');
+  await staffPage.locator('#campaign-escalation-followup-form textarea[name="reason_zh"]')
+    .fill('销售侧仅补充材料索引，不代表财务部门签收或资金授权');
+  await staffPage.getByRole('button',{name:'追加销售侧核查资料'}).click();
+  await expect(staffPage.locator('#toast')).toContainText('人工升级阻断保持');
+  await expect(staffPage.locator('#campaign-escalation-list')).toContainText('外部财务核查事项待确认');
+  await expect(staffPage.locator('#campaign-incident-history-list')).toContainText('人工升级后销售侧补充材料');
+  await expect(staffPage.locator('#campaign-finance-list')).toContainText('交接资料存在异常');
+  expect((await admin.query('SELECT status FROM ms.isolated_campaign_finance_incidents WHERE id=$1',
+    [escalationIncidentId])).rows[0].status).toBe('manual_escalated');
+  expect((await admin.query("SELECT status FROM ms.marketing_campaigns WHERE id=$1",
+    [campaignId])).rows[0].status).toBe('draft');
+  // The addendum read route must clear stale metadata and disable writes on failure.
+  await staffPage.route('**/api/v1/marketing-campaigns/finance-incidents/follow-ups',
+    route=>route.fulfill({status:500,contentType:'application/json',
+      body:JSON.stringify({code:'INTERNAL_ERROR',message:'模拟补充资料读取故障'})}));
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-escalation-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-escalation-followup-panel')).toBeHidden();
+  await staffPage.unroute('**/api/v1/marketing-campaigns/finance-incidents/follow-ups');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-escalation-list')).toContainText('外部财务核查事项待确认');
+
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
     status:500,contentType:'application/json',
     body:JSON.stringify({code:'INTERNAL_ERROR',message:'隔离活动读取故障'})
@@ -320,15 +374,17 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaigns-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-incident-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-incident-history-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-escalation-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{
   await Promise.allSettled([staffPage,managerPage].filter(Boolean).map(x=>x.close()));
   if(app?.listening)await new Promise(ok=>app.close(ok));
   // Release only temporary CI fixture records in FK-safe order.
-  if(financeIncidentId){
-   await admin.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign_finance_incident' AND target_id=$1",[financeIncidentId]);
-   await admin.query('DELETE FROM ms.isolated_campaign_finance_incidents WHERE id=$1',[financeIncidentId]);
+  for(const id of [financeIncidentId,escalationIncidentId].filter(Boolean)){
+   await admin.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign_finance_incident' AND target_id=$1",[id]);
+   await admin.query('DELETE FROM ms.isolated_campaign_finance_escalation_followups WHERE incident_id=$1',[id]);
+   await admin.query('DELETE FROM ms.isolated_campaign_finance_incidents WHERE id=$1',[id]);
   }
   if(salesReviewId){
    await admin.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign_sales_review' AND target_id=$1",[salesReviewId]);

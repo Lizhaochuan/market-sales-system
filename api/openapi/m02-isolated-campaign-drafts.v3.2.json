@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-63",
+    "version": "v3.2-64",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -616,6 +616,102 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/follow-ups": {
+      "get": {
+        "operationId": "listScopedFinanceEscalationFollowups",
+        "summary": "Scoped metadata-only append-only records for manually escalated sales-side incidents",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to 100 scoped follow-up metadata items, no evidence or reason"
+          },
+          "403": {
+            "description": "Approved staff-only read"
+          },
+          "500": {
+            "description": "Fail closed on overlimit"
+          }
+        }
+      }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/{incident_id}/follow-ups": {
+      "post": {
+        "operationId": "appendFinanceEscalationFollowup",
+        "summary": "Append sales-side follow-up evidence; NEVER finance acceptance or release",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "note_type",
+                  "evidence_ref",
+                  "reason_zh"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "note_type": {
+                    "type": "string",
+                    "enum": [
+                      "sales_evidence_addendum",
+                      "external_finance_requirements_pending"
+                    ]
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 200
+                  },
+                  "reason_zh": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 400
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded append-only sales-side note; incident remains manual_escalated; finance_authorized=false"
+          },
+          "403": {
+            "description": "Not reporter or original independent sales reviewer, not escalated, or employee revoked"
+          },
+          "409": {
+            "description": "Same key used for different body"
+          },
+          "422": {
+            "description": "Invalid note"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
@@ -626,5 +722,8 @@
   "x-finance-readiness-does-not-authorize-spend": true,
   "x-finance-incidents-never-authorize-spend": true,
   "x-finance-incident-audit-readonly": true,
-  "x-finance-incident-history-allows-spend": false
+  "x-finance-incident-history-allows-spend": false,
+  "x-escalation-followups-append-only": true,
+  "x-external-finance-acceptance-implemented": false,
+  "x-escalation-hold-can-be-released": false
 }

@@ -78,6 +78,21 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const followups=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+   '/api/v1/marketing-campaigns/finance-incidents/follow-ups',
+   {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
+ const appendFollowup=async(staff,id,type='sales_evidence_addendum',requestKey=key())=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+   '/api/v1/marketing-campaigns/finance-incidents/'+id+'/follow-ups',{
+   method:'POST',headers:{Authorization:'Bearer '+sign(staff),
+    'Content-Type':'application/json','Idempotency-Key':requestKey},
+   body:JSON.stringify({note_type:type,evidence_ref:'虚构升级后补充材料索引',
+    reason_zh:'销售侧人工核查追加信息，不能代表财务签收或资金审批'})});
+  return {status:r.status,...await r.json()};
+ };
  const reportIncident=async(staff,id,kind,requestKey=key(),reason='虚构资料需独立复核')=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
    '/api/v1/marketing-campaigns/finance-handoffs/'+id+'/incidents',{
@@ -394,12 +409,71 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     await assert.rejects(pool.query('DELETE FROM ms.audit_events WHERE FALSE'),
       e=>e.code==='42501');
   }
+  // V3.2-64: only the reporter and actual independent sales reviewer may append.
+  assert.equal((await appendFollowup(A,incident1)).status,403,
+    'closed recheck may not be used for escalation follow-up');
+  assert.equal((await followups(A)).status,200);
+  assert.equal((await followups(A)).data.items.filter(x=>x.incident_id===incident2).length,0);
+  assert.equal((await followups(B)).status,401);
+  const addendumKey=key();
+  const addendum=await appendFollowup(A,incident2,'sales_evidence_addendum',addendumKey);
+  assert.equal(addendum.status,200,JSON.stringify(addendum));
+  assert.equal(addendum.data.incident_status,'manual_escalated');
+  assert.equal(addendum.data.responsibility_boundary,'sales_reporter');
+  assert.equal(addendum.data.finance_authorized,false);
+  assert.equal(addendum.data.execution_allowed,false);
+  const original=addendum.data.followup_id;
+  assert.equal((await appendFollowup(A,incident2,'sales_evidence_addendum',addendumKey)).data.followup_id,
+    original,'idempotent replay must not append extra note or audit');
+  assert.equal((await appendFollowup(A,incident2,'external_finance_requirements_pending',addendumKey)).status,409);
+  const independent=await appendFollowup(M,incident2,'external_finance_requirements_pending');
+  assert.equal(independent.status,200,JSON.stringify(independent));
+  assert.equal(independent.data.responsibility_boundary,'independent_sales_reviewer');
+  assert.equal(independent.data.finance_authorized,false);
+  assert.equal(independent.data.execution_allowed,false);
+  for(const who of [A,M]){
+    const notes=await followups(who);
+    assert.equal(notes.status,200,JSON.stringify(notes));
+    const items=notes.data.items.filter(x=>x.incident_id===incident2);
+    assert.equal(items.length,2,'two responsibility parties independently append notes');
+    assert.deepEqual(items.map(x=>x.responsibility_boundary).sort(),
+      ['independent_sales_reviewer','sales_reporter'].sort());
+    for(const x of items){
+      assert.equal(x.incident_status,'manual_escalated');
+      assert.equal(x.external_authority_state,'awaiting_external_finance_authority');
+      assert.equal(x.finance_authorized,false);
+      assert.equal(x.execution_allowed,false);
+      for(const secret of ['evidence_ref','reason_zh','request_key',
+       'request_fingerprint','organization_id','after_business_json']){
+        assert.equal(Object.hasOwn(x,secret),false,'follow-up view must hide '+secret);
+      }
+    }
+  }
+  let followupEvents=(await auditHistory(A)).data.items.filter(x=>x.incident_id===incident2);
+  assert.equal(followupEvents.length,4,'each addendum creates one append-only audit event');
+  assert.equal(followupEvents.filter(x=>
+    x.event_name==='CAMPAIGN_FINANCE_ESCALATION_FOLLOWUP_RECORDED').length,2);
+  assert.ok(followupEvents.every(x=>x.current_incident_status==='manual_escalated'&&
+    x.finance_authorized===false&&x.execution_allowed===false));
+  assert.equal((await handoffs(A)).data.items.find(x=>x.review_id===reviewId).readiness_status,
+    'blocked_active_incident','evidence append does not release finance hold');
+  const ownership=(await owner.query(
+    "SELECT status FROM ms.isolated_campaign_finance_incidents WHERE id=$1",[incident2])).rows[0];
+  assert.equal(ownership.status,'manual_escalated');
+  for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+    await assert.rejects(pool.query('SELECT * FROM ms.isolated_campaign_finance_escalation_followups'),
+      e=>e.code==='42501');
+    await assert.rejects(pool.query("UPDATE ms.isolated_campaign_finance_escalation_followups SET note_type=note_type WHERE FALSE"),
+      e=>e.code==='42501');
+  }
   const eventNames=(await owner.query(
     "SELECT event_name FROM ms.audit_events WHERE target_type='marketing_campaign_finance_incident' AND target_id=ANY($1::uuid[])",
     [incidentIds])).rows.map(x=>x.event_name).sort();
   assert.deepEqual(eventNames,
    ['CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED','CAMPAIGN_FINANCE_HANDOFF_ISSUE_REPORTED',
-    'CAMPAIGN_FINANCE_ISSUE_ESCALATED','CAMPAIGN_FINANCE_ISSUE_RECHECK_REQUESTED'].sort());
+    'CAMPAIGN_FINANCE_ISSUE_ESCALATED','CAMPAIGN_FINANCE_ISSUE_RECHECK_REQUESTED',
+    'CAMPAIGN_FINANCE_ESCALATION_FOLLOWUP_RECORDED',
+    'CAMPAIGN_FINANCE_ESCALATION_FOLLOWUP_RECORDED'].sort());
   for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
    await assert.rejects(pool.query('SELECT * FROM ms.isolated_campaign_finance_incidents'),
      e=>e.code==='42501');
@@ -461,11 +535,14 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
   assert.equal((await post(A,payload(prefix+'-revoked'))).status,403);
   assert.equal((await auditHistory(A)).status,403,
     'revoked external signed identity cannot read prior incident audit');
+  assert.equal((await followups(A)).status,403,
+    'revoked signed identity cannot enumerate escalation follow-ups');
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));
   if(incidentIds.length){
    await owner.query("DELETE FROM ms.audit_events WHERE target_type='marketing_campaign_finance_incident' AND target_id=ANY($1::uuid[])",[incidentIds]);
+   await owner.query('DELETE FROM ms.isolated_campaign_finance_escalation_followups WHERE incident_id=ANY($1::uuid[])',[incidentIds]);
    await owner.query('DELETE FROM ms.isolated_campaign_finance_incidents WHERE id=ANY($1::uuid[])',[incidentIds]);
   }
   if(reviewId){
