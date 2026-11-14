@@ -222,8 +222,8 @@ RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalo
 DECLARE actor uuid;org uuid;m ms.cross_module_compensation_manifests%ROWTYPE;
  c ms.lead_student_downstream_correction_cases%ROWTYPE;
  domain_count integer;security_count integer;request_count integer;active_review_count integer;
- has_rejected boolean;latest boolean;fingerprint_ok boolean;
- can_view boolean;underlying jsonb;
+ has_rejected boolean;latest boolean;fingerprint_ok boolean;plan_reviewers_current boolean;
+ can_view boolean;
 BEGIN
  SELECT staff_id,org_id INTO actor,org FROM ms.access_actor();
  IF actor IS NULL THEN RAISE EXCEPTION '没有可验证的本机构员工' USING ERRCODE='42501'; END IF;
@@ -265,6 +265,19 @@ BEGIN
                         ELSE 'academic_correction_reviewer' END);
  SELECT m.plan_version=max(p.version_no) INTO latest FROM ms.cross_module_correction_plans p
  WHERE p.case_id=m.case_id;
+ SELECT (count(DISTINCT s.id)=3) INTO plan_reviewers_current
+ FROM ms.cross_module_correction_signoffs s
+ JOIN ms.staff_users su ON su.id=s.signed_by
+   AND su.organization_id=m.organization_id AND su.status='active'
+ JOIN ms.user_role_grants g ON g.user_id=su.id
+   AND g.revoked_at IS NULL AND g.valid_from<=now()
+ JOIN ms.role_templates t ON t.id=g.role_id
+   AND t.organization_id=m.organization_id
+ WHERE s.plan_id=m.plan_id AND s.decision='approved'
+ AND t.role_code=(CASE s.department
+   WHEN 'sales' THEN 'sales_manager'
+   WHEN 'finance' THEN 'finance_correction_reviewer'
+   ELSE 'academic_correction_reviewer' END);
  fingerprint_ok:=c.status='hold_active' AND
   ms.cross_module_local_correction_fingerprint(c.lead_id,c.student_id)=m.local_fingerprint;
  RETURN jsonb_build_object(
@@ -273,8 +286,9 @@ BEGIN
   'valid_current_role_approvals',active_review_count,
   'any_rejection_or_revision',has_rejected,
   'local_scope_current',fingerprint_ok,'latest_plan',COALESCE(latest,false),
+  'upstream_three_party_roles_current',plan_reviewers_current,
   'planning_paperwork_complete',request_count=2 AND domain_count=2 AND
-    security_count=2 AND active_review_count=4 AND NOT has_rejected AND fingerprint_ok AND COALESCE(latest,false),
+    security_count=2 AND active_review_count=4 AND plan_reviewers_current AND NOT has_rejected AND fingerprint_ok AND COALESCE(latest,false),
   'official_source_registered',false,'official_credentials_installed',false,
   'production_readonly_connection_allowed',false,
   'finance_source_authenticated',false,'crm_source_authenticated',false,
