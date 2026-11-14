@@ -105,28 +105,16 @@
                                 "format": "uuid"
                               },
                               "parent_channel_id": {
-                                "oneOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "uuid"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
+                                "type": "string",
+                                "format": "uuid",
+                                "nullable": true
                               },
                               "name": {
                                 "type": "string"
                               },
                               "channel_type": {
-                                "oneOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
+                                "type": "string",
+                                "nullable": true
                               },
                               "status": {
                                 "type": "string",
