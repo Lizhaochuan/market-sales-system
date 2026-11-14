@@ -1,0 +1,22 @@
+name: V3.2-85 isolated triage reopen and rereview
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-triage-reopen.mjs'
+      - 'tests/security/v3-2-85-m02-triage-reopen.test.mjs'
+      - '.github/workflows/v3-2-85-triage-reopen.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-triage-reopen:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check follow-up source syntax
+        run: node --check src/cross-module-triage-reopen.mjs
+      - name: Run reopen, triage and evidence audit tests
+        run: node --test tests/security/v3-2-85-m02-triage-reopen.test.mjs tests/security/v3-2-84-m02-blocker-triage.test.mjs tests/security/v3-2-83-m02-unified-blocker-audit.test.mjs
