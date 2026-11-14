@@ -1,6 +1,6 @@
 // V3.2-71: isolated fixture-only provenance preflight; no trusted production source.
 import {createHash} from 'node:crypto';
-const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA=/^[0-9a-f]{64}$/;
 const KINDS=new Set(['market_sales','crm_finance','academic']);
 const exact=(x,fields)=>x!==null&&typeof x==='object'&&!Array.isArray(x)&&
