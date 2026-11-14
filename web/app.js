@@ -1,7 +1,7 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
 const viewInfo={
   overview:['业务总览','工作概览'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
@@ -74,6 +74,12 @@ function fillOptions(){
       'lead_id',v=>'本人已创建线索 · '+v.contact_name],
     ownedStudentChoices:[state.students.filter(v=>v.owner_user_id===state.user?.staff_id),
       'student_id',v=>v.display_name+' · 仅本学生'],
+    studentLinksPendingVerification:[state.currentStudentLinks.filter(v=>v.current_state==='pending_review'),
+      'association_request_id',v=>v.student_name+' · 待核实'],
+    studentLinksWithdrawable:[state.currentStudentLinks.filter(v=>['pending_review','verified'].includes(v.current_state)),
+      'association_request_id',v=>v.student_name+' · '+(v.current_state==='verified'?'已人工核实':'待核实')],
+    pendingStudentLinkReviews:[state.studentLinkReviews.filter(v=>v.status==='pending'),
+      'review_id',v=>(v.action==='verify'?'核实':'撤回')+' · '+v.student_name],
     pendingLinkRequests:[state.leadStudentRequests.filter(v=>v.status==='pending'),
       'request_id',v=>v.student_name+' · 单学生待核实'],
     pendingAdjustmentRequests:[state.leadAdjustmentRequests.filter(v=>v.status==='pending'),
@@ -190,6 +196,19 @@ function render(){
     x.contact_name+' · '+x.event_type,
     '咨询时间：'+formatDate(x.occurred_at)+' · 申请时间：'+formatDate(x.created_at),
     ({pending:'待主管审核',reviewed_eligible:'候选核查通过（未生成线索）',rejected:'已驳回'})[x.status]||'状态待核对','候'));
+  $('student-link-verification-workbench').hidden=!state.strict;
+  $('student-link-verification-decision-card').hidden=!state.strict||
+    state.capabilities.review_student_link_verification!==true;
+  if(state.strict){
+    paint('student-link-reviews-list',state.studentLinkReviews,x=>record(
+      x.student_name,'操作：'+(x.action==='verify'?'正式人工核实':'撤回错误关联')+
+        ' · '+formatDate(x.created_at),
+      ({pending:'等待独立主管审核',approved:'审批已通过',rejected:'本次审核已驳回'})[x.status]||'待核实','核'));
+    paint('student-link-current-list',state.currentStudentLinks,x=>record(
+      x.student_name,'单名学生的销售线索关联',
+      ({pending_review:'仍待核实',verified:'已人工确认销售关联（不代表监护人）',
+        withdrawn:'错误关联已撤回，历史保留'})[x.current_state]||'待核查','学'));
+  }
   $('lead-governance-workbench').hidden=!state.strict;
   $('lead-student-link-decision-card').hidden=!state.strict||
     state.capabilities.review_student_lead_link!==true;
@@ -290,7 +309,9 @@ async function refresh(){
     ['finalLeadConversions','/api/v1/lead-conversions'],
     ['leadStudentRequests','/api/v1/lead-student-associations'],
     ['leadAdjustmentRequests','/api/v1/lead-adjustments'],
-    ['leadCorrectionNotes','/api/v1/lead-correction-notes']
+    ['leadCorrectionNotes','/api/v1/lead-correction-notes'],
+    ['studentLinkReviews','/api/v1/lead-student-link-reviews'],
+    ['currentStudentLinks','/api/v1/lead-student-links/current']
   ]:[
     ['students','/api/v1/students'],['contacts','/api/v1/contacts'],
     ['events','/api/v1/contact-events'],['leads','/api/v1/leads'],
@@ -298,7 +319,7 @@ async function refresh(){
   ];
   const results=await Promise.allSettled(endpoints.map(x=>api(x[1])));
   if(state.strict)for(const key of ['leads','opportunities','families'])state[key]=[];
-  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];}
+  else {state.custodyRequests=[];state.custodyStaff=[];state.custodyActive=[];state.custodyReviews=[];state.relatedStudents=[];state.candidateConsultations=[];state.leadCandidates=[];state.readinessReviews=[];state.attributionDisputes=[];state.disputableCandidates=[];state.finalLeadConversions=[];state.leadStudentRequests=[];state.leadAdjustmentRequests=[];state.leadCorrectionNotes=[];state.studentLinkReviews=[];state.currentStudentLinks=[];}
   for(let i=0;i<endpoints.length;i++){
     const [key]=endpoints[i],r=results[i];
     state[key]=r.status==='fulfilled'?r.value.items||[]:[];
@@ -321,7 +342,7 @@ function setView(view){
 function logout(notice=true){
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   applyStrictLayout();
-  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions','leadStudentRequests','leadAdjustmentRequests','leadCorrectionNotes'])state[key]=[];
+  for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions','leadStudentRequests','leadAdjustmentRequests','leadCorrectionNotes','studentLinkReviews','currentStudentLinks'])state[key]=[];
   document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
   $('workspace').hidden=true;$('login-screen').hidden=false;
   $('login-form').reset();$('external-login-form').reset();$('audit-list').replaceChildren();
@@ -565,6 +586,30 @@ register('lead-adjustment-decision-form',async d=>{
   return d.decision==='approved'?
     '独立主管已审核，线索状态或补充说明已留存不可改写记录':
     '已驳回该次线索调整申请';
+});
+register('student-link-verification-request-form',async d=>{
+  if(d.action==='verify'&&!d.confirmation_ref.trim())
+    throw Error('请填写对单名学生的人工核实依据');
+  await api('/api/v1/lead-student-link-reviews',{method:'POST',body:{
+    association_request_id:d.action==='verify'?d.verify_association:d.withdraw_association,
+    action:d.action,
+    ...(d.action==='verify'?{
+      basis_kind:d.basis_kind,confirmation_ref:d.confirmation_ref.trim()
+    }:{}),
+    evidence_ref:d.evidence_ref.trim(),reason_zh:d.reason_zh.trim()
+  }});
+  return d.action==='verify'?
+    '已申请核实这名学生与线索的实际关联，等待独立主管复核':
+    '错误学生关联撤回申请已提交；原关联仍在，待主管审核';
+});
+register('student-link-verification-decision-form',async d=>{
+  await api('/api/v1/lead-student-link-reviews/'+encodeURIComponent(d.review_id)+
+    '/decision',{method:'POST',body:{
+      decision:d.decision,evidence_ref:d.evidence_ref.trim(),reason_zh:d.reason_zh.trim()
+    }});
+  return d.decision==='rejected'?
+    '本次核实或撤回申请已驳回，学生与线索状态没有变化':
+    '已保存独立审核。仅改变所选学生的线索关联，家庭和监护关系仍未核实';
 });
 register('event-form',async d=>{
   const created=await api('/api/v1/contact-events',{method:'POST',body:{
