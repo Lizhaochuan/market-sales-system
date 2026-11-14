@@ -164,7 +164,7 @@ test('V3.2-28 Ed25519 fixture source preparation never grants real correction au
   rejected(()=>verify(x));
  });
  await t.test('modified signature fails',()=>{
-  const x=envelope();x.signature='A'+x.signature.slice(1);
+  const x=envelope();x.signature=(x.signature[0]==='A'?'B':'A')+x.signature.slice(1);
   rejected(()=>verify(x));
  });
  await t.test('wrong key despite same source name fails',()=>{
