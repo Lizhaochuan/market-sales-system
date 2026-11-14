@@ -44,6 +44,8 @@ REVOKE ALL ON ms.contact_custody_reviews,ms.contact_custody_review_decisions
 
 -- Store a restoration chain, without mutating old approval decisions.
 ALTER TABLE ms.contact_custody_assignments
+ DROP CONSTRAINT contact_custody_assignments_approval_request_id_key;
+ALTER TABLE ms.contact_custody_assignments
  ADD COLUMN prior_custodian_id uuid REFERENCES ms.staff_users(id),
  ADD COLUMN review_id uuid UNIQUE REFERENCES ms.contact_custody_reviews(id);
 UPDATE ms.contact_custody_assignments a SET prior_custodian_id=COALESCE(
@@ -52,6 +54,8 @@ UPDATE ms.contact_custody_assignments a SET prior_custodian_id=COALESCE(
   ORDER BY prev.granted_at DESC,prev.id DESC LIMIT 1),
  (SELECT c.created_by FROM ms.contacts c WHERE c.id=a.contact_id))
  WHERE prior_custodian_id IS NULL;
+CREATE UNIQUE INDEX uq_original_custody_approval
+ ON ms.contact_custody_assignments(approval_request_id) WHERE review_id IS NULL;
 
 -- Future approval from 019 is captured even if the old function inserts
 -- without the new field. Locking of the contact row serializes transfers.
@@ -229,6 +233,20 @@ GRANT EXECUTE ON FUNCTION ms.request_custody_review(uuid,text,text,text,text),
  ms.decide_custody_review(uuid,text,text,text,text) TO ms_scoped_lowrisk_writer;
 
 -- Minimal visible review summary. Evidence and private reasons are NOT exported.
+CREATE VIEW ms.scoped_contact_custody_active
+WITH (security_barrier=true) AS
+SELECT a.id AS assignment_id,a.contact_id,c.display_name AS contact_name,
+ a.assignee_id,a.granted_at
+FROM ms.contact_custody_assignments a
+JOIN ms.contacts c ON c.id=a.contact_id
+JOIN ms.contact_custody_requests q ON q.id=a.approval_request_id
+WHERE a.organization_id=ms.current_scoped_organization_id()
+ AND a.revoked_at IS NULL AND ms.current_scoped_staff_id() IS NOT NULL
+ AND (ms.current_scoped_staff_id() IN (a.assignee_id,q.requested_by,a.prior_custodian_id)
+  OR EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates t ON t.id=g.role_id
+   WHERE g.user_id=ms.current_scoped_staff_id() AND g.revoked_at IS NULL
+   AND g.valid_from<=now() AND t.organization_id=a.organization_id
+   AND t.role_code IN ('sales_manager','super_admin')));
 CREATE VIEW ms.scoped_contact_custody_reviews
 WITH (security_barrier=true) AS
 SELECT r.id AS review_id,r.assignment_id,r.kind,r.status,
@@ -248,8 +266,8 @@ WHERE r.organization_id=ms.current_scoped_organization_id()
    WHERE g.user_id=ms.current_scoped_staff_id() AND g.revoked_at IS NULL
     AND g.valid_from<=now() AND t.organization_id=r.organization_id
     AND t.role_code IN ('sales_manager','super_admin')));
-REVOKE ALL ON ms.scoped_contact_custody_reviews FROM PUBLIC;
-GRANT SELECT ON ms.scoped_contact_custody_reviews TO ms_student_assignee_reader;
+REVOKE ALL ON ms.scoped_contact_custody_reviews,ms.scoped_contact_custody_active FROM PUBLIC;
+GRANT SELECT ON ms.scoped_contact_custody_reviews,ms.scoped_contact_custody_active TO ms_student_assignee_reader;
 
 -- Existing student rows (owned/shared) keep their own grant checks.
 -- A *verified* parent link gives a custodian only a MINIMAL read projection,
