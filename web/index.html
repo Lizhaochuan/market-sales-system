@@ -312,6 +312,30 @@
             <p id="campaign-incident-status" class="form-hint" role="status">异常不得释放财务支出或活动投放权限。</p>
             <div id="campaign-incident-list" class="record-list"></div>
           </article>
+          <article class="panel" id="campaign-escalation-followup-panel" hidden>
+            <h3>人工升级后销售侧补充材料</h3>
+            <p class="form-hint">仅原异常报告人或独立销售复核人可追加，财务接收确认、预算付款及活动发布仍未开放。</p>
+            <form id="campaign-escalation-followup-form" class="field-stack">
+              <label>已人工升级的异常
+                <select name="incident_id" id="campaign-escalation-choice" required></select>
+              </label>
+              <label>补充内容
+                <select name="note_type" required>
+                  <option value="sales_evidence_addendum">追加销售侧佐证材料</option>
+                  <option value="external_finance_requirements_pending">记录外部财务权威待核验事项（非签收）</option>
+                </select>
+              </label>
+              <label>补充材料索引<input name="evidence_ref" minlength="2" maxlength="200" required></label>
+              <label>核查说明<textarea name="reason_zh" minlength="2" maxlength="400" required></textarea></label>
+              <button type="submit" class="primary">追加销售侧核查资料</button>
+            </form>
+          </article>
+          <article class="panel" id="campaign-escalation-queue-panel">
+            <div class="panel-header"><h3>升级后补充资料记录（只读）</h3>
+              <span id="campaign-escalation-total" class="count">0 条</span></div>
+            <p id="campaign-escalation-status" class="form-hint" role="status">仅展示有权访问的升级异常元数据；原始证据不显示。</p>
+            <div id="campaign-escalation-list" class="record-list"></div>
+          </article>
           <article class="panel" id="campaign-incident-history-panel">
             <div class="panel-header"><h3>交接异常审计时间线（只读）</h3>
               <span id="campaign-incident-history-total" class="count">0 条</span></div>
