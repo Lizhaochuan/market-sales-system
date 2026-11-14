@@ -1,0 +1,22 @@
+name: V3.2-91 isolated gated refreeze rechecks
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-gated-refreeze.mjs'
+      - 'tests/security/v3-2-91-m02-gated-refreeze.test.mjs'
+      - '.github/workflows/v3-2-91-gated-refreeze.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-gated-refreeze:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify isolated gated refreeze syntax
+        run: node --check src/cross-module-gated-refreeze.mjs
+      - name: Run step completion, source invalidation and upstream freeze tests
+        run: node --test tests/security/v3-2-91-m02-gated-refreeze.test.mjs tests/security/v3-2-90-m02-freeze-invalidation-plan.test.mjs tests/security/v3-2-89-m02-unified-report-freeze.test.mjs
