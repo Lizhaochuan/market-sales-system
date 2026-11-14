@@ -198,6 +198,20 @@ test('V3.2-29 immutable source onboarding proposals cannot authorize production 
    assert.equal((await root.query('SELECT status FROM ms.lead_student_downstream_correction_cases WHERE id=$1',[c.caseId])).rows[0].status,'hold_active');
    assert.equal((await root.query('SELECT student_id FROM ms.sales_orders WHERE id=$1',[c.order])).rows[0].student_id,c.wrong);
   });
+  await t.test('revoked source security role invalidates all prior planning approvals',async()=>{
+   await root.query(
+    "UPDATE ms.user_role_grants SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
+    ['30000000-0000-4000-8000-000000000018']);
+   const q=await one(planA,readiness,[mid]);
+   assert.equal(q.domain_planning_approvals,2);
+   assert.equal(q.independent_security_planning_approvals,2);
+   assert.equal(q.valid_current_role_approvals,2);
+   assert.equal(q.planning_paperwork_complete,false);
+   assert.equal(q.production_readonly_connection_allowed,false);
+   assert.equal(q.execution_allowed,false);
+   assert.equal(q.release_allowed,false);
+   await deny(security,readiness,[mid],'42501');
+  });
   await t.test('late finance event and new plan version revoke readiness, not recorded history',async()=>{
    const receipt=(await root.query(
     "INSERT INTO ms.payment_receipt_projections(authority_system,external_payment_id,amount_cents) VALUES('fictional-ci',$1,3400) RETURNING id",
