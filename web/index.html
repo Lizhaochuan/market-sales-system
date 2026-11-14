@@ -49,6 +49,7 @@
       <button data-view="overview" class="nav-item active"><span class="nav-glyph">▦</span>工作概览</button>
       <button data-view="students" class="nav-item"><span class="nav-glyph">◉</span>学生客户</button>
       <button data-view="contacts" class="nav-item"><span class="nav-glyph">♧</span>家长与联系人</button>
+      <button data-view="channels" class="nav-item"><span class="nav-glyph">☷</span>获客渠道</button>
       <button data-view="leads" class="nav-item"><span class="nav-glyph">✦</span>咨询与线索</button>
       <button data-view="opportunities" class="nav-item"><span class="nav-glyph">▤</span>销售商机</button>
       <button data-view="interactions" class="nav-item"><span class="nav-glyph">✎</span>跟进记录</button>
@@ -89,6 +90,22 @@
         </div>
       </div>
       <p class="muted footnote">未启用：真实付款、退款、自动成交、试听排课、CRM 发课时权益。这里显示的数字仅来自虚构演示数据。</p>
+    </section>
+
+    <section class="view" data-panel="channels">
+      <div class="section-head">
+        <h2>获客渠道目录</h2>
+        <p>只读查看本机构虚构渠道。停用渠道与受停用父渠道影响的子渠道分别显示，不修改来源归因或成交金额。</p>
+      </div>
+      <article class="panel">
+        <div class="panel-header">
+          <h3>当前机构渠道</h3>
+          <span id="channels-total" class="count">0 条</span>
+        </div>
+        <p id="channels-status" class="form-hint" role="status">当前仅为隔离只读目录，不代表实际获客渠道已经核实。</p>
+        <div id="channels-list" class="record-list" aria-label="本机构渠道列表"></div>
+      </article>
+      <p class="muted footnote">渠道维护、正式员工模式、跨渠道费用分摊、学生首次来源及商机归因金额尚未开放。这里没有新增、编辑、删除或启用渠道的操作。</p>
     </section>
 
     <section class="view" data-panel="students">
