@@ -78,6 +78,12 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
    {headers:{Authorization:'Bearer '+sign(staff)}});
   return {status:r.status,...await r.json()};
  };
+ const packetFreezeGates=async staff=>{
+  const r=await fetch('http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/packet-freeze-gates',
+    {headers:{Authorization:'Bearer '+sign(staff)}});
+  return {status:r.status,...await r.json()};
+ };
  const compensationChecklist=async staff=>{
   const r=await fetch('http://127.0.0.1:'+app.address().port+
     '/api/v1/marketing-campaigns/finance-incidents/compensation-checklist',
@@ -439,6 +445,41 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     await assert.rejects(pool.query('DELETE FROM ms.audit_events WHERE FALSE'),
       e=>e.code==='42501');
   }
+  // V3.2-70: fixture-only SHA-256 cannot be mistaken for a persisted, signed packet.
+  let freezeGates=await packetFreezeGates(A);
+  assert.equal(freezeGates.status,200,JSON.stringify(freezeGates));
+  assert.equal(freezeGates.data.items.some(x=>x.incident_id===incident1),false);
+  assert.equal((await packetFreezeGates(B)).status,401);
+  const checkNoFrozenHandoff=(x,complete)=>{
+    assert.ok(x,'a scoped escalated incident has a pending freeze gate');
+    assert.equal(x.incident_status,'manual_escalated');
+    assert.equal(x.issue_kind,'integrity_mismatch');
+    assert.equal(x.failure_classification,'snapshot_integrity_conflict');
+    assert.equal(x.sales_packet_complete,complete);
+    assert.equal(x.freeze_block_reason,complete
+      ?'blocked_independent_sales_review_and_freeze_missing'
+      :'blocked_sales_packet_incomplete');
+    assert.equal(x.freeze_registry_status,'fixture_only_not_available_in_runtime');
+    for(const k of ['frozen_source_revision','freeze_version','evidence_sha256'])
+      assert.equal(x[k],null,'real snapshot must not be invented: '+k);
+    for(const k of ['evidence_packet_frozen','independent_sales_case_approved',
+      'trusted_source_revision_verified','canonical_digest_verified',
+      'persistent_idempotency_registry_verified','revision_compare_and_swap_verified',
+      'evidence_immutability_verified','external_signature_verified',
+      'financial_receipt_verified','academic_receipt_verified',
+      'historical_originals_integrity_verified','original_records_mutable',
+      'packet_handoff_allowed','compensation_write_allowed','release_eligible',
+      'finance_authorized','execution_allowed','activity_publish_allowed'])
+      assert.equal(x[k],false,'untrusted production truth '+k);
+    for(const k of ['preserve_original_orders_required',
+      'preserve_original_payments_required','preserve_original_sale_events_required',
+      'preserve_original_lessons_required','hold_active'])
+      assert.equal(x[k],true,'original history must be preserved '+k);
+    for(const secret of ['organization_id','student_id','order_id','payment_id',
+      'lesson_id','request_key','audit_events','signature','evidence_ref'])
+      assert.equal(Object.hasOwn(x,secret),false,'freeze gate leaked '+secret);
+  };
+  checkNoFrozenHandoff(freezeGates.data.items.find(x=>x.incident_id===incident2),false);
   // V3.2-69: four approval stages are *requirements*, never actual approvals.
   let checklist=await compensationChecklist(A);
   assert.equal(checklist.status,200,JSON.stringify(checklist));
@@ -647,6 +688,24 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     checklist=await compensationChecklist(who);
     assert.equal(checklist.status,200,JSON.stringify(checklist));
     checkChecklist(checklist.data.items.find(x=>x.incident_id===incident2),true);
+    freezeGates=await packetFreezeGates(who);
+    assert.equal(freezeGates.status,200,JSON.stringify(freezeGates));
+    checkNoFrozenHandoff(freezeGates.data.items.find(x=>x.incident_id===incident2),true);
+  }
+  const illegalPacketFreeze=await fetch(
+    'http://127.0.0.1:'+app.address().port+
+    '/api/v1/marketing-campaigns/finance-incidents/packet-freeze-gates',{
+      method:'POST',headers:{Authorization:'Bearer '+sign(A),
+       'Content-Type':'application/json','Idempotency-Key':key()},
+      body:JSON.stringify({evidence_packet_frozen:true,
+        canonical_digest_verified:true,packet_handoff_allowed:true,
+        finance_authorized:true,release_eligible:true})
+    });
+  assert.equal(illegalPacketFreeze.status,404,'no runtime evidence freeze or handoff route');
+  for(const pool of [aRead,bRead,mRead,aWrite,mWrite]){
+    await assert.rejects(
+     pool.query("UPDATE ms.scoped_isolated_campaign_compensation_packet_freeze_gates SET packet_handoff_allowed=true WHERE FALSE"),
+     e=>['42501','55000','0A000'].includes(e.code));
   }
   const illegalChecklistApproval=await fetch(
     'http://127.0.0.1:'+app.address().port+
@@ -826,6 +885,8 @@ test('V3.2-57 strict campaign drafts validate owner, channels, dates, planned bu
     'revoked identity cannot list compensation candidates');
   assert.equal((await compensationChecklist(A)).status,403,
     'revoked identity cannot claim independent approval');
+  assert.equal((await packetFreezeGates(A)).status,403,
+    'revoked employee cannot read packet freeze gates');
   assert.equal(broadCalls,0);
  }finally{
   if(app?.listening)await new Promise(ok=>app.close(ok));

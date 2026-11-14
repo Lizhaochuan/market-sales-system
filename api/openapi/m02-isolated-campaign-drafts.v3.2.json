@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "M02 隔离市场活动草稿 API",
-    "version": "v3.2-69",
+    "version": "v3.2-70",
     "description": "Isolated fictional campaign draft creation, revisions and sales-manager-only review. Finance authorization and real spending not implemented. Read-only finance handoff preparation is not finance approval."
   },
   "x-contract-status": "isolated-implemented",
@@ -822,6 +822,28 @@
           }
         }
       }
+    },
+    "/api/v1/marketing-campaigns/finance-incidents/packet-freeze-gates": {
+      "get": {
+        "operationId": "listIsolatedCompensationPacketFreezeGates",
+        "summary": "Read-only runtime snapshot-freeze blockers; SHA256 freeze exists only in offline fixtures",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "At most 100 scoped rows; no authenticated source revision, persistent freeze, external handoff or release."
+          },
+          "403": {
+            "description": "Strict verified employee identity and dedicated DB reader"
+          },
+          "500": {
+            "description": "Projection failure and overflow fail closed"
+          }
+        }
+      }
     }
   },
   "x-sales-approval-releases-budget": false,
@@ -851,5 +873,9 @@
   "x-independent-three-party-compensation-approval-implemented": false,
   "x-compensation-independent-approval-implemented": false,
   "x-compensation-originals-verified": false,
-  "x-compensation-isolation-release-implemented": false
+  "x-compensation-isolation-release-implemented": false,
+  "x-offline-evidence-freeze-fixture-implemented": true,
+  "x-persistent-evidence-freeze-implemented": false,
+  "x-cross-module-packet-handoff-implemented": false,
+  "x-authoritative-source-revision-bound": false
 }

@@ -296,6 +296,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
     .toContainText('销售证据未齐：补充材料，不得释放');
   await expect(staffPage.locator('#campaign-checklist-list'))
     .toContainText('销售材料未齐：不能进入独立审核');
+  await expect(staffPage.locator('#campaign-packet-freeze-list'))
+    .toContainText('销售证据未齐，无法冻结材料包');
   await expect(staffPage.locator('#campaign-acceptance-list'))
     .toContainText('财务未签收');
   await expect(staffPage.locator('#campaign-evidence-list')).toContainText('缺少原报告人补充佐证');
@@ -312,6 +314,8 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-compensation-list')).toContainText('原记录保留');
   await expect(staffPage.locator('#campaign-compensation-list')).toContainText('禁止补偿执行');
   await expect(staffPage.locator('#campaign-checklist-list')).toContainText('三方最终验收未完成');
+  await expect(staffPage.locator('#campaign-packet-freeze-list'))
+    .toContainText('禁止跨模块交接');
   await expect(staffPage.locator('#campaign-incident-history-list')).toContainText('人工升级后销售侧补充材料');
   await expect(staffPage.locator('#campaign-finance-list')).toContainText('交接资料存在异常');
   expect((await admin.query('SELECT status FROM ms.isolated_campaign_finance_incidents WHERE id=$1',
@@ -459,6 +463,38 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-checklist-list'))
     .toContainText('销售材料未齐：不能进入独立审核');
 
+  // A forged frozen digest or signed external release must be rejected and cleared.
+  await staffPage.route('**/api/v1/marketing-campaigns/finance-incidents/packet-freeze-gates',
+    route=>route.fulfill({status:200,contentType:'application/json',
+      body:JSON.stringify({data:{items:[{
+        incident_id:escalationIncidentId,review_id:salesReviewId,
+        incident_status:'manual_escalated',issue_kind:'supporting_materials_gap',
+        failure_classification:'sales_evidence_gap',sales_packet_complete:false,
+        freeze_block_reason:'blocked_sales_packet_incomplete',
+        freeze_registry_status:'fixture_only_not_available_in_runtime',
+        frozen_source_revision:4,freeze_version:1,evidence_sha256:'a'.repeat(64),
+        evidence_packet_frozen:true,independent_sales_case_approved:true,
+        trusted_source_revision_verified:true,canonical_digest_verified:true,
+        persistent_idempotency_registry_verified:true,revision_compare_and_swap_verified:true,
+        evidence_immutability_verified:true,external_signature_verified:true,
+        financial_receipt_verified:true,academic_receipt_verified:true,
+        historical_originals_integrity_verified:true,
+        preserve_original_orders_required:true,preserve_original_payments_required:true,
+        preserve_original_sale_events_required:true,preserve_original_lessons_required:true,
+        original_records_mutable:false,packet_handoff_allowed:true,
+        compensation_write_allowed:true,hold_active:false,release_eligible:true,
+        finance_authorized:true,execution_allowed:true,activity_publish_allowed:true
+      }]}})
+    }));
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-packet-freeze-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-packet-freeze-status')).toContainText('读取失败');
+  await expect(staffPage.locator('#campaign-escalation-followup-panel')).toBeHidden();
+  await staffPage.unroute('**/api/v1/marketing-campaigns/finance-incidents/packet-freeze-gates');
+  await staffPage.getByRole('button',{name:'刷新数据'}).click();
+  await expect(staffPage.locator('#campaign-packet-freeze-list'))
+    .toContainText('销售证据未齐，无法冻结材料包');
+
   await staffPage.route('**/api/v1/marketing-campaigns/drafts',r=>r.fulfill({
     status:500,contentType:'application/json',
     body:JSON.stringify({code:'INTERNAL_ERROR',message:'隔离活动读取故障'})
@@ -531,6 +567,7 @@ test('M01 Chinese strict workbench: employee request, independent manager approv
   await expect(staffPage.locator('#campaign-trust-failure-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-compensation-list')).toBeEmpty();
   await expect(staffPage.locator('#campaign-checklist-list')).toBeEmpty();
+  await expect(staffPage.locator('#campaign-packet-freeze-list')).toBeEmpty();
   await expect(staffPage.locator('#channel-review-choice')).toBeEmpty();
   expect(await staffPage.evaluate(()=>localStorage.length)).toBe(0);
  }finally{
