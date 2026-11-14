@@ -518,6 +518,44 @@
           <div id="downstream-correction-cases-list" class="record-list"></div>
         </article>
       </div>
+      <div id="downstream-reconciliation-workbench" class="space-top" hidden>
+        <div class="section-head"><h2>下游纠错：两位不同主管核实与安全释放</h2>
+          <p>对已有商机的案件，仅在原学生关联实际核实无误且没有报价、订单、收退款、试课或履约影响时，第二名独立主管才能解除隔离。确属错误关联必须继续隔离并提交人工跨模块处理。</p></div>
+        <div class="two-col">
+          <article class="panel" id="downstream-first-review-card" hidden>
+            <h3>第一位主管：核对指定学生、商机和财务影响</h3>
+            <form id="downstream-first-review-form" class="field-stack">
+              <label>待核对隔离案件 <select name="case_id" data-options="downstreamCasesForFinding" required></select></label>
+              <label>核对结论 <select name="finding">
+                <option value="original_student_confirmed">原指定学生关联经核实正确</option>
+                <option value="wrong_student_confirmed">确认关联错误，必须人工跨模块纠错</option>
+              </select></label>
+              <label>指定学生独立核实材料 <input name="student_evidence_ref" maxlength="200" required></label>
+              <label>商机及来源核对材料 <input name="opportunity_evidence_ref" maxlength="200" required></label>
+              <label>订单与财务影响核查材料 <input name="finance_evidence_ref" maxlength="200" required></label>
+              <label>核对说明 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <p class="form-hint">第一轮核对不能解除销售隔离，核实材料引用不等于自动证明真实身份或资金已结清。</p>
+              <button class="primary" type="submit">登记第一主管独立核对</button>
+            </form>
+          </article>
+          <article class="panel" id="downstream-second-review-card" hidden>
+            <h3>另一名主管：最终安全判定</h3>
+            <form id="downstream-second-review-form" class="field-stack">
+              <label>待二次核对的结论 <select name="finding_id" data-options="downstreamFindingsForResolution" required></select></label>
+              <label>处置 <select name="resolution">
+                <option value="escalate_manual">保持隔离，转人工跨模块纠错</option>
+                <option value="release_verified">仅符合严格条件时解除隔离</option>
+              </select></label>
+              <label>第二主管核实证据 <input name="evidence_ref" maxlength="200" required></label>
+              <label>独立处置理由 <textarea name="reason_zh" maxlength="400" rows="3" required></textarea></label>
+              <p class="form-hint">必须与案件申请人及先前主管不同；系统实时核查指定学生已人工确认、下游没有报价、订单、资金、试课和履约记录。任何不满足条件都拒绝释放，不允许自动转移订单。</p>
+              <button class="secondary" type="submit">提交二次独立处置</button>
+            </form>
+          </article>
+        </div>
+        <article class="panel space-top"><h3>核对证据状态与隔离结果</h3>
+          <div id="downstream-reconciliations-list" class="record-list"></div></article>
+      </div>
       <article class="panel space-top" id="strict-consultation-card" hidden>
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>
