@@ -296,3 +296,11 @@
 - PostgreSQL 测试覆盖：缺失独立证据链、跨机构检查、旧版证据链签发、调查人及审核人自查、重复签发、原始事件摘要发生变动、审核意见被改成 DISAGREED、后续调查版本使之前两份审核和证据链失效、新版本只有一份审核时不得签发、重新双域审核后才能产生新证据链。隔离事件、全部调查和旧审核、旧证据链不可覆盖或删除，最新报告恒定 `quarantine_active=true`、`hold_active=true`、`release_eligible=false`。
 - **真实解除隔离前仍需独立验收**：需要可信安全事件来源及完整链外证据、不可篡改的外部审计和签名密钥托管、生产级身份与职责独立性、密钥被盗后的重新发行/吊销与历史取证、销售/财务/教务影响核对和回滚补偿、正式的多部门 UAT、灰度与故障恢复，以及专门审批的受控恢复路径。以上任一环节未完成不得将 CI `EVIDENCE_LINKED_STILL_HOLD` 误用为生产恢复授权。
 - 限制：当前 SHA-256 仅验证**同一隔离审计库中的记录一致性**，不证明调查证据来自可信外部事实；超级管理员仍可控制数据库，不能替代 WORM/HSM/可信时间或生产安全 UAT。继续 Draft / CI-only / 不合并 / 不部署 / 不改真实业务数据。
+
+## V121 最终验收门槛、生产缺口及人工签署矩阵（CI-only）
+- 新增机器可读权威清单 `docs/market-sales/v3-2-121-release-readiness.json`，按三种不可混淆的性质区分当前结果：`CI_SCOPE_ONLY`（7 项已经编制隔离测试证据的工程控制）、`UNVERIFIED`（10 项**尚未验证**的真实生产依赖）及 `NOT_SIGNED`（6 个**尚未取得**的人工独立签署职责）。CI 控制所附文件路径是测试证据位置，不是实际运行已通过的签署声明；每次 CI 运行的真实结果由 GitHub Actions 另行证明。
+- 生产缺口涉及生产 IAM 与特权身份、不可绕过的 Ed25519 验签/HSM、真正异地 WORM 与可信时间、安全监控及危机演练、销售原始订单和学生归属的核对、财务资金与补偿记录、教务履约记录、跨服务故障恢复、独立取证/隐私合规，以及正式 UAT 和部署变更控制。每一项目前为 `UNVERIFIED`，没有凭 CI 推断已经完成。
+- 必须独立验证和记录的责任域：`SECURITY`、`AUDIT`、`SALES`、`FINANCE`、`ACADEMIC`、`OPERATIONS`。本清单所有签署均为 `NOT_SIGNED`；不接受简单改写 JSON 或在 CI 中指定 `ciPassed=true` 来模拟真实批准。后续如推进正式生产验收，需要可信来源的证据摘要、审批人身份和可核验时间、版本绑定以及跨模块签署流程，不能回填为模拟的通过状态。
+- 只读模块 `src/cross-module-v121-release-readiness.mjs` 根据此清单始终产生 `HOLD_NOT_PRODUCTION_READY`、`release_authorized=false`、`merge_allowed=false`、`deploy_allowed=false`、`quarantine_active=true`、`hold_active=true`、`release_eligible=false`。它不包含生产恢复函数、访问令牌或解除隔离入口，且严格拒绝篡改固定的禁用动作、释放标志、外部缺口或未经验证的签署状态。
+- `tests/contracts/v3-2-121-release-readiness.test.mjs` 校验必备 ID 与测试路径、人工审批域、生产缺口和禁止动作，并测试“CI 全部通过也不能授权”“把一个缺口设置为 VERIFIED”“把一名审核人改为 SIGNED”“删掉生产禁用动作”等错误配置都 fail-closed。此检查已加入 V3.2-121 GitHub Actions，并对验收矩阵、只读代码与文档变更触发测试。
+- 该矩阵本身**不是**可用于批准合并和部署的生产变更管理系统；其唯一用途是准确记录当前未通过的正式验收条件，阻止模拟 CI 被错误当成正式授权。PR #129 保持 Draft，不合并、不部署、不修改真实学生、订单、收款或履约历史。BR-M04-001 仍以学生为主单位，家庭按需关联。
