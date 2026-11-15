@@ -93,11 +93,13 @@ export function createIsolatedManifestRevocationAudit({
    try{
     const result=await ledger.observe(scope,manifest_sequence,now(scope));
     if(!exact(result,['accepted','sequence','event_digest','reason_code',
-      'classification','revocation_recorded','source_snapshot_digest'])||
+      'classification','revocation_recorded','source_snapshot_digest',
+      'latest_manifest_digest'])||
      result.accepted!==true||
      result.reason_code!=='FIXTURE_EXPORT_OBSERVATION_APPENDED'||
      !Number.isSafeInteger(result.sequence)||result.sequence<1||
      !SHA.test(result.event_digest)||!SHA.test(result.source_snapshot_digest)||
+     !SHA.test(result.latest_manifest_digest)||
      !['REVOKED_PREVIOUSLY','REVOKED_SUPERSEDED_BY_LATER_EXPORT',
        'REVOKED_SOURCE_CHANGED_AFTER_EXPORT',
        'CURRENT_FIXTURE_SNAPSHOT_STILL_UNAUTHORIZED'].includes(
@@ -114,7 +116,8 @@ export function createIsolatedManifestRevocationAudit({
      !exact(event,AUDIT)||sha(event)!==result.event_digest||
      event.status!=='HOLD_ACTIVE_EXPORT_REVOCATION_AUDIT_ONLY')
      fail('EXPORT_REVOCATION_COMMIT_READBACK_UNVERIFIED');
-    if(latest.source_snapshot_digest!==result.source_snapshot_digest)
+    if(latest.source_snapshot_digest!==result.source_snapshot_digest||
+     latest.latest_manifest_digest!==result.latest_manifest_digest)
      return deny('BLOCKED_EXPORT_OBSERVATION_SOURCE_CHANGED_AFTER_COMMIT',{
       fixture_export_observation_recorded:true,
       audit_sequence:result.sequence,classification:result.classification,
