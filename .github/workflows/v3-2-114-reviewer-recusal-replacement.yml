@@ -1,0 +1,71 @@
+name: V3.2-114 signed reviewer recusal and replacement audit
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-reviewer-recusal-replacement.mjs'
+      - 'tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs'
+      - 'tests/helpers/v3-2-114-m02-postgres-reviewer-lifecycle.mjs'
+      - 'tests/fixtures/v3-2-114-m02-reviewer-lifecycle.sql'
+      - 'scripts/v3-2-114-setup-reviewer-lifecycle.mjs'
+      - 'spec/v3-2-114-m02-reviewer-recusal-replacement.json'
+      - 'docs/V3.2-114_M02_REVIEWER_RECUSAL_REPLACEMENT.md'
+      - '.github/workflows/v3-2-114-reviewer-recusal-replacement.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-reviewer-revocation-audit:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install ephemeral runtime without changing lock files
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Verify lifecycle and SQL helper syntax
+        run: |
+          node --check src/cross-module-reviewer-recusal-replacement.mjs
+          node --check tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs
+          node --check tests/helpers/v3-2-114-m02-postgres-reviewer-lifecycle.mjs
+          node --check scripts/v3-2-114-setup-reviewer-lifecycle.mjs
+      - name: Initialize isolated PostgreSQL V106 V109 V110 V112 V113 and V114 tables
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+          node scripts/v3-2-112-setup-evidence-intake-sql.mjs
+          node scripts/v3-2-113-setup-reviewer-assignments.mjs
+          node scripts/v3-2-114-setup-reviewer-lifecycle.mjs
+      - name: Run V114 independent reviewer recusal and durable replacement scenarios
+        run: node --test tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs
+      - name: Regress V113 reviewer assignment and V112 evidence intake SQL contracts
+        run: node --test tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs
+      - name: Regress V111 separate signed evidence and V110 negative SQL receipt
+        run: node --test tests/security/v3-2-111-m02-independent-evidence-review.test.mjs tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+      - name: Regress V109 lease V108 race V107 signed sources and V106 PostgreSQL
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Assert all production and independent business permissions remain disabled
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-114-m02-reviewer-recusal-replacement.json'));const d=s.hard_denials;if(s.parent_pr!==120||s.cases.length!==18||s.fixture_protocol.actual_organization_admin_appointment!==false||s.database.production_migration_created!==false||s.real_reviewer_appointments_verified!==0||s.cross_system_atomic_handoff_implemented!==false||s.external_contract_status!=='proposed-unimplemented'||Object.entries(d).some(([k,v])=>k==='hold_active'?v!==true:v!==false))process.exit(1)"
+      - name: Recheck V105 unsatisfied external admission requirements
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Repeat original eighteen V82 through V99 isolated security suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
