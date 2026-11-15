@@ -1,5 +1,5 @@
 // V3.2-121 CI-only independent Ed25519 audit proof: no production authority or storage.
-import {sign, verify} from 'node:crypto';
+import {sign, verify, randomUUID} from 'node:crypto';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIGEST=/^[0-9a-f]{64}$/;
@@ -114,4 +114,25 @@ export function inspectFixtureArchivedAuditAnchor({anchor,publicKeys,keyStates})
    state==='RETIRED'?'RETIRED_HISTORICAL_ONLY':'SIGNED_HISTORY_ONLY',
   cryptographically_valid:true,hold_active:true,release_eligible:false
  });
+}
+
+
+// Only the separately credentialed fixture attester can insert this immutable
+// database ticket. The writer connection never receives attester credentials.
+// Actual Ed25519 verification precedes the SQL request; PostgreSQL only binds
+// the trusted attester's decision to the exact statement and signature.
+export async function issueFixtureVerifiedAnchorTicket({
+ anchor,publicKeys,keyStates,current,nowMs,minimumSequence,attester
+}){
+ verifyFixtureActiveAuditAnchor({anchor,publicKeys,keyStates,current,nowMs,minimumSequence});
+ if(!attester || typeof attester.query!=='function')
+  fail('V121_ANCHOR_ATTESTER_UNAVAILABLE');
+ const ticket=randomUUID();
+ const s=anchor.statement;
+ await attester.query(
+  'SELECT v121_anchor.attest_verified_checkpoint($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::uuid,$6::jsonb,$7::text,$8::char(64))',
+  [ticket,s.organization_id,s.failure_id,s.snapshot_sequence,s.signer_id,
+   s,anchor.signature_b64,s.observed_digest]
+ );
+ return ticket;
 }
