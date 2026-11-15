@@ -956,3 +956,51 @@ test('dual-role closeout review proves evidence only and cannot clear security o
  assert.deepEqual(holds.rows.map(r=>[r.module_name,r.hold_active,r.release_eligible]),[['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=9')).rows[0].n,0);
 });
+
+test('UAT closeout evidence checklist detects gaps, ownership mistakes and preserves HOLD',async()=>{
+ const event='00000000-0000-4000-8000-0000000000e9';
+ const query=()=>admin.query('SELECT * FROM v106_test.fixture_closeout_uat_readiness WHERE organization_id=$1 AND event_id=$2',[a,event]);
+ const before=(await query()).rows[0];
+ assert.equal(before.evidence_count,0);
+ assert.equal(before.held_domains,3);
+ assert.equal(before.dual_review_recorded,true);
+ assert.equal(before.emergency_stop_active,true);
+ assert.equal(before.release_eligible,false);
+ const kinds=[
+  ['SOURCE_EVENT_AUTHENTICATED','SECURITY','00000000-0000-4000-8000-000000000011'],
+  ['AUDIT_CHAIN_RECONCILED','AUDIT','00000000-0000-4000-8000-000000000012'],
+  ['REVOCATION_EFFECTS_RECONCILED','SALES','00000000-0000-4000-8000-000000000013'],
+  ['FINANCIAL_IMPACT_RECONCILED','FINANCE','00000000-0000-4000-8000-000000000014'],
+  ['ACADEMIC_FULFILLMENT_RECONCILED','ACADEMIC','00000000-0000-4000-8000-000000000015']
+ ];
+ const sql='INSERT INTO v106_test.fixture_closeout_uat_evidence(organization_id,incident_id,event_id,evidence_kind,evidence_digest,responsible_domain,checked_by) VALUES($1,$2,$3,$4,$5,$6,$7)';
+ for(const [i,row] of kinds.entries()){
+  const [kind,domain,reviewer]=row;
+  const digest=createHash('sha256').update('fixture-uat-evidence-'+kind).digest('hex');
+  await admin.query(sql,[a,incident,event,kind,digest,i===1?'SECURITY':domain,reviewer]);
+ }
+ let read=(await query()).rows[0];
+ assert.equal(read.evidence_count,4);
+ assert.equal(read.independent_reviewers,5);
+ assert.equal(read.release_eligible,false);
+ // The original mistaken responsible domain is append-only. Simulate privileged fixture
+ // correction only to show that authoritative evidence checks remain fail-closed.
+ await admin.query('ALTER TABLE v106_test.fixture_closeout_uat_evidence DISABLE TRIGGER fixture_closeout_uat_evidence_immutable');
+ try{
+  await admin.query("UPDATE v106_test.fixture_closeout_uat_evidence SET responsible_domain='AUDIT' WHERE organization_id=$1 AND event_id=$2 AND evidence_kind='AUDIT_CHAIN_RECONCILED'",[a,event]);
+ }finally{
+  await admin.query('ALTER TABLE v106_test.fixture_closeout_uat_evidence ENABLE TRIGGER fixture_closeout_uat_evidence_immutable');
+ }
+ read=(await query()).rows[0];
+ assert.equal(read.evidence_count,5);
+ assert.equal(read.independent_reviewers,5);
+ assert.equal(read.held_domains,3);
+ assert.equal(read.emergency_stop_active,true);
+ assert.equal(read.dual_review_recorded,true);
+ assert.equal(read.hold_active,true);
+ assert.equal(read.release_eligible,false);
+ await assert.rejects(admin.query('DELETE FROM v106_test.fixture_closeout_uat_evidence WHERE organization_id=$1 AND event_id=$2',[a,event]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+ await assert.rejects(admin.query(sql,[a,incident,event,kinds[0][0],'a'.repeat(64),kinds[0][1],kinds[0][2]]),/duplicate key/);
+ await assert.rejects(issuerWriter.query('SELECT * FROM v106_test.fixture_closeout_uat_readiness'),/permission denied/);
+ await assert.rejects(admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),/V121_SECURITY_ALERT_UNRESOLVED/);
+});
