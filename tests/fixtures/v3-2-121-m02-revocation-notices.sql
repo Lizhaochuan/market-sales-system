@@ -822,6 +822,71 @@ CREATE TRIGGER fixture_uat_remediations_immutable BEFORE UPDATE OR DELETE
  ON v106_test.fixture_uat_remediations FOR EACH ROW
  EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
 
+-- Scoped, retry-safe fixture admission. The natural idempotency key is remediation_id.
+-- Returning ALREADY_RECORDED implies an exact match on the CURRENT version only.
+CREATE FUNCTION v106_test.fixture_submit_uat_remediation(
+ p_org uuid,p_failure uuid,p_remediation uuid,p_version integer,
+ p_digest char(64),p_actor uuid,p_note char(64))
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $retry_remediation$
+DECLARE existing record;
+DECLARE incident_scope uuid;
+DECLARE current_version integer;
+BEGIN
+ IF session_user<>'v106_closeout_writer' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_REMEDIATION_ROLE_DENIED';
+ END IF;
+ IF p_failure IS NULL OR p_remediation IS NULL OR p_actor IS NULL OR
+    p_version IS NULL OR p_version<1 OR
+    p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}$' OR
+    p_digest=repeat('0',64) OR
+    p_note IS NULL OR p_note !~ '^[a-f0-9]{64}$' THEN
+  RAISE EXCEPTION 'V121_REMEDIATION_INPUT_INVALID';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  p_org::text||'|'||p_failure::text,0));
+ SELECT incident_id INTO incident_scope FROM v106_test.fixture_uat_failures
+ WHERE organization_id=p_org AND failure_id=p_failure;
+ IF incident_scope IS NULL THEN
+  RAISE EXCEPTION 'V121_REMEDIATION_FAILURE_MISSING';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM v106_test.fixture_recovery_emergency_stops
+  WHERE organization_id=p_org AND incident_id=incident_scope
+   AND issuance_blocked IS TRUE) THEN
+  RAISE EXCEPTION 'V121_REMEDIATION_HOLD_REQUIRED';
+ END IF;
+ SELECT COALESCE(MAX(remediation_version),0) INTO current_version
+ FROM v106_test.fixture_uat_remediations
+ WHERE organization_id=p_org AND failure_id=p_failure;
+ SELECT * INTO existing FROM v106_test.fixture_uat_remediations
+ WHERE organization_id=p_org AND remediation_id=p_remediation;
+ IF FOUND THEN
+  IF existing.failure_id<>p_failure OR existing.remediation_version<>p_version OR
+     existing.new_evidence_digest<>p_digest OR existing.remediated_by<>p_actor OR
+     existing.remediation_note_digest<>p_note THEN
+   RAISE EXCEPTION 'V121_REMEDIATION_IDEMPOTENCY_CONFLICT';
+  END IF;
+  IF existing.remediation_version<>current_version THEN
+   RAISE EXCEPTION 'V121_UAT_REMEDIATION_SUPERSEDED';
+  END IF;
+  RETURN 'ALREADY_RECORDED';
+ END IF;
+ IF p_version<>current_version+1 THEN
+  RAISE EXCEPTION 'V121_UAT_REMEDIATION_VERSION_NOT_NEXT';
+ END IF;
+ INSERT INTO v106_test.fixture_uat_remediations
+  (organization_id,failure_id,remediation_id,remediation_version,
+   new_evidence_digest,remediated_by,remediation_note_digest)
+ VALUES(p_org,p_failure,p_remediation,p_version,p_digest,p_actor,p_note);
+ RETURN 'RECORDED';
+END;
+$retry_remediation$;
+REVOKE ALL ON FUNCTION v106_test.fixture_submit_uat_remediation(
+ uuid,uuid,uuid,integer,char(64),uuid,char(64)) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_submit_uat_remediation(
+ uuid,uuid,uuid,integer,char(64),uuid,char(64)) TO v106_closeout_writer;
+
 CREATE TABLE v106_test.fixture_uat_remediation_reviews (
  organization_id uuid NOT NULL,
  remediation_id uuid NOT NULL,
@@ -850,6 +915,7 @@ DECLARE original_reviewer uuid;
 DECLARE other_reviewer uuid;
 DECLARE i uuid;
 DECLARE failure_for_lock uuid;
+DECLARE recorded_review record;
 BEGIN
  IF session_user<>'v106_closeout_writer' OR
    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
@@ -892,16 +958,27 @@ BEGIN
    AND r.new_evidence_digest=p_digest) THEN
   RAISE EXCEPTION 'V121_UAT_REVIEW_EVIDENCE_MISMATCH';
  END IF;
+ IF NOT EXISTS(
+  SELECT 1 FROM v106_test.fixture_recovery_emergency_stops
+  WHERE organization_id=p_org AND incident_id=i AND issuance_blocked IS TRUE
+ ) THEN RAISE EXCEPTION 'V121_UAT_REVIEW_HOLD_REQUIRED'; END IF;
+ SELECT * INTO recorded_review FROM v106_test.fixture_uat_remediation_reviews
+ WHERE organization_id=p_org AND remediation_id=p_remediation
+  AND reviewer_domain=p_domain;
+ IF FOUND THEN
+  IF recorded_review.reviewer_id=p_reviewer AND
+     recorded_review.decision=p_decision AND
+     recorded_review.review_evidence_digest=p_digest THEN
+   RETURN; -- Exact replay, no second append or changed authority.
+  END IF;
+  RAISE EXCEPTION 'V121_UAT_REVIEW_IDEMPOTENCY_CONFLICT';
+ END IF;
  IF p_reviewer=owner_id OR p_reviewer=original_reviewer OR EXISTS(
   SELECT 1 FROM v106_test.fixture_uat_remediation_reviews
   WHERE organization_id=p_org AND remediation_id=p_remediation
     AND reviewer_id=p_reviewer) THEN
   RAISE EXCEPTION 'V121_UAT_REVIEWER_NOT_INDEPENDENT';
  END IF;
- IF NOT EXISTS(
-  SELECT 1 FROM v106_test.fixture_recovery_emergency_stops
-  WHERE organization_id=p_org AND incident_id=i AND issuance_blocked IS TRUE
- ) THEN RAISE EXCEPTION 'V121_UAT_REVIEW_HOLD_REQUIRED'; END IF;
  INSERT INTO v106_test.fixture_uat_remediation_reviews
  (organization_id,remediation_id,reviewer_id,reviewer_domain,decision,review_evidence_digest)
  VALUES(p_org,p_remediation,p_reviewer,p_domain,p_decision,p_digest);
