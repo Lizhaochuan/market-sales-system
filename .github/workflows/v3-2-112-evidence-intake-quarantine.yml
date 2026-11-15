@@ -1,0 +1,69 @@
+name: V3.2-112 evidence intake quarantine and independent owner claims
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-evidence-intake-quarantine.mjs'
+      - 'tests/fixtures/v3-2-112-m02-evidence-intake.sql'
+      - 'tests/helpers/v3-2-112-m02-evidence-intake-ledger.mjs'
+      - 'tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs'
+      - 'scripts/v3-2-112-setup-evidence-intake-sql.mjs'
+      - 'spec/v3-2-112-m02-evidence-intake-quarantine.json'
+      - 'docs/V3.2-112_M02_EVIDENCE_INTAKE_QUARANTINE.md'
+      - '.github/workflows/v3-2-112-evidence-intake-quarantine.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-evidence-quarantine:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install temporary CI runtime
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Syntax check metadata quarantine and SQL contracts
+        run: |
+          node --check src/cross-module-evidence-intake-quarantine.mjs
+          node --check tests/helpers/v3-2-112-m02-evidence-intake-ledger.mjs
+          node --check tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs
+          node --check scripts/v3-2-112-setup-evidence-intake-sql.mjs
+      - name: Prepare disposable scoped checkpoint lease notice and intake tables
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+          node scripts/v3-2-112-setup-evidence-intake-sql.mjs
+      - name: Run V112 unverified evidence intake SQL and tenant safety suite
+        run: node --test tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs
+      - name: Regress V111 independent sales finance academic evidence review
+        run: node --test tests/security/v3-2-111-m02-independent-evidence-review.test.mjs
+      - name: Regress V110 notice and negative receipt PostgreSQL transaction
+        run: node --test tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+      - name: Regress V109 V108 V107 and V106 disposable PostgreSQL tests
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Assert no owner assigned or external business authority verified
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const x=JSON.parse(readFileSync('spec/v3-2-112-m02-evidence-intake-quarantine.json'));const d=x.hard_denials;if(x.parent_pr!==118||x.roles.length!==6||x.tests.length!==14||x.roles.some(r=>r.assigned_person!=='UNASSIGNED'||r.outside_signature_authority_verified!==false)||x.candidate_owner_is_verified!==false||x.external_submission_is_authentic!==false||x.integration_with_prior_stages.promotion_to_verified!=='NOT_IMPLEMENTED'||x.production_schema_migration_039_created!==false||x.real_external_contract_status!=='proposed-unimplemented'||Object.entries(d).some(([k,v])=>k==='hold_active'?v!==true:v!==false))process.exit(1)"
+      - name: Recheck V105 unfulfilled external contract admission evidence
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Repeat eighteen V82-V99 isolated security suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
