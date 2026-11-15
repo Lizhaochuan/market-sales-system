@@ -75,3 +75,12 @@ CI 用 `tests/contracts/v3-2-121-iam-evidence.test.mjs` 测试完整合成 E1/E2
 `tests/contracts/v3-2-121-iam-source-version.test.mjs` 覆盖有效对象签名、版本切换、相同路径文件字节替换、审计镜像落后、不可变锁缺失、已撤销来源密钥、旧审核沿用、新版证据与旧清单冲突、来源不可用和失效时绝不签发。所有成功结果仍固定 `production_source_authenticated=false`、`production_evidence_collected=false`、`release_authorized=false`、`hold_active=true`、`release_eligible=false`。
 
 EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`；PR #129 保持 Draft、CI-only，不允许合并、部署或使用真实学生/订单/资金/履约数据测试。
+
+
+## EXT-001 模拟来源密钥独立性与读取中撤权复核（CI-only）
+
+- 对模拟 SECURITY 提交者、AUDIT 复核者、主存储见证者和审计镜像见证者执行 Ed25519 公钥 SPKI 指纹去重。只比较不同的 UUID/角色名不能证明密钥独立；即使两个来源签名各自有效，若底层公钥相同也必须拒绝。
+- 支持 Node.js 原生 public KeyObject 和可导入的公钥格式；无效/非 Ed25519/非公钥均拒绝，不能因安全加固阻断正常有效的测试对象。
+- 在异步双来源读取的每轮结束后重新检查 SECURITY/AUDIT 签署身份状态、两个来源见证签名及公钥独立性；模拟来源密钥在读取期间被撤销时，不允许调用 SQL attester。补充复用同一 Ed25519 公钥但签名有效的反例以及读取期间撤权的负向测试。
+- 这只是临时模拟信任注册表上的重新读取。最后一次复核与数据库提交之间仍有竞态窗口，未建立可信真实 IAM、外部对象不可变存储或数据库原生强制双来源校验。任何成功模拟验证仍不构成真实证据验收或解除 HOLD。
+- 以上变更的 CI 验收以最新提交的实际 GitHub Actions 结果为准；未通过时不得声明测试完成。PR #129 继续 Draft，禁止合并、部署及实际生产迁移。
