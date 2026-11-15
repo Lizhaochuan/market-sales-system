@@ -285,7 +285,7 @@
 ## V121 安全隔离事件误报调查与独立双域复核（CI-only）
 - 在独立隔离审计数据库中新增追加式 `quarantine_assessments` 和 `quarantine_assessment_reviews`：一个原始隔离事件可以有依次递增的调查版本，每个版本固定调查人、调查证据摘要和 `INCONCLUSIVE` / `CONFIRMED_COMPROMISE` / `FALSE_POSITIVE_CANDIDATE` 结论；原始隔离事件、调查历史及审核历史均不可覆盖或删除。
 - 独立 `v121_anchor_investigator` 只能通过受限入口提交下一版调查；`v121_anchor_security_reviewer` 和 `v121_anchor_audit_reviewer` 分别只能提交 SECURITY / AUDIT 职责审核，审核人不能是原调查人，也不能在同一版本中冒用两种职责。每条审核必须绑定对应调查版本的证据摘要。
-- 调查提交和双域审核对同一机构+隔离事件使用事务级锁，审核获得锁后重新验证当前最新调查版本，拒绝 `V121_QUARANTINE_ASSESSMENT_SUPERSEDED`。只统计当前最新版本的独立复核通过意见，**旧调查版本的两份认可不能自动沿用**。原始事件与调查不可跨机构读写，测试角色限定隔离租户范围。
+- 调查提交和双域审核对同一机构+隔离事件使用事务级锁，审核获得锁后重新验证当前最新调查版本，拒绝 `V121_QUARANTINE_ASSESSMENT_SUPERSEDED`。只统计当前最新版本的独立复核通过意见，**旧调查版本的两份认可不能自动沿用**。调查与复核写入入口强制限定 CI 隔离机构；隔离事件、调查及审核三张只读表额外启用针对 `v121_anchor_reader` 的 PostgreSQL RLS，诊断视图本身也限制为同一机构。测试管理员注入另一机构事件后，普通 reader 不得读取该事件或其诊断信息。此配置仅是当前单租户测试角色的显式边界，不代表已完成通用多租户授权设计。
 - `quarantine_review_diagnostics` 输出当前最新调查版本、结论、双方认可数量与固定 `QUARANTINE_RETAINED`。**即使最新调查为 `FALSE_POSITIVE_CANDIDATE` 且 SECURITY、AUDIT 双方均认可，也依旧保持原始隔离、所有历史记录、`quarantine_active=true`、`hold_active=true` 和 `release_eligible=false`**。本轮没有创建任何恢复凭据、撤销隔离、跳过签名验真或改变生产资金订单的路径。
 - CI 覆盖无原始事件、跨租户尝试、错误复核职责、调查人自审、重复审核、跨职责重用审核人、错误证据摘要、旧版复核失效及两次调查后重建最新诊断。原始隔离事件、CRM 三模块 HOLD 和事故 STOP 全程保留。
 - **限制**：这是隔离 PostgreSQL 中的工作流边界测试，尚无真实安全调查的证据采集、独立身份认证、法律合规调查确认或生产隔离解除机制。误报候选仅是待调查结论，**不是恢复批准**。继续 Draft / CI-only / 不合并 / 不部署。
