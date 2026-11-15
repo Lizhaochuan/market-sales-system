@@ -1374,7 +1374,7 @@ function setView(view){
 function snapshotMainForms(){
   const out={};
   document.querySelectorAll('#workspace form').forEach(form=>{
-    if(!form.id||form.id==='business-form'||form.id==='audit-form')return;
+    if(!form.id||form.id==='business-form'||form.id==='audit-form'||form.closest('#lead-desk'))return;
     const touchedText=[...form.elements].some(el=>{
       if(!el.name||el.disabled||el.type==='hidden'||el.type==='submit'||el.type==='button')return false;
       if(el.type==='checkbox'||el.type==='radio')return el.checked!==el.defaultChecked;
@@ -1396,6 +1396,9 @@ function snapshotMainForms(){
 async function restoreExpiredDraft(draft){
   if(!draft)return false;
   let restored=false;
+  if(draft.leadDraft&&typeof window.__restoreLeadDraft==='function'){
+    if(await window.__restoreLeadDraft(draft.leadDraft))restored=true;
+  }
   if(draft.mainForms){
     for(const [formId,fields] of Object.entries(draft.mainForms)){
       const form=$(formId);if(!form)continue;
@@ -1432,10 +1435,11 @@ function logout(notice=true){
   if(notice==='expired'&&state.user?.staff_id){
     const businessDraft=typeof window.__snapshotBusinessDraft==='function'?window.__snapshotBusinessDraft():null;
     const mainForms=snapshotMainForms();
-    if(businessDraft||Object.keys(mainForms).length){
+    const leadDraft=typeof window.__snapshotLeadDraft==='function'?window.__snapshotLeadDraft():null;
+    if(businessDraft||leadDraft||Object.keys(mainForms).length){
       state.expiredDraft={
         staffId:state.user.staff_id,strict:state.strict,
-        view:state.view,businessDraft,mainForms
+        view:state.view,businessDraft,mainForms,leadDraft
       };
     }else state.expiredDraft=null;
   }else{

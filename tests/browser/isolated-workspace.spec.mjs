@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 test('fictional workspace: tasks, quote versions, order intent, safe totals, logout and mobile',async({page},testInfo)=>{
- await page.goto('/');
+ await page.goto('/?workspace=legacy');
  await page.locator('#login-form select').selectOption('sales-a');
  await page.locator('#login-form input').fill('fictional-strong-ui-demo-passphrase-0001');
  await page.getByRole('button',{name:'进入工作台',exact:true}).click();
@@ -70,7 +70,7 @@ test('fictional workspace: tasks, quote versions, order intent, safe totals, log
 });
 
 test('workspace refresh failure clears records and delayed requests cannot refill logout',async({page})=>{
- await page.goto('/');
+ await page.goto('/?workspace=legacy');
  await page.locator('#login-form input').fill('fictional-strong-ui-demo-passphrase-0001');
  await page.getByRole('button',{name:'进入工作台',exact:true}).click();
  await page.locator('#workspace-business-nav').click();
@@ -94,7 +94,7 @@ test('workspace refresh failure clears records and delayed requests cannot refil
 });
 
 test('a delayed save cannot reset another employee session or expose the prior task',async({page})=>{
- await page.goto('/');
+ await page.goto('/?workspace=legacy');
  const login=async account=>{
   await page.locator('#login-form select').selectOption(account);
   await page.locator('#login-form input').fill('fictional-strong-ui-demo-passphrase-0001');
@@ -124,7 +124,7 @@ test('a delayed save cannot reset another employee session or expose the prior t
 });
 
 test('UAT fixes: Step 2 notes/carryover/jump, Step 3 future default, Step 4 presets, Step 5 quote order & Step 8 toggle',async({page})=>{
- await page.goto('/');
+ await page.goto('/?workspace=legacy');
  await page.locator('#login-form select').selectOption('sales-a');
  await page.locator('#login-form input').fill('fictional-strong-ui-demo-passphrase-0001');
  await page.getByRole('button',{name:'进入工作台',exact:true}).click();
@@ -245,7 +245,7 @@ test('UAT fixes: Step 2 notes/carryover/jump, Step 3 future default, Step 4 pres
 });
 
 test('Step 5 & Step 7: switching consultants clears consultation time; 401 expiry restores draft only for same employee in memory',async({page})=>{
- await page.goto('/');
+ await page.goto('/?workspace=legacy');
  const login=async account=>{
   await page.locator('#login-form select').selectOption(account);
   await page.locator('#login-form input').fill('fictional-strong-ui-demo-passphrase-0001');

@@ -1,5 +1,7 @@
 # 隔离工作台 8 步 UAT 修复与 AI/开发交接记录
 
+> 后续销售流程已改为单 Lead 简洁工作台，日常入口与最新测试步骤以 [SIMPLE_SALES_FLOW.md](SIMPLE_SALES_FLOW.md) 为准。本文保留此前 8 步 UAT 的修复记录。
+
 > **用途**：本文件记录在 Draft PR #129 基线提交 `47cbfa6`（`fix: preserve workspace sessions during delayed saves and improve mobile layout`）之后，针对 8 步人工 UAT 反馈所做的代码修复、安全边界约定与自动化测试，供后续 **ChatGPT** 或其他开发者无缝接手。
 >
 > **状态约束（未改变）**：继续保持 `MS_STAGE=isolated-test`、`EXT-001=UNVERIFIED`、`HOLD=true`、`release_eligible=false`、`merge_authorized=false`、`deploy_authorized=false`。本轮修复仅改善隔离演示工作台的真实可用性与界面衔接，不构成生产验收、不接入真实 CRM/财务。

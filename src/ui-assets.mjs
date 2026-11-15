@@ -4,6 +4,7 @@ const files=new Map([
   ['/',['../web/index.html','text/html; charset=utf-8']],
   ['/app.js',['../web/app.js','text/javascript; charset=utf-8']],
   ['/business-workspace.js',['../web/business-workspace.js','text/javascript; charset=utf-8']],
+  ['/lead-desk.js',['../web/lead-desk.js','text/javascript; charset=utf-8']],
   ['/identity.js',['../web/identity.js','text/javascript; charset=utf-8']],
   ['/styles.css',['../web/styles.css','text/css; charset=utf-8']]
 ]);

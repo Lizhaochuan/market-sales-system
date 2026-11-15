@@ -1,6 +1,7 @@
 // Explicit opt-in fictional planning workspace. Never calls CRM, finance or messaging.
 import {randomUUID,createHash} from 'node:crypto';
 import {fail,ownsStudent,ownsOpportunity} from './auth.mjs';
+import {leadDesk} from './lead-desk.mjs';
 
 const kinds=new Set(['tasks','trials','quotes','order-intents','expense-plans','automation-rules']);
 const flags={scope:'FICTIONAL_PLANNING_ONLY',hold_active:true,release_eligible:false,
@@ -33,7 +34,7 @@ async function save(c,ctx,{id=randomUUID(),kind,state,body,studentId=null,opport
  const r=await c.query(`INSERT INTO ms_workspace.records
   (id,organization_id,owner_user_id,kind,state,body,student_id,opportunity_id,dedupe_key)
   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(organization_id,owner_user_id,dedupe_key) DO NOTHING RETURNING *`,
- [id,ctx.user.organization_id,ctx.user.id,kind,state,body,studentId,opportunityId,dedupeKey]);
+ [id,ctx.user.organization_id,ctx.workspaceOwner??ctx.user.id,kind,state,body,studentId,opportunityId,dedupeKey]);
  if(!r.rowCount)return null;
  await history(c,ctx,r.rows[0]);return r.rows[0];
 }
@@ -87,6 +88,7 @@ async function normalize(c,ctx,kind,b){
 }
 const stateFor=kind=>kind==='tasks'?'open':kind==='automation-rules'?'configured':'draft';
 export async function workspaceOperation(c,ctx,{method,parts,body}){
+ if(parts[0]==='leads')return leadDesk(c,ctx,{method,parts,body},workspaceOperation);
  const [kind,id,action]=parts;
  if(method==='GET'&&kind==='summary'&&!id)return summary(c,ctx);
  if(method==='GET'&&kind==='interactions'&&!id){

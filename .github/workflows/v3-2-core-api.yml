@@ -169,6 +169,8 @@ jobs:
         run: |
           node --check web/app.js
           node --check web/business-workspace.js
+          node --check web/lead-desk.js
+          node --check src/lead-desk.mjs
           node --check src/isolated-business-workspace.mjs
           node --check web/identity.js
           node --check src/scoped-employee-read-api.mjs
