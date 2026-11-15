@@ -10,7 +10,7 @@ import {signFixtureAuditAnchor,verifyFixtureAuditAnchor,verifyFixtureActiveAudit
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
-import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake} from '../../src/cross-module-v121-iam-evidence.mjs';
+import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake,verifyFixtureExt001BytesAndFingerprint} from '../../src/cross-module-v121-iam-evidence.mjs';
 const hash=o=>createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const a='11111111-1111-4111-8111-111111111111';
 const b='22222222-2222-4222-8222-222222222222';
@@ -1497,9 +1497,10 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
  await admin.query("CREATE ROLE v121_iam_intake_writer LOGIN PASSWORD 'test_only_iam_intake_writer'");
  await admin.query("CREATE ROLE v121_iam_intake_reader LOGIN PASSWORD 'test_only_iam_intake_reader'");
  await admin.query("CREATE ROLE v121_iam_revoker LOGIN PASSWORD 'test_only_iam_revoker'");
+ await admin.query("CREATE ROLE v121_iam_provenance_attester LOGIN PASSWORD 'test_only_iam_provenance_attester'");
  await admin.query('CREATE DATABASE v121_anchor_isolated');
  await admin.query('REVOKE CONNECT ON DATABASE v121_anchor_isolated FROM PUBLIC');
- await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security,v121_anchor_investigator,v121_anchor_security_reviewer,v121_anchor_audit_reviewer,v121_anchor_evidence_checker,v121_iam_intake_writer,v121_iam_intake_reader,v121_iam_revoker');
+ await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security,v121_anchor_investigator,v121_anchor_security_reviewer,v121_anchor_audit_reviewer,v121_anchor_evidence_checker,v121_iam_intake_writer,v121_iam_intake_reader,v121_iam_revoker,v121_iam_provenance_attester');
  const ledgerAdmin=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
  let anchorReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
  const anchorWriter=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
@@ -2260,8 +2261,10 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
  const writerB=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_intake_writer',password:'test_only_iam_intake_writer'});
  const readOnly=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_intake_reader',password:'test_only_iam_intake_reader'});
  const revoker=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_revoker',password:'test_only_iam_revoker'});
+ const attester=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_provenance_attester',password:'test_only_iam_provenance_attester'});
  const receiptSql='SELECT v121_anchor.fixture_register_iam_evidence($1::uuid,$2::integer,$3::uuid,$4::char(64),$5::char(64),$6::char(64),$7::uuid,$8::uuid,$9::timestamptz) AS verdict';
  const statusSql='SELECT * FROM v121_anchor.fixture_iam_evidence_status($1::uuid,$2::integer)';
+ const attestSql='SELECT v121_anchor.fixture_attest_iam_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz) AS verdict';
  const revokeSql='SELECT v121_anchor.fixture_revoke_iam_evidence($1::uuid,$2::integer,$3::uuid,$4::char(64))';
  const issuerId='00000000-0000-4000-8000-0000000000c1';
  const reviewerId='00000000-0000-4000-8000-0000000000c3';
@@ -2274,21 +2277,23 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
  ]);
  const now=Date.now();
  const expiresAt=now+1_800_000;
- const make=revision=>{
+ const make=(revision,label=String(revision))=>{
+  const e1Bytes=Buffer.from('fixture-iam-roles-'+label);
+  const e2Bytes=Buffer.from('fixture-iam-negatives-'+label);
   const body={
    schema_version:'v3.2-121-ext001-evidence-v1',
    scope:'CI_FIXTURE_ONLY',gap_id:'EXT-001',organization_id:a,
-   revision_id:randomUUID(),collected_at_ms:now-60_000,valid_until_ms:expiresAt,
+   revision_no:revision,revision_id:randomUUID(),collected_at_ms:now-60_000,valid_until_ms:expiresAt,
    producer:{principal_id:issuerId,key_id:issuerKeyId,domain:'SECURITY'},
    artifacts:[
     {id:'EXT-001-E1',kind:'IAM_ROLE_INVENTORY',
      uri:'fixture://ext001/synthetic/iam-inventory',
-     sha256:createHash('sha256').update('fixture-iam-roles-'+revision).digest('hex'),
+     sha256:createHash('sha256').update(e1Bytes).digest('hex'),
      source:'CI_SYNTHETIC',classification:'SYNTHETIC',
      captured_at_ms:now-90_000,expires_at_ms:expiresAt},
     {id:'EXT-001-E2',kind:'RBAC_NEGATIVE_TESTS',
      uri:'fixture://ext001/synthetic/denial-tests',
-     sha256:createHash('sha256').update('fixture-iam-negatives-'+revision).digest('hex'),
+     sha256:createHash('sha256').update(e2Bytes).digest('hex'),
      source:'CI_SYNTHETIC',classification:'SYNTHETIC',
      captured_at_ms:now-89_000,expires_at_ms:expiresAt}
    ],
@@ -2306,21 +2311,34 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    issuerPrivateKey:issuerKeys.privateKey,reviewerPrivateKey:reviewerKeys.privateKey,
    reviewerId,reviewerKeyId,reviewedAtMs:now-30_000
   });
-  const fingerprint=fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs:now});
-  return {envelope,fingerprint,receiptId:randomUUID()};
+  const artifactBytes=new Map([['EXT-001-E1',e1Bytes],['EXT-001-E2',e2Bytes]]);
+  const fingerprint=verifyFixtureExt001BytesAndFingerprint(envelope,{trustedKeys,nowMs:now,artifactBytes});
+  return {envelope,fingerprint,receiptId:randomUUID(),artifactBytes};
  };
  const params=(revision,proof)=>[a,revision,proof.receiptId,
   proof.fingerprint.evidence_digest,proof.fingerprint.evidence_e1_digest,
   proof.fingerprint.evidence_e2_digest,
   proof.fingerprint.issuer_id,proof.fingerprint.reviewer_id,
   new Date(proof.fingerprint.valid_until_ms)];
+ const provenanceParams=(revision,proof)=>[a,revision,proof.fingerprint.revision_id,
+  proof.receiptId,proof.fingerprint.evidence_digest,proof.fingerprint.evidence_e1_digest,
+  proof.fingerprint.evidence_e2_digest,proof.fingerprint.issuer_id,
+  proof.fingerprint.reviewer_id,proof.fingerprint.issuer_signature_digest,
+  proof.fingerprint.reviewer_signature_digest,new Date(proof.fingerprint.valid_until_ms)];
+ const attest=async(revision,proof)=>attester.query(attestSql,provenanceParams(revision,proof));
  const status=async revision=>(await readOnly.query(statusSql,[a,revision])).rows[0];
  try{
   await audit.query(await readFile(new URL('../fixtures/v3-2-121-ext001-iam-evidence-ledger.sql',import.meta.url),'utf8'));
-  await Promise.all([writerA.connect(),writerB.connect(),readOnly.connect(),revoker.connect()]);
+  await Promise.all([writerA.connect(),writerB.connect(),readOnly.connect(),revoker.connect(),attester.connect()]);
   assert.deepEqual([ (await status(1)).receipt_status,(await status(1)).history_count ],
    ['RECEIPT_NOT_FOUND',0]);
   const p1=make(1);
+  await assert.rejects(writerA.query(receiptSql,params(1,p1)),
+   /V121_IAM_PROVENANCE_MISSING_OR_MISMATCH/);
+  await assert.rejects(writerA.query(attestSql,provenanceParams(1,p1)),/permission denied/);
+  await assert.rejects(attester.query(receiptSql,params(1,p1)),/permission denied/);
+  assert.equal((await attest(1,p1)).rows[0].verdict,'ATTESTED_SYNTHETIC_STILL_HOLD');
+  assert.equal((await attest(1,p1)).rows[0].verdict,'EXACT_PROVENANCE_RETRY_STILL_HOLD');
   assert.equal((await writerA.query(receiptSql,params(1,p1))).rows[0].verdict,
    'REGISTERED_SYNTHETIC_STILL_HOLD');
   assert.equal((await writerB.query(receiptSql,params(1,p1))).rows[0].verdict,
@@ -2343,6 +2361,9 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   await assert.rejects(writerA.query(revokeSql,[a,1,randomUUID(),p1.fingerprint.evidence_digest]),
    /permission denied/);
   const p2=make(2);
+  await assert.rejects(writerB.query(receiptSql,params(2,{...p1,receiptId:randomUUID()})),
+   /V121_IAM_PROVENANCE_MISSING_OR_MISMATCH/);
+  await attest(2,p2);
   assert.equal((await writerA.query(receiptSql,params(2,p2))).rows[0].verdict,
    'REGISTERED_SYNTHETIC_STILL_HOLD');
   assert.equal((await status(1)).receipt_status,'RECEIPT_SUPERSEDED_STILL_HOLD');
@@ -2361,6 +2382,11 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   await assert.rejects(revoker.query(revokeSql,[a,2,randomUUID(),reason]),
    /V121_IAM_REVISION_ALREADY_REVOKED/);
   const p3=make(3);
+  const changedBytes=new Map(p3.artifactBytes);
+  changedBytes.set('EXT-001-E2',Buffer.from('replaced file bytes'));
+  assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(p3.envelope,
+   {trustedKeys,nowMs:now,artifactBytes:changedBytes}),{code:'V121_IAM_FILE_DIGEST_MISMATCH'});
+  await attest(3,p3);
   assert.equal((await writerA.query(receiptSql,params(3,p3))).rows[0].verdict,
    'REGISTERED_SYNTHETIC_STILL_HOLD');
   await writerA.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
@@ -2386,16 +2412,20 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   await assert.rejects(writerB.query(receiptSql,params(3,p3)),
    /V121_IAM_REVISION_CONFLICT/);
   const p4=make(4);
+  await attest(4,p4);
   await writerA.query(receiptSql,params(4,p4));
   assert.equal((await status(3)).receipt_status,'RECEIPT_SUPERSEDED_STILL_HOLD');
   assert.equal((await status(4)).receipt_status,'VALID_SYNTHETIC_STILL_HOLD');
-  const p5a=make('5a'),p5b=make('5b');
+  const p5a=make(5,'5a'),p5b=make(5,'5b');
+  await attest(5,p5a);
+  await assert.rejects(attest(5,p5b),/V121_IAM_PROVENANCE_CONFLICT/);
   const race=await Promise.allSettled([
    writerA.query(receiptSql,params(5,p5a)),
    writerB.query(receiptSql,params(5,p5b))
   ]);
   assert.deepEqual(race.map(x=>x.status).sort(),['fulfilled','rejected']);
-  assert.match(race.find(x=>x.status==='rejected').reason.message,/V121_IAM_REVISION_CONFLICT/);
+  assert.match(race.find(x=>x.status==='rejected').reason.message,
+   /V121_IAM_REVISION_CONFLICT|V121_IAM_PROVENANCE_MISSING_OR_MISMATCH/);
   assert.equal((await status(5)).receipt_status,'VALID_SYNTHETIC_STILL_HOLD');
   assert.equal((await status(5)).history_count,5);
   // The reader is restarted to prove receipt history survives connections.
@@ -2414,13 +2444,14 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    /V121_ANCHOR_LEDGER_IMMUTABLE/);
   const count=(await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_evidence_receipts WHERE organization_id=$1',[a])).rows[0].n;
   const revoked=(await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_evidence_revocations WHERE organization_id=$1',[a])).rows[0].n;
-  assert.deepEqual([count,revoked],[5,1]);
+  const provenance=(await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_provenance_proofs WHERE organization_id=$1',[a])).rows[0].n;
+  assert.deepEqual([count,revoked,provenance],[5,1,5]);
   const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
   assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),
    [['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
   assert.equal((await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0].issuance_blocked,true);
  }finally{
-  await Promise.allSettled([writerA.end(),writerB.end(),readOnly.end(),revoker.end()]);
+  await Promise.allSettled([writerA.end(),writerB.end(),readOnly.end(),revoker.end(),attester.end()]);
   await audit.end();
  }
 });
