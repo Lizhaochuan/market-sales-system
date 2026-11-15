@@ -149,6 +149,29 @@ test('receipt cross-tenant write and unknown notice fail closed',async()=>{
  await assert.rejects(ledger.appendNegativeReceipt({organization_id:b,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'}),{code:'NOTICE_RECEIPT_TARGET_ABSENT'});
  await assert.rejects(writer.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[b,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']),/row-level security/);
 });
+test('coverage snapshot contains consistent recipient set and receipt states',async()=>{
+ const scope=Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest'].map(k=>[k,input[k]]));
+ const snap=await ledger.captureCoverageSnapshot(scope);
+ assert.equal(snap.heads.revoked,true);
+ assert.deepEqual(snap.recipients,[recipient,extra]);
+ assert.equal(snap.notices.find(n=>n.epoch===20).state,'COPY_NOT_RETRACTABLE');
+ assert.equal((await service.report(scope)).hold_active,true);
+});
+test('failed SQL insert rolls back with no partial negative receipt',async()=>{
+ const q=await service.enqueue({...input,epoch:24});
+ const before=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(before.rows[0].n,0);
+ const client=await writer.connect();
+ try{
+  await client.query('BEGIN');
+  await client.query('INSERT INTO v106_test.fixture_revocation_negative_receipts(organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[a,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']);
+  await assert.rejects(client.query('INSERT INTO v106_test.fixture_revocation_negative_receipts(organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[a,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']));
+  await client.query('ROLLBACK');
+ }finally{client.release();}
+ const after=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(after.rows[0].n,0);
+ assert.equal((await ledger.appendNegativeReceipt({organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'})).hold_active,true);
+});
 test('receipt integrity failure prevents coverage report',async()=>{
  const q=await service.enqueue({...input,epoch:23});
  const base={organization_id:a,incident_id:incident,notice_id:q.notice_id};
