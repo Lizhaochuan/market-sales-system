@@ -6,7 +6,10 @@ import {verifyFixtureNegativeReceiptProof} from '../../src/cross-module-fixture-
 const sha=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const fail=c=>{const e=new Error(c);e.code=c;throw e;};
 const scopeParams=x=>[x.organization_id,x.incident_id];
-export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthority,receiptPublicKey,receiptClock}={}){
+export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthority,receiptPublicKey,receiptClock,
+ beforeReceiptCommit=async()=>{},afterReceiptCommit=async()=>{}}={}){
+ if(typeof beforeReceiptCommit!=='function'||typeof afterReceiptCommit!=='function')
+  throw TypeError('V121 fixture commit hooks must be functions');
  if(process.env.V106_ISOLATED_PG!=='YES_TEST_ONLY'||!pool?.connect)
   throw TypeError('V121 requires disposable PostgreSQL');
  async function checkProof(input){
@@ -197,7 +200,11 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
      if(row.receipt_state!==input.receipt_state)fail('NOTICE_RECEIPT_REPLAY_CONFLICT');
      let saved;try{saved=JSON.parse(row.receipt_payload);}catch{fail('NOTICE_RECEIPT_TAMPERED');}
      if(JSON.stringify(saved.proof)!==JSON.stringify(input.proof))fail('NOTICE_RECEIPT_REPLAY_CONFLICT');
+     await beforeReceiptCommit({notice_id:input.notice_id,duplicate:true});
+     await checkProof(input);
      await c.query('COMMIT');started=false;
+     await afterReceiptCommit({notice_id:input.notice_id,duplicate:true});
+     await checkProof(input);
      return {receipt_digest:row.receipt_digest,duplicate:true,hold_active:true};
     }
     if(input.receipt_sequence!==rows.rowCount+1)fail('NOTICE_RECEIPT_OUT_OF_ORDER');
@@ -207,7 +214,10 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
     const digest=sha(payload);
     await c.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
      [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,JSON.stringify(payload)]);
+    await beforeReceiptCommit({notice_id:input.notice_id,duplicate:false});
+    await checkProof(input);
     await c.query('COMMIT');started=false;
+    await afterReceiptCommit({notice_id:input.notice_id,duplicate:false});
     await checkProof(input);
     return {receipt_digest:digest,duplicate:false,hold_active:true};
    }catch(e){
