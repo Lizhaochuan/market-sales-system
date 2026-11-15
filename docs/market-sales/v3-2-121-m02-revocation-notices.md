@@ -220,3 +220,9 @@
 - 新版整改 INSERT 与复核函数采用同一机构+失败项的 PostgreSQL 事务级 advisory lock。审核先根据整改 ID 查询失败项锁作用域，获得锁后**重新进行最新版本、证据摘要、人员独立性与 HOLD 校验**，并在该锁保护下提交复核，避免版本切换期间的检查-写入竞争。
 - 并发测试同时提交两个 `remediation_version=4` 候选，要求严格恰好一个成功、另一个被版本递增或唯一键规则拒绝；旧版证据、失败候选 ID 均无法获取新版复核。另测试 v5 版本新增与 v4 最后一次复核竞争：v4 复核可以在线性化时先于新版本提交，也可能被拒绝，但**v5 的最新复核计数必须为 0**，不会继承 v4 的任何审核结论。
 - 事故紧急停止仍保持启用；销售/财务/教务 HOLD 不存在解除路径。此锁仅在本隔离 PostgreSQL 实例中提供顺序化，不保证跨真实系统/服务的全局一致性。正式上线还需要真实 IAM、审计源、跨库消息边界和 UAT。
+
+## V121 整改与复核重试幂等性、提交前断连（CI-only）
+- 新增 `fixture_submit_uat_remediation` 受限 SQL 入口，按 `(organization_id,remediation_id)` 作为幂等键，持有机构+失败项的事务级 advisory lock。只有同一失败项、版本、证据、整改人员、备注全部一致且仍是**当前最新整改版本**，才返回 `ALREADY_RECORDED`；新提交返回 `RECORDED`；同 ID 不同负载拒绝 `V121_REMEDIATION_IDEMPOTENCY_CONFLICT`，过期版本拒绝，事故 STOP 不存在或已关闭时 fail closed。
+- `fixture_record_uat_remediation_review` 在原有最新版本检查、证据绑定和事故 HOLD 验证之后，支持同一复核职责、同一人员、相同意见及证据的**严格幂等重试**。复核职责相同而内容改变则拒绝 `V121_UAT_REVIEW_IDEMPOTENCY_CONFLICT`；不同身份跨审核职责仍要求独立。记录始终只追加，不覆盖历史。
+- PostgreSQL CI 测试以 `BEGIN`→写入→`ROLLBACK` 模拟异常回滚，并用 `pg_terminate_backend` 在事务已执行、但未 COMMIT 时主动终止模拟客户端连接；两者均不得保留半提交的整改。随后两个同参数请求同时重试，应只生成一条记录；审核的事务回滚、双请求重试和冲突重试同样受检。最终三个模块均保持 HOLD，安全告警未解决，仍禁止恢复密钥发行。
+- 限制：这是同一 PostgreSQL 事务内的精确重试验证，不能替代跨服务的可靠投递、断网分区及多数据库分布式事务演练。真实 IAM、外部密钥托管、独立不可改审计和生产 UAT 仍未完成。继续 Draft / CI-only / 不合并 / 不部署。
