@@ -117,3 +117,11 @@ EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`
 - 回归测试包含缺少 signer、格式错误 MAC、错误密钥版本、伪造 MAC、合法签名但来源指纹冲突和角色权限拒绝。所有成功模拟验证继续 HOLD。
 - 限制：CI runner 和模拟 signer 持有密钥，不能代替真正独立、受认证的生产验证服务。SQL 不自行验证真实 Ed25519 签名，旧的原始合成证据 attester 入口仍存在；没有 KMS/HSM、真实 IAM、外部不可变存储和跨系统原子撤权。这是隔离来源入口的局部收敛，不是全库或生产不可绕过授权。
 - EXT-001 继续 UNVERIFIED、NOT_COLLECTED、NOT_REVIEWED、NOT_SIGNED；hold_active=true、release_eligible=false、merge_authorized=false、deploy_authorized=false。PR #129 Draft / CI-only，禁止合并部署或发出真实通知。
+
+## EXT-001 旧版 SQL 入口封闭与密钥退役重放隔离（CI-only）
+
+- 旧版 fixture_attest_iam_provenance 的 EXECUTE 已从普通 v121_iam_provenance_attester 登录角色撤销，不能再独立创建没有双来源 HMAC 的认证记录。只有安全定义者拥有的 source-aware SQL 函数可内部调用核心函数；PostgreSQL 测试超级管理员仅用于播种历史版合成证据、验证旧回执和追加历史。它不代表任何正式生产访问流程。
+- fixture_iam_source_auth_keys 新增按机构限制唯一 ACTIVE 密钥版本的索引，并通过不可删除、不可修改密钥字节、不可从退役状态重新启用的触发器保证单向轮换。HMAC 核验发生在历史认证及来源指纹持久写入之前，已退役的旧版 MAC 不得在精确重试中被重新接受；新版本的有效 MAC 可对原始只追加证据完成确定性精确重试。
+- 负向 PostgreSQL 16 测试覆盖普通 attester 对旧入口权限拒绝、退役后旧密钥重放失败、退役密钥恢复拒绝、修改密钥拒绝、一个机构同时两把 ACTIVE 密钥拒绝、新版 MAC 旧版本号重放拒绝、重试不新增来源历史行。
+- 范围仍是测试数据库和模拟信任根：数据库所有者/超级用户能绕过测试限制；不提供真实 IAM 密钥所有权、外部 KMS/HSM、独立密钥托管和生产不可篡改证明。过期/撤权跨系统竞态、业务责任和外部 UAT 尚未通过。
+- EXT-001=UNVERIFIED，production_evidence_collected=false，hold_active=true，release_eligible=false。PR #129 Draft、CI-only，不合并不部署不发送真实通知。
