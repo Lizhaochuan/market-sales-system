@@ -41,3 +41,13 @@ CI 合成样例强制覆盖 8 类职责：ATTESTER（验签）、ANCHOR_WRITER�
 CI 用 `tests/contracts/v3-2-121-iam-evidence.test.mjs` 测试完整合成 E1/E2、独立签名、过期、证据缺失、错误凭据、权限越权、跨租户、数据篡改，以及验证成功也不能修改上游交接状态。没有收集任何真实生产材料，没有向第三方发出凭证请求。
 
 保持 PR #129 Draft、CI-only、销售/财务/教务和安全隔离 HOLD，不合并、不部署、不修改任何真实业务数据。
+
+## EXT-001 后续：合成证据登记、重试、撤回与版本过期（CI-only）
+
+- 新增隔离数据库脚本 `tests/fixtures/v3-2-121-ext001-iam-evidence-ledger.sql`。它在已有 `v121_anchor_isolated` 的独立架构中维护只追加的 `fixture_iam_evidence_receipts`（证据接收历史）和 `fixture_iam_evidence_revocations`（撤回事件）。业务库 `v106_isolated` 不负责写入该记录；审计库仍由同一 CI PostgreSQL 集群管理，因此**不是外部 WORM**。
+- `v121_iam_intake_writer` 仅能通过受限函数提交经合成 Ed25519 校验后提取的包摘要、E1/E2 摘要、两个不同的审核主体、收据 UUID、递增版本号与失效时间。无直接表读写权限；`v121_iam_revoker` 只负责追加撤回事件，`v121_iam_intake_reader` 只能执行只读诊断。函数用机构+EXT-001 事务锁避免并发重排，强制 PostgreSQL `READ COMMITTED`。
+- 当同一版本、同一收据 ID、摘要、提交人与复核人和失效时间**完全一致**且仍是最新未撤回、未过期版本时，重复提交返回 `EXACT_RETRY_SYNTHETIC_STILL_HOLD`，不新增记录。同版本内容不同返回 `V121_IAM_REVISION_CONFLICT`；越序版本或旧版本重试拒绝。新版本必须为前一版本加一，旧版保留为 `RECEIPT_SUPERSEDED_STILL_HOLD`。
+- 撤回只追加新事件且不删除原收据；撤回后原版本返回 `RECEIPT_REVOKED_STILL_HOLD`，不得继续重试，二次撤回拒绝。数据库接收时设置的合成收据失效时间必须在未来且不超过 1 小时；到期状态为 `RECEIPT_EXPIRED_STILL_HOLD`，过期版本不得恢复。新版本需要重新生成、重新验签、独立复核并单独登记。
+- `fingerprintFixtureExt001ForIntake` 在内存中验证 SECURITY 与 AUDIT 的两个合成签名、证据来源、时间和跨模块权限测试后计算带域标识的 SHA-256 指纹。SQL **仅检验存入摘要和元数据的形状及版本一致性，不具备 Ed25519 本地验真功能**；若隔离写入角色本身遭入侵，仍可能伪造登记内容。生产不得将此流程当作真实 IAM 证据校验、安全认证、业务解隔或上线许可。
+- PostgreSQL CI 负测包含：无记录诊断、精确重复重试、冲突重试、跨机构、跳过版本、受限身份越权、未经外部验签的签名篡改拒绝、撤回及重复撤回、旧版不可复用、过期与重新版本化、并发两条不同内容竞争同一版本、连接重启后历史重建、管理员篡改保护触发器及销售/财务/教务 HOLD 不变。
+- **实际交接仍未发生**：`EXT-001=UNVERIFIED`、证据包 `NOT_COLLECTED`、真实独立复核 `NOT_REVIEWED`、人工签署 `NOT_SIGNED`。合成收据不得写入上游生产验收清单或当作真实生产证据引用。Draft PR #129 不合并、不部署。
