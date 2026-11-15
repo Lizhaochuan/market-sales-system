@@ -2184,6 +2184,8 @@ test('quarantine evidence chain binds original event, latest investigation and t
   await assert.rejects(checker.query(attestSql,[b,event,current,checkerId]),/V121_QUARANTINE_CHAIN_CHECKER_DENIED/);
   await assert.rejects(security.query(attestSql,[a,event,current,checkerId]),/permission denied/);
   await assert.rejects(checker.query(attestSql,[a,event,previous,checkerId]),/V121_QUARANTINE_CHAIN_SUPERSEDED/);
+  await assert.rejects(checker.query(attestSql,[a,event,current,investigatorId]),/V121_QUARANTINE_CHECKER_NOT_INDEPENDENT/);
+  await assert.rejects(checker.query(attestSql,[a,event,current,securityId]),/V121_QUARANTINE_CHECKER_NOT_INDEPENDENT/);
   await checker.query(attestSql,[a,event,current,checkerId]);
   result=await diagnostics();
   assert.equal(result.chain_status,'EVIDENCE_LINKED_STILL_HOLD');
