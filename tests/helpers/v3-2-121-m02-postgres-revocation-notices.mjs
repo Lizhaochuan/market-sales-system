@@ -162,6 +162,22 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
   }
   fail('NOTICE_SQL_RETRY_EXHAUSTED');
  }
+ async function observeSignerWatermark(c,input){
+  const st=input.proof.statement;
+  const p=[st.organization_id,st.incident_id,st.signer_id];
+  const existing=await c.query('SELECT authority_epoch,revocation_watermark FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3 FOR UPDATE',p);
+  if(existing.rowCount===0){
+   await c.query('INSERT INTO v106_test.fixture_signer_watermarks(organization_id,incident_id,signer_id,authority_epoch,revocation_watermark) VALUES($1,$2,$3,$4,$5)',
+    [...p,st.authority_epoch,st.revocation_watermark]);
+  }else{
+   const old=existing.rows[0];
+   if(st.authority_epoch<old.authority_epoch||st.revocation_watermark<old.revocation_watermark)
+    fail('NOTICE_SIGNER_WATERMARK_REGRESSION');
+   if(st.authority_epoch>old.authority_epoch||st.revocation_watermark>old.revocation_watermark)
+    await c.query('UPDATE v106_test.fixture_signer_watermarks SET authority_epoch=$4,revocation_watermark=$5 WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',
+      [...p,st.authority_epoch,st.revocation_watermark]);
+  }
+ }
  async function appendNegativeReceipt(input){
   if(!input||Object.keys(input).sort().join('|')!==
     ['incident_id','notice_id','organization_id','receipt_sequence','receipt_state','proof'].sort().join('|')||
@@ -182,6 +198,7 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
     if(notice.rowCount!==1)fail('NOTICE_RECEIPT_TARGET_ABSENT');
     await source(c,{...input,...notice.rows[0]});
     await checkProof(input);
+    await observeSignerWatermark(c,input);
     const rows=await c.query('SELECT receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload FROM v106_test.fixture_revocation_negative_receipts WHERE organization_id=$1 AND incident_id=$2 AND notice_id=$3 ORDER BY receipt_sequence',
      [...scopeParams(input),input.notice_id]);
     let previous='0'.repeat(64);
