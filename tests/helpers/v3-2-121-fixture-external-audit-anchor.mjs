@@ -79,3 +79,39 @@ export function verifyFixtureAuditAnchor({anchor,publicKeys,current,nowMs,minimu
  return Object.freeze({status:'ANCHOR_MATCH_STILL_HOLD',
   hold_active:true,release_eligible:false,checkpoint_sequence:statement.snapshot_sequence});
 }
+
+
+// Extra policy gate for a persisted, append-only lifecycle registry.
+// Cryptographic validity is distinct from present-day authorization.
+export function verifyFixtureActiveAuditAnchor(args){
+ const signer=args.anchor?.statement?.signer_id;
+ const state=args.keyStates instanceof Map?args.keyStates.get(signer):null;
+ if(state==='REVOKED') fail('V121_ANCHOR_KEY_REVOKED');
+ if(state==='RETIRED') fail('V121_ANCHOR_KEY_RETIRED');
+ if(state!=='REGISTERED') fail('V121_ANCHOR_SIGNER_UNTRUSTED');
+ return verifyFixtureAuditAnchor(args);
+}
+
+// Historical signed evidence remains inspectable after a key is retired or revoked.
+// No current-time trust or release decision is returned from this forensic path.
+export function inspectFixtureArchivedAuditAnchor({anchor,publicKeys,keyStates}){
+ const statement=anchor?.statement;
+ const bytes=encodeFixtureAuditAnchor(statement);
+ const key=publicKeys instanceof Map?publicKeys.get(statement.signer_id):null;
+ if(!key) fail('V121_ANCHOR_SIGNER_UNTRUSTED');
+ const signature=anchor?.signature_b64;
+ if(typeof signature!=='string' || !/^[A-Za-z0-9+/]{86}==$/.test(signature))
+  fail('V121_ANCHOR_SIGNATURE_INVALID');
+ const sig=Buffer.from(signature,'base64');
+ if(sig.length!==64 || sig.toString('base64')!==signature ||
+    !verify(null,bytes,key,sig))
+  fail('V121_ANCHOR_SIGNATURE_INVALID');
+ const state=keyStates instanceof Map?keyStates.get(statement.signer_id):null;
+ if(!['REGISTERED','RETIRED','REVOKED'].includes(state))
+  fail('V121_ANCHOR_SIGNER_UNTRUSTED');
+ return Object.freeze({
+  status:state==='REVOKED'?'REVOKED_HISTORICAL_ONLY':
+   state==='RETIRED'?'RETIRED_HISTORICAL_ONLY':'SIGNED_HISTORY_ONLY',
+  cryptographically_valid:true,hold_active:true,release_eligible:false
+ });
+}
