@@ -1,0 +1,33 @@
+name: V3.2-102 isolated signed source read contract
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-signed-source-contract.mjs'
+      - 'tests/security/v3-2-102-m02-signed-source-contract.test.mjs'
+      - 'docs/V3.2-102_M02_SIGNED_SOURCE_CONTRACT.md'
+      - 'spec/v3-2-102-m02-signed-source-contract.json'
+      - '.github/workflows/v3-2-102-signed-source-contract.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fixture-proof-and-fail-closed:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify source and test syntax
+        run: |
+          node --check src/cross-module-signed-source-contract.mjs
+          node --check tests/security/v3-2-102-m02-signed-source-contract.test.mjs
+      - name: Signed fixture source / V3.2-101 integration regression
+        run: node --test tests/security/v3-2-102-m02-signed-source-contract.test.mjs tests/security/v3-2-101-m02-readonly-verification-facade.test.mjs
+      - name: Check contract hard-deny flags and no production wiring
+        run: |
+          node --input-type=module -e "import {readFileSync} from 'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-102-m02-signed-source-contract.json'));if(s.parent_pr!==108||s.integration.production_read_api_connected!==false||s.integration.real_finance_signatures_verified!==false||s.integration.real_academic_signatures_verified!==false||s.invariants.handoff_allowed!==false||s.invariants.finance_authorized!==false||s.invariants.academic_authorized!==false||s.invariants.release_eligible!==false||s.invariants.hold_active!==true||s.integration.external_contract_status!=='proposed-unimplemented')process.exit(1)"
+      - name: Repeat V3.2-82 through 99 isolated safety suite
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
+      - name: Re-run audit inventory regression
+        run: node --test tests/security/v3-2-100-m02-integration-review.test.mjs
