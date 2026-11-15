@@ -209,3 +209,51 @@ test('invalid signer snapshot blocks both initial receipt and replay',async()=>{
  const signature_b64=sign(null,encodeFixtureReceiptProof(statement),keyPair.privateKey).toString('base64');
  await assert.rejects(invalid.appendNegativeReceipt({...data,proof:{statement,signature_b64}}),{code:'FIXTURE_RECEIPT_AUTHORITY_STALE'});
 });
+
+function fixtureSignedInput(q){
+ const statement={organization_id:a,incident_id:incident,notice_id:q.notice_id,
+  receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',
+  signer_id:'00000000-0000-4000-8000-000000000081',
+  authority_epoch:4,revocation_watermark:2,issued_at_ms:100,expires_at_ms:500};
+ const signature_b64=sign(null,encodeFixtureReceiptProof(statement),keyPair.privateKey).toString('base64');
+ return {organization_id:a,incident_id:incident,notice_id:q.notice_id,
+  receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',proof:{statement,signature_b64}};
+}
+test('revocation between insert and SQL commit rolls back receipt',async()=>{
+ const q=await service.enqueue({...input,epoch:40});
+ let active=true;
+ const adapter=createIsolatedPostgresRevocationNotices({pool:writer,
+  receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
+  receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:2,active}),
+  beforeReceiptCommit:async()=>{active=false;}});
+ await assert.rejects(adapter.appendNegativeReceipt(fixtureSignedInput(q)),{code:'FIXTURE_RECEIPT_AUTHORITY_STALE'});
+ const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(count.rows[0].n,0);
+});
+test('revocation immediately after commit returns denial but retains immutable evidence',async()=>{
+ const q=await service.enqueue({...input,epoch:41});
+ let active=true;
+ const adapter=createIsolatedPostgresRevocationNotices({pool:writer,
+  receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
+  receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:2,active}),
+  afterReceiptCommit:async()=>{active=false;}});
+ await assert.rejects(adapter.appendNegativeReceipt(fixtureSignedInput(q)),{code:'FIXTURE_RECEIPT_AUTHORITY_STALE'});
+ const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(count.rows[0].n,1);
+ const report=await adapter.captureCoverageSnapshot(Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest'].map(k=>[k,input[k]]))).then(()=>null,e=>e);
+ assert.equal(report?.code,'NOTICE_RECEIPT_PROOF_RECHECK_FAILED');
+});
+test('authority unavailable at commit checkpoint is denied without persisted receipt',async()=>{
+ const q=await service.enqueue({...input,epoch:42});
+ let available=true;
+ const adapter=createIsolatedPostgresRevocationNotices({pool:writer,
+  receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
+  receiptProofAuthority:async()=>{
+   if(!available)throw Error('fixture authority unavailable');
+   return {authority_epoch:4,revocation_watermark:2,active:true};
+  },
+  beforeReceiptCommit:async()=>{available=false;}});
+ await assert.rejects(adapter.appendNegativeReceipt(fixtureSignedInput(q)),/fixture authority unavailable/);
+ const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(count.rows[0].n,0);
+});
