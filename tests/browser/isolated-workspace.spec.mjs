@@ -92,3 +92,33 @@ test('workspace refresh failure clears records and delayed requests cannot refil
  await expect(page.locator('#business-records')).toBeEmpty();
  await expect(page.locator('#business-pipeline')).toBeEmpty();
 });
+
+test('a delayed save cannot reset another employee session or expose the prior task',async({page})=>{
+ await page.goto('/');
+ const login=async account=>{
+  await page.locator('#login-form select').selectOption(account);
+  await page.locator('#login-form input').fill('fictional-strong-ui-demo-passphrase-0001');
+  await page.getByRole('button',{name:'进入工作台',exact:true}).click();
+  await page.locator('#workspace-business-nav').click();
+  await expect(page.locator('#business-status')).toContainText('已读取');
+ };
+ await login('sales-a');
+ let release;const gate=new Promise(resolve=>{release=resolve;});
+ await page.route('**/api/v1/isolated-workspace/tasks',async route=>{
+  if(route.request().method()==='POST')await gate;await route.continue();
+ });
+ const name='保存期间退出'+Date.now();
+ await page.locator('#business-form [name="title"]').fill(name);
+ const started=page.waitForRequest(request=>request.url().endsWith('/isolated-workspace/tasks')&&request.method()==='POST');
+ await page.locator('#business-save').click();await started;
+ await expect(page.locator('#business-kind')).toBeDisabled();
+ await page.getByRole('button',{name:'退出演示账号'}).click();
+ await login('sales-b');
+ await page.locator('#business-kind').selectOption('quotes');
+ await expect(page.locator('#business-status')).toContainText('报价草稿');
+ const finished=page.waitForResponse(response=>response.url().endsWith('/isolated-workspace/tasks')&&response.request().method()==='POST');
+ release();await finished;
+ await expect(page.locator('#business-kind')).toHaveValue('quotes');
+ await expect(page.locator('#business-kind')).toBeEnabled();
+ await expect(page.locator('#business-records')).not.toContainText(name);
+});

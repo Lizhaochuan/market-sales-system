@@ -5,7 +5,7 @@
   'expense-plans':'费用计划','automation-rules':'本地提醒规则'};
  const statuses={open:'待完成',completed:'已完成',cancelled:'已取消',draft:'草稿，待外部确认',configured:'规则已保存'};
  const stageNames={new:'新建',contacted:'已联系',needs_analysis:'需求确认',proposal:'方案沟通',negotiation:'意向协商'};
- let enabled=false,records=[],summary=null,editing=null,generation=0,loading=false;
+ let enabled=false,records=[],summary=null,editing=null,generation=0,loading=false,saving=false,sessionEpoch=0;
  const nav=node('button','nav-item','▣  业务计划与任务');nav.type='button';nav.hidden=true;nav.id='workspace-business-nav';
  document.querySelector('nav[aria-label="模块导航"]').append(nav);
  const panel=node('section','view');panel.dataset.panel='business-workspace';panel.id='business-workspace';
@@ -65,10 +65,11 @@
  }
  function active(){return enabled&&state.token&&!state.strict;}
  function clear(){
-  generation++;records=[];summary=null;editing=null;nav.hidden=true;
+  generation++;sessionEpoch++;saving=false;records=[];summary=null;editing=null;nav.hidden=true;
   for(const id of ['business-records','business-summary','business-pipeline','business-history','business-student','business-opportunity','business-quote','business-interactions'])$(id).replaceChildren();
   $('business-form').reset();$('business-status').textContent='未登录，业务计划已清空。';
   $('business-extra-lines').replaceChildren();
+  $('business-kind').disabled=false;$('business-save').disabled=false;$('business-reset').disabled=false;
   $('business-quote')._quotes=[];
   panel.classList.remove('active');
  }
@@ -144,7 +145,7 @@
  function renderPipeline(){
   const el=$('business-pipeline');el.replaceChildren();
   for(const o of summary.pipeline){
-   const card=node('article','audit-item');card.append(node('strong','',o.student_name+' · '+yuan(o.predicted_amount_cents)));
+   const card=node('article','audit-item business-pipeline-card');card.append(node('strong','',o.student_name+' · '+yuan(o.predicted_amount_cents)));
    const stage=node('select'),life=node('select'),reason=node('input');reason.placeholder='本次推进原因';reason.maxLength=500;
    stage.setAttribute('aria-label','商机阶段');life.setAttribute('aria-label','商机状态');reason.setAttribute('aria-label','推进原因');
    for(const [key,label] of Object.entries(stageNames))stage.append(option(key,label));stage.value=o.stage;
@@ -156,7 +157,10 @@
   }
  }
  $('business-form').addEventListener('submit',async event=>{
-  event.preventDefault();const submit=$('business-save');submit.disabled=true;
+  event.preventDefault();if(saving)return;saving=true;
+  const session=sessionEpoch,token=state.token;
+  const submit=$('business-save');submit.disabled=true;
+  $('business-kind').disabled=true;$('business-reset').disabled=true;
   try{
    const f=Object.fromEntries(new FormData(event.target));const k=kind();let body={title:f.title};
    if(['tasks','trials','quotes'].includes(k))body={...body,student_id:f.student_id||null,opportunity_id:f.opportunity_id||null};
@@ -176,14 +180,16 @@
    if(k==='automation-rules')body={...body,action:'create_followup_task',enabled:f.enabled==='true',inactive_days:Number(f.inactive_days),due_in_days:Number(f.due_in_days)};
    if(editing)body.expected_version=editing.version;
    await api(root+k+(editing?'/'+editing.id:''),{method:'POST',body});
+   if(session!==sessionEpoch||token!==state.token)return;
    const selected=k;reset();$('business-kind').value=selected;await refreshBusiness();toast('业务计划已保存，仍待外部确认');
-  }catch(e){toast(e.message,true);}finally{submit.disabled=false;}
+  }catch(e){if(session===sessionEpoch)toast(e.message,true);}finally{if(session===sessionEpoch){saving=false;submit.disabled=false;
+   $('business-kind').disabled=false;$('business-reset').disabled=false;}}
  });
  async function scan(){
   if(!active()||loading)return;loading=true;
-  const token=state.token;
+  const token=state.token,session=sessionEpoch;
   try{const result=await api(root+'automation/run',{method:'POST',body:{}});
-   if(!active()||token!==state.token)return;
+   if(!active()||token!==state.token||session!==sessionEpoch)return;
    await refreshBusiness();return result;}
   catch(e){if(active())toast(e.message,true);}finally{loading=false;}
  }
