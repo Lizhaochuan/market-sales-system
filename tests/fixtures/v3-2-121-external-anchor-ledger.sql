@@ -80,6 +80,8 @@ CREATE TABLE v121_anchor.verified_admissions (
  signature_b64 text NOT NULL CHECK(signature_b64 ~ '^[A-Za-z0-9+/]{86}==$'),
  observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64}$'),
  issued_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ expires_at timestamptz NOT NULL DEFAULT (statement_timestamp()+interval '60 seconds'),
+ CONSTRAINT admission_ttl_bounded CHECK(expires_at>issued_at AND expires_at<=issued_at+interval '60 seconds'),
  PRIMARY KEY(organization_id,admission_id),
  FOREIGN KEY(organization_id,signer_id)
   REFERENCES v121_anchor.signers(organization_id,signer_id)
@@ -133,6 +135,19 @@ BEGIN
  WHERE organization_id=p_org AND failure_id=p_failure;
  IF last_seq IS NOT NULL AND p_seq<>last_seq+1 THEN
   RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ -- One active, unconsumed admission per signer+snapshot. Retain immutable
+ -- expired records; a fresh attestation can be issued after expiration.
+ IF EXISTS(
+  SELECT 1 FROM v121_anchor.verified_admissions x
+  WHERE x.organization_id=p_org AND x.failure_id=p_failure
+    AND x.snapshot_sequence=p_seq AND x.signer_id=p_signer
+    AND x.issued_at<=clock_timestamp() AND x.expires_at>clock_timestamp()
+    AND NOT EXISTS(
+     SELECT 1 FROM v121_anchor.checkpoints c
+     WHERE c.organization_id=x.organization_id AND c.admission_id=x.admission_id)
+ ) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_DUPLICATE_ACTIVE';
  END IF;
  INSERT INTO v121_anchor.verified_admissions
   (admission_id,organization_id,failure_id,snapshot_sequence,signer_id,
@@ -195,6 +210,9 @@ BEGIN
  WHERE organization_id=NEW.organization_id AND admission_id=NEW.admission_id;
  IF NOT FOUND THEN
   RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_MISSING';
+ END IF;
+ IF admitted.issued_at>clock_timestamp() OR admitted.expires_at<=clock_timestamp() THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_EXPIRED';
  END IF;
  IF admitted.failure_id IS DISTINCT FROM NEW.failure_id OR
     admitted.snapshot_sequence IS DISTINCT FROM NEW.snapshot_sequence OR
