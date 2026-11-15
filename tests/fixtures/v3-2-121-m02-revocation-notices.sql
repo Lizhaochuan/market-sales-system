@@ -334,7 +334,7 @@ DECLARE audit_event record;
 DECLARE latest integer;
 DECLARE approval_secret bytea;
 DECLARE approval_envelope text;
-DECLARE now_ms bigint;
+DECLARE fixture_now_ms bigint;
 BEGIN
  IF session_user <> 'v106_key_issuer' OR
     p_organization <> '11111111-1111-4111-8111-111111111111'::uuid THEN
@@ -368,11 +368,11 @@ BEGIN
  IF p_attestation_version IS NULL OR p_attestation_version<1 THEN
   RAISE EXCEPTION 'V121_APPROVAL_VERSION_INVALID';
  END IF;
- SELECT now_ms INTO now_ms FROM v106_test.fixture_recovery_clock WHERE singleton=true;
- IF now_ms IS NULL OR p_issued_at_ms IS NULL OR p_expires_at_ms IS NULL OR
+ SELECT clock.now_ms INTO fixture_now_ms FROM v106_test.fixture_recovery_clock clock WHERE clock.singleton=true;
+ IF fixture_now_ms IS NULL OR p_issued_at_ms IS NULL OR p_expires_at_ms IS NULL OR
    p_issued_at_ms<1 OR p_expires_at_ms<=p_issued_at_ms OR
    p_expires_at_ms-p_issued_at_ms>30000 OR
-   now_ms<p_issued_at_ms OR now_ms>=p_expires_at_ms THEN
+   fixture_now_ms<p_issued_at_ms OR fixture_now_ms>=p_expires_at_ms THEN
   RAISE EXCEPTION 'V121_RECOVERY_ATTESTATION_EXPIRED';
  END IF;
  SELECT approval_key INTO approval_secret
