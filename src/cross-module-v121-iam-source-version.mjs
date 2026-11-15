@@ -227,10 +227,21 @@ export async function issueFixtureExt001FromTwoSources(args){
   receiptId:args.receiptId,
   attester:args.attester
  });
+ // A database attestation may finish after a source has been revoked or
+ // replaced. Re-check both fixture stores before reporting the result.
+ // A failed post-check cannot roll back a committed SQL append-only row;
+ // it must instead fail closed and preserve that row for investigation.
+ const post=await verifyFixtureExt001SourceVersion(args);
+ if(post.envelope_digest!==verified.envelope_digest||
+    post.revision_id!==verified.revision_id||
+    !['EXT-001-E1','EXT-001-E2'].every(id=>
+      verified.artifactBytes.get(id).equals(post.artifactBytes.get(id))))
+  fail('V121_IAM_SOURCE_CHANGED_AFTER_ATTESTATION');
  return Object.freeze({
   ...result,
   source_checked_in_fixture:true,
-  independent_read_rounds:2,
+  independent_read_rounds:4,
+  post_attestation_source_rechecked:true,
   production_source_authenticated:false,
   production_evidence_collected:false,
   release_authorized:false,
