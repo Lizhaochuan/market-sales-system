@@ -104,7 +104,7 @@ function setup(revision=1){
  return {
   envelope,manifest,signManifest,sourceKeys,primaryReader,auditReader,
   options:{envelope,trustedKeys,sourceKeys,sourceProof:signManifest(),
-   primaryReader,auditReader,nowMs:120_000},
+   primaryReader,auditReader,nowMs:120_000,clock:()=>120_000},
   calls:()=>[primaryCalls,auditCalls]
  };
 }
@@ -301,4 +301,59 @@ test('substituting pinned bytes after SQL fixture attestation fails closed',asyn
   }
  }),'V121_IAM_SOURCE_CONTENT_MISMATCH');
  assert.equal(admitted,1);
+});
+
+test('SQL attestation must not accept missing clock, expired proof or clock rollback',async()=>{
+ const receiptId='00000000-0000-4000-8000-0000000000e6';
+ const x=setup();
+ let calls=0;
+ const attester={query:async()=>{calls++;return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};}};
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,clock:undefined,receiptId,attester
+ }),'V121_IAM_SOURCE_CLOCK_REQUIRED');
+ assert.equal(calls,0);
+ const expired=setup();
+ let current=120_000;
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...expired.options,
+  clock:()=>current,
+  receiptId,
+  attester:{query:async()=>{
+   calls++;
+   current=200_000;
+   return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+  }}
+ }),'V121_IAM_EVIDENCE_STALE');
+ assert.equal(calls,1,'fixture SQL may have committed before expiry is detected');
+ const backwards=setup();
+ let at=120_000;
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...backwards.options,
+  clock:()=>at,
+  receiptId,
+  attester:{query:async()=>{
+   calls++;
+   at=119_000;
+   return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+  }}
+ }),'V121_IAM_SOURCE_CLOCK_ROLLBACK_OR_INVALID');
+ assert.equal(calls,2);
+});
+
+test('source reading that outlasts the manifest expiry does not reach SQL',async()=>{
+ const x=setup();
+ let time=120_000;
+ let issued=0;
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,
+  clock:()=>time,
+  primaryReader:async rec=>{
+   const result=await x.primaryReader(rec);
+   time=196_000;
+   return {...result,observed_at_ms:196_000};
+  },
+  receiptId:'00000000-0000-4000-8000-0000000000e6',
+  attester:{query:async()=>{issued++;return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};}}
+ }),'V121_IAM_SOURCE_MANIFEST_INVALID');
+ assert.equal(issued,0);
 });
