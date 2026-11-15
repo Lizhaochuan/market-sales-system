@@ -208,3 +208,10 @@
 - `fixture_uat_remediation_diagnostics` 只用于展示整改尝试、复核通过的职责数量，以及保留原失败记录的事实。即使两个职责均表示复核接受，也恒定 `hold_active=true`、`release_eligible=false`。
 - PostgreSQL CI 检查证据不可改、相同复核者角色冲突、整改人员自审、重复复核和三业务域持续 HOLD。
 - **限制**：审核人 UUID 当前由隔离函数调用者提供，尚未连接真实 IAM，也没有审核人签名原件；独立角色账号的调用权限不构成真实人员认证。数据库超级管理员仍可绕过测试触发器。不得把模拟双职责复核作为生产真实结案或解除 HOLD 的依据。保持 Draft、CI-only、不合并、不部署。
+
+## V121 整改版本冲突、旧复核失效与最新证据绑定（CI-only）
+- 每个失败项的整改记录新增正整数 `remediation_version`，按 `(organization_id,failure_id)` 独立连续递增。数据库触发器在事务级锁保护下拒绝跳号、并发抢号和重复使用相同证据 SHA-256。历史失败和每个整改版本均不可修改或删除。
+- 受控 `fixture_record_uat_remediation_review` 仅接受**当前最新整改版本**，且每份审核传入的证据摘要必须与该版本 `new_evidence_digest` 相同；旧版本即使历史上已有两项 ACCEPTED_FOR_REVIEW，后续也不允许继续补签或挪用到最新版本。
+- `fixture_uat_remediation_diagnostics` 统计总尝试次数、最新版本和最新整改 ID，但 `accepted_review_roles` **只统计最新版本的 ACCEPTED_FOR_REVIEW**；出现新版本后自动归零，新的 REJECTED 决定不当作通过。历史审核可保留用于追溯，不继承授权。
+- 测试覆盖 v1→v2→v3：跳号、历史证据复用、复核指向过时版本、证据摘要不匹配、拒绝意见、新版复核重新计数、旧记录不可改，以及始终 `hold_active=true`、`release_eligible=false`。
+- 这里的“审核通过”只是隔离模拟的诊断计数，不是正式 IAM 身份签署或真实业务解除隔离授权；继续保持 Draft、HOLD、CI-only、不合并、不部署。
