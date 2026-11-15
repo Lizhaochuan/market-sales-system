@@ -11,6 +11,7 @@ import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
 import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake,verifyFixtureExt001BytesAndFingerprint,issueFixtureExt001VerifiedProvenance} from '../../src/cross-module-v121-iam-evidence.mjs';
+import {signFixtureExt001SourceManifest,issueFixtureExt001FromTwoSources} from '../../src/cross-module-v121-iam-source-version.mjs';
 const hash=o=>createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const a='11111111-1111-4111-8111-111111111111';
 const b='22222222-2222-4222-8222-222222222222';
@@ -2447,6 +2448,73 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
     ['VALID_SYNTHETIC_STILL_HOLD',5,5,true,false]);
    await assert.rejects(again.query(statusSql,[b,5]),/V121_IAM_READER_SCOPE_DENIED/);
   }finally{await again.end();}
+  // Bind exact E1/E2 object versions and both signatures into a separate
+  // immutable SQL source ledger. All data, keys and readers are CI fixtures.
+  const p6=make(6);
+  const primaryPair=generateKeyPairSync('ed25519');
+  const mirrorPair=generateKeyPairSync('ed25519');
+  const primaryId='00000000-0000-4000-8000-0000000000d1';
+  const mirrorId='00000000-0000-4000-8000-0000000000d2';
+  const primaryActor='00000000-0000-4000-8000-0000000000d3';
+  const mirrorActor='00000000-0000-4000-8000-0000000000d4';
+  const sourceKeys=new Map([
+   [primaryId,{status:'ACTIVE',domain:'FIXTURE_PRIMARY_STORE',
+    principal_id:primaryActor,publicKey:primaryPair.publicKey}],
+   [mirrorId,{status:'ACTIVE',domain:'FIXTURE_AUDIT_MIRROR',
+    principal_id:mirrorActor,publicKey:mirrorPair.publicKey}]
+  ]);
+  const sourceManifest={
+   schema_version:'v3.2-121-ext001-source-version-v1',
+   scope:'CI_FIXTURE_ONLY',organization_id:a,
+   revision_no:6,revision_id:p6.fingerprint.revision_id,
+   envelope_digest:p6.fingerprint.evidence_digest,
+   recorded_at_ms:now-1000,expires_at_ms:now+900_000,
+   objects:p6.envelope.body.artifacts.map((obj,i)=>({
+    artifact_id:obj.id,object_ref:obj.uri,
+    object_version_id:'fixture-v6-'+(i===0?'inventory':'denials'),
+    generation:6,sha256:obj.sha256
+   }))
+  };
+  const sourceProof=signFixtureExt001SourceManifest(sourceManifest,{
+   primaryPrivateKey:primaryPair.privateKey,auditPrivateKey:mirrorPair.privateKey,
+   primaryKeyId:primaryId,primaryPrincipalId:primaryActor,
+   auditKeyId:mirrorId,auditPrincipalId:mirrorActor
+  });
+  const reader=domain=>async rec=>({
+   artifact_id:rec.artifact_id,object_ref:rec.object_ref,
+   object_version_id:rec.object_version_id,generation:rec.generation,
+   sha256:rec.sha256,
+   bytes:Buffer.from(p6.artifactBytes.get(rec.artifact_id)),
+   observed_at_ms:Date.now(),is_current:true,
+   lock_mode:'FIXTURE_IMMUTABLE',source_domain:domain
+  });
+  const sourceResult=await issueFixtureExt001FromTwoSources({
+   envelope:p6.envelope,trustedKeys,sourceKeys,sourceProof,
+   primaryReader:reader('FIXTURE_PRIMARY_STORE'),
+   auditReader:reader('FIXTURE_AUDIT_MIRROR'),
+   nowMs:now,clock:()=>Date.now(),receiptId:p6.receiptId,attester
+  });
+  assert.equal(sourceResult.verdict,'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD');
+  assert.equal(sourceResult.source_version_bound_in_fixture,true);
+  assert.match(sourceResult.source_binding_digest,/^[a-f0-9]{64}$/);
+  assert.equal(sourceResult.hold_active,true);
+  const stored=await audit.query(
+   'SELECT source_binding_digest FROM v121_anchor.fixture_iam_source_bindings WHERE organization_id=$1 AND revision_no=6',[a]);
+  assert.equal(stored.rows.length,1);
+  assert.equal(stored.rows[0].source_binding_digest.trim(),sourceResult.source_binding_digest);
+  const sourceSql='SELECT v121_anchor.fixture_attest_iam_source_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz,$13::char(64)) AS verdict';
+  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),'f'.repeat(64)]),
+   /V121_IAM_SOURCE_BINDING_CONFLICT/);
+  await assert.rejects(writerA.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest]),
+   /permission denied/);
+  await assert.rejects(writerA.query('SELECT * FROM v121_anchor.fixture_iam_source_bindings'),
+   /permission denied/);
+  await assert.rejects(audit.query('UPDATE v121_anchor.fixture_iam_source_bindings SET source_binding_digest=$1 WHERE revision_no=6',['0'.repeat(64)]),
+   /V121_ANCHOR_LEDGER_IMMUTABLE/);
+  await assert.rejects(audit.query('DELETE FROM v121_anchor.fixture_iam_source_bindings WHERE revision_no=6'),
+   /V121_ANCHOR_LEDGER_IMMUTABLE/);
+  assert.equal((await writerA.query(receiptSql,params(6,p6))).rows[0].verdict,
+   'REGISTERED_SYNTHETIC_STILL_HOLD');
   await assert.rejects(audit.query('UPDATE v121_anchor.fixture_iam_evidence_receipts SET envelope_digest=$1 WHERE organization_id=$2 AND revision_no=1',['a'.repeat(64),a]),
    /V121_ANCHOR_LEDGER_IMMUTABLE/);
   await assert.rejects(audit.query('DELETE FROM v121_anchor.fixture_iam_evidence_revocations WHERE organization_id=$1 AND revision_no=2',[a]),
@@ -2454,7 +2522,7 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   const count=(await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_evidence_receipts WHERE organization_id=$1',[a])).rows[0].n;
   const revoked=(await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_evidence_revocations WHERE organization_id=$1',[a])).rows[0].n;
   const provenance=(await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_provenance_proofs WHERE organization_id=$1',[a])).rows[0].n;
-  assert.deepEqual([count,revoked,provenance],[5,1,5]);
+  assert.deepEqual([count,revoked,provenance],[6,1,6]);
   const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
   assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),
    [['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
