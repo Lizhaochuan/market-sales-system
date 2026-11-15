@@ -218,12 +218,13 @@ test('remote recheck is mandatory before attestation, with no SQL call on invali
  }};
  const r=await issueFixtureExt001FromTwoSources({...x.options,receiptId,attester});
  assert.equal(issued,1);
- assert.equal(r.independent_read_rounds,4);
+ assert.equal(r.independent_read_rounds,6);
+ assert.equal(r.post_signer_source_rechecked,true);
  assert.equal(r.post_attestation_source_rechecked,true);
  assert.equal(r.source_checked_in_fixture,true);
  assert.equal(r.source_version_bound_in_fixture,true);
  assert.match(r.source_binding_digest,/^[a-f0-9]{64}$/);
- assert.deepEqual(x.calls(),[8,8]);
+ assert.deepEqual(x.calls(),[12,12]);
  assert.equal(r.release_authorized,false);
  assert.equal(r.production_evidence_collected,false);
  assert.equal(r.hold_active,true);
@@ -382,4 +383,39 @@ test('source-auth signer is mandatory and fails closed before SQL when missing',
   ...x.options,receiptId,attester,sourceAuthSigner:async()=>('not-a-mac')
  }),'V121_IAM_SOURCE_AUTH_INVALID');
  assert.equal(sqlCalls,0);
+});
+
+test('signer outage or source revocation during signing stops before SQL attestation',async()=>{
+ const receiptId='00000000-0000-4000-8000-0000000000e6';
+ const x=setup();
+ let issued=0;
+ const attester={query:async()=>{
+  issued++;
+  return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};
+ }};
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,receiptId,attester,
+  sourceAuthSigner:async()=>{throw Error('signer is unavailable');}
+ }),'V121_IAM_SOURCE_SIGNER_UNAVAILABLE');
+ assert.equal(issued,0,'signer outage must not reach SQL');
+ const y=setup();
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...y.options,receiptId,attester,
+  sourceAuthSigner:async()=>{
+   y.sourceKeys.set(id.audit,{...y.sourceKeys.get(id.audit),status:'REVOKED'});
+   return 'a'.repeat(64);
+  }
+ }),'V121_IAM_SOURCE_TRUST_INVALID');
+ assert.equal(issued,0,'source revoked during signing must not reach SQL');
+ const z=setup();
+ let swapped=false;
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...z.options,receiptId,attester,
+  sourceAuthSigner:async()=>{swapped=true;return 'a'.repeat(64);},
+  auditReader:async rec=>{
+   const result=await z.auditReader(rec);
+   return swapped?{...result,bytes:Buffer.from('changed after remote signing')}:result;
+  }
+ }),'V121_IAM_SOURCE_CONTENT_MISMATCH');
+ assert.equal(issued,0,'file altered during signing must not reach SQL');
 });
