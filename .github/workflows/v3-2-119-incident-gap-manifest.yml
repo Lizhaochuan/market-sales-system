@@ -1,0 +1,80 @@
+name: V3.2-119 bounded incident student gap manifest
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-incident-gap-manifest.mjs'
+      - 'tests/integration/v3-2-119-m02-incident-gap-manifest.test.mjs'
+      - 'tests/helpers/v3-2-119-m02-postgres-incident-gap-manifest.mjs'
+      - 'tests/fixtures/v3-2-119-m02-incident-gap-manifest.sql'
+      - 'scripts/v3-2-119-setup-incident-gap-manifest.mjs'
+      - 'spec/v3-2-119-m02-incident-gap-manifest.json'
+      - 'docs/V3.2-119_M02_INCIDENT_GAP_MANIFEST.md'
+      - '.github/workflows/v3-2-119-incident-gap-manifest.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-incident-manifest:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install disposable CI runtime
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Validate V119 module SQL helper test and fixture syntax
+        run: |
+          node --check src/cross-module-incident-gap-manifest.mjs
+          node --check tests/helpers/v3-2-119-m02-postgres-incident-gap-manifest.mjs
+          node --check tests/integration/v3-2-119-m02-incident-gap-manifest.test.mjs
+          node --check scripts/v3-2-119-setup-incident-gap-manifest.mjs
+      - name: Initialize disposable V106 V109 V110 V112 V113 V114 V115 V116 V117 V118 and V119 tables
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+          node scripts/v3-2-112-setup-evidence-intake-sql.mjs
+          node scripts/v3-2-113-setup-reviewer-assignments.mjs
+          node scripts/v3-2-114-setup-reviewer-lifecycle.mjs
+          node scripts/v3-2-115-setup-review-hold.mjs
+          node scripts/v3-2-116-setup-hold-outbox.mjs
+          node scripts/v3-2-117-setup-delivery-reconciliation.mjs
+          node scripts/v3-2-118-setup-hold-gap-scan.mjs
+          node scripts/v3-2-119-setup-incident-gap-manifest.mjs
+      - name: Verify V119 student discovery bounded export digest and local SQL isolation
+        run: node --test tests/integration/v3-2-119-m02-incident-gap-manifest.test.mjs
+      - name: Regress V118 monotone gap scan and V117 reconciliation
+        run: node --test tests/integration/v3-2-118-m02-hold-gap-watermark-scan.test.mjs tests/integration/v3-2-117-m02-hold-delivery-reconciliation.test.mjs
+      - name: Regress V116 signed outbox and V115 persistent HOLD
+        run: node --test tests/integration/v3-2-116-m02-hold-outbox-delivery.test.mjs tests/integration/v3-2-115-m02-review-invalidation-hold.test.mjs
+      - name: Regress V114 reviewer lifecycle V113 reviewer assignment and V112 intake
+        run: node --test tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs
+      - name: Regress V111 independent domain signers and V110 negative notices
+        run: node --test tests/security/v3-2-111-m02-independent-evidence-review.test.mjs tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+      - name: Regress V109 V108 V107 and V106 isolated PostgreSQL fences
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Assert business authority stays blocked with zero production migrations
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-119-m02-incident-gap-manifest.json'));const d=s.hard_denials;if(s.parent_pr!==125||s.test_cases.length!==20||s.discovery_contract.max_students_per_incident_scan!==8||s.discovery_contract.allow_caller_provided_student_subset!==false||s.export_contract.actual_organizational_signer_or_key_custody!==false||s.sql.production_migration_039_created!==false||s.external_acceptance.official_contract_status!=='proposed-unimplemented'||Object.entries(d).some(([k,v])=>k==='hold_active'?v!==true:v!==false))process.exit(1)"
+      - name: Recheck V105 external admission still unverified
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress eighteen V82 through V99 isolated M02 safety suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
