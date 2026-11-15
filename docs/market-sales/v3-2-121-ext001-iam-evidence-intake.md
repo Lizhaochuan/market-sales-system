@@ -84,3 +84,11 @@ EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`
 - 在异步双来源读取的每轮结束后重新检查 SECURITY/AUDIT 签署身份状态、两个来源见证签名及公钥独立性；模拟来源密钥在读取期间被撤销时，不允许调用 SQL attester。补充复用同一 Ed25519 公钥但签名有效的反例以及读取期间撤权的负向测试。
 - 这只是临时模拟信任注册表上的重新读取。最后一次复核与数据库提交之间仍有竞态窗口，未建立可信真实 IAM、外部对象不可变存储或数据库原生强制双来源校验。任何成功模拟验证仍不构成真实证据验收或解除 HOLD。
 - 以上变更的 CI 验收以最新提交的实际 GitHub Actions 结果为准；未通过时不得声明测试完成。PR #129 继续 Draft，禁止合并、部署及实际生产迁移。
+
+
+## EXT-001 SQL attestation 后双来源再核验（CI-only）
+
+- issueFixtureExt001FromTwoSources 在取得隔离 SQL attester 的确定性正向响应后，重新执行两轮主存储/审计镜像读取及四类身份的验签状态核验；正常执行共计四轮模拟双来源读取。后核验要求证据摘要、审核版本及 E1/E2 字节与提交前完全一致。
+- 任一来源在模拟 SQL 返回后被撤权、固定版本文件被替换、镜像不可用或内容改变时均 fail closed，不返回成功响应。负向测试保留 SQL 已记录合成审计事件的事实，禁止把后核验失败冒充数据库自动回滚。
+- 此检查仍非跨系统原子事务；后核验与最终输出之间也有竞态窗口。没有真实 IAM、真实 WORM 存储或生产撤权证明。成功只表示注入的 CI fixture 一致。
+- EXT-001 继续 UNVERIFIED、production_evidence_collected=false、hold_active=true、release_eligible=false；PR #129 Draft / CI-only，不合并、不部署、不写真实业务。
