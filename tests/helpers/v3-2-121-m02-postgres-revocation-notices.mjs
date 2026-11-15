@@ -17,34 +17,47 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
    return c;
   }catch(e){c.release();throw e;}
  }
+ async function verifyHistory(c,table,head,scope,code){
+  const count=Number(head.sequence);
+  if(!Number.isSafeInteger(count)||count<1||count>128)fail(code);
+  const rows=await c.query(
+   'SELECT sequence,event_payload,event_digest FROM v106_test.'+table+
+   ' WHERE organization_id=$1 AND incident_id=$2 ORDER BY sequence',scopeParams(scope));
+  if(rows.rowCount!==count)fail(code);
+  let previous='0'.repeat(64);
+  const events=[];
+  for(let i=0;i<rows.rows.length;i++){
+   const row=rows.rows[i];let event;
+   try{event=JSON.parse(row.event_payload);}catch{fail(code);}
+   const digest=sha(event);
+   if(Number(row.sequence)!==i+1||event?.sequence!==i+1||
+      event.previous_event_digest!==previous||digest!==row.event_digest||
+      event.scope?.organization_id!==scope.organization_id||
+      event.scope?.incident_id!==scope.incident_id)fail(code);
+   previous=digest;events.push({event,digest});
+  }
+  if(previous!==head.event_digest)fail(code);
+  return events;
+ }
  async function source(c,scope){
   const p=scopeParams(scope);
   const mh=await c.query('SELECT sequence,event_digest,hold_active FROM v106_test.fixture_incident_gap_manifest_heads WHERE organization_id=$1 AND incident_id=$2 ',p);
   if(mh.rowCount!==1||mh.rows[0].hold_active!==true)fail('NOTICE_MANIFEST_HEAD_ABSENT');
-  const m=await c.query('SELECT event_payload,event_digest FROM v106_test.fixture_incident_gap_manifest_events WHERE organization_id=$1 AND incident_id=$2 AND sequence=$3', [...p,scope.export_version]);
-  if(m.rowCount!==1)fail('NOTICE_MANIFEST_VERSION_ABSENT');
-  let manifest;try{manifest=JSON.parse(m.rows[0].event_payload);}catch{fail('NOTICE_MANIFEST_TAMPERED');}
-  if(sha(manifest)!==m.rows[0].event_digest||sha(manifest)!==scope.manifest_digest||
-    manifest.scope?.organization_id!==scope.organization_id||
-    manifest.scope?.incident_id!==scope.incident_id||
-    manifest.sequence!==scope.export_version)fail('NOTICE_MANIFEST_TAMPERED');
+  const manifests=await verifyHistory(c,'fixture_incident_gap_manifest_events',mh.rows[0],scope,'NOTICE_MANIFEST_HISTORY_INVALID');
+  const target=manifests[scope.export_version-1];
+  if(!target||target.digest!==scope.manifest_digest)
+   fail('NOTICE_MANIFEST_VERSION_ABSENT');
   const rh=await c.query('SELECT sequence,event_digest,hold_active FROM v106_test.fixture_manifest_revocation_heads WHERE organization_id=$1 AND incident_id=$2 ',p);
   if(rh.rowCount!==1||rh.rows[0].hold_active!==true)fail('NOTICE_REVOCATION_HEAD_ABSENT');
-  const rev=await c.query('SELECT sequence,event_payload,event_digest FROM v106_test.fixture_manifest_revocation_events WHERE organization_id=$1 AND incident_id=$2 AND event_digest=$3 ORDER BY sequence', [...p,scope.revocation_event_digest]);
-  if(rev.rowCount!==1)fail('NOTICE_REVOCATION_EVENT_ABSENT');
-  let event;try{event=JSON.parse(rev.rows[0].event_payload);}catch{fail('NOTICE_REVOCATION_TAMPERED');}
-  if(sha(event)!==rev.rows[0].event_digest||event.scope?.organization_id!==scope.organization_id||
-    event.scope?.incident_id!==scope.incident_id||
-    event.target_manifest_sequence!==scope.export_version||
-    event.target_manifest_digest!==scope.manifest_digest||
-    event.revocation_recorded!==true||!event.classification?.startsWith('REVOKED_'))
+  const revocations=await verifyHistory(c,'fixture_manifest_revocation_events',rh.rows[0],scope,'NOTICE_REVOCATION_HISTORY_INVALID');
+  const match=revocations.find(({digest})=>digest===scope.revocation_event_digest);
+  const event=match?.event;
+  if(!event||event.target_manifest_sequence!==scope.export_version||
+     event.target_manifest_digest!==scope.manifest_digest||
+     event.revocation_recorded!==true||
+     !['REVOKED_PREVIOUSLY','REVOKED_SUPERSEDED_BY_LATER_EXPORT',
+       'REVOKED_SOURCE_CHANGED_AFTER_EXPORT'].includes(event.classification))
    fail('NOTICE_REVOCATION_UNPROVEN');
-  // Reject an export head that was tampered, but older revoked exports remain revoked.
-  const latest=await c.query('SELECT event_payload,event_digest FROM v106_test.fixture_incident_gap_manifest_events WHERE organization_id=$1 AND incident_id=$2 AND sequence=$3',[...p,mh.rows[0].sequence]);
-  if(latest.rowCount!==1)fail('NOTICE_MANIFEST_HEAD_TAMPERED');
-  let last;try{last=JSON.parse(latest.rows[0].event_payload);}catch{fail('NOTICE_MANIFEST_HEAD_TAMPERED');}
-  if(sha(last)!==mh.rows[0].event_digest||sha(last)!==latest.rows[0].event_digest)
-   fail('NOTICE_MANIFEST_HEAD_TAMPERED');
   return {manifest_digest:scope.manifest_digest,revocation_event_digest:scope.revocation_event_digest,revoked:true};
  }
  async function read(scope,callback){
