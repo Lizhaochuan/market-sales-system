@@ -4,7 +4,7 @@ import {generateKeyPairSync,createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {
  REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,
- signFixtureExt001Envelope,verifyFixtureExt001Envelope,verifyFixtureExt001BytesAndFingerprint
+ signFixtureExt001Envelope,verifyFixtureExt001Envelope,verifyFixtureExt001BytesAndFingerprint,issueFixtureExt001VerifiedProvenance
 } from '../../src/cross-module-v121-iam-evidence.mjs';
 import {validateFixtureV121Handover}
  from '../../src/cross-module-v121-production-handover.mjs';
@@ -195,4 +195,58 @@ test('signed revision and actual E1/E2 bytes must match before isolated provenan
  const mixed={...newIssuer,reviewer:oldReview.reviewer};
  assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(mixed,{...opts,artifactBytes:bytes()}),
   {code:'V121_IAM_EVIDENCE_REVIEW_INVALID'});
+});
+
+
+test('independent provenance attester cannot be called with stale file bytes or unsigned revision',async()=>{
+ const envelope=signBody(safeBody());
+ const artifactBytes=new Map([
+  ['EXT-001-E1',Buffer.from('synthetic role inventory version one')],
+  ['EXT-001-E2',Buffer.from('synthetic RBAC denial tests version one')]
+ ]);
+ const receiptId='00000000-0000-4000-8000-0000000000c6';
+ let calls=0;
+ const attester={query:async(sql,args)=>{
+  calls++;
+  assert.match(sql,/fixture_attest_iam_provenance/);
+  assert.equal(args[0],org);
+  assert.equal(args[1],1);
+  assert.equal(args[2],envelope.body.revision_id);
+  assert.equal(args[3],receiptId);
+  assert.equal(args[7],issuerId);
+  assert.equal(args[8],reviewerId);
+  assert.equal(args[9].length,64);
+  assert.equal(args[10].length,64);
+  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+ }};
+ const settings={envelope,artifactBytes,trustedKeys:trusted(),
+  nowMs:120_000,revisionNo:1,receiptId,attester};
+ const result=await issueFixtureExt001VerifiedProvenance(settings);
+ assert.equal(result.verdict,'ATTESTED_SYNTHETIC_STILL_HOLD');
+ assert.equal(result.release_authorized,false);
+ assert.equal(result.production_evidence_collected,false);
+ assert.equal(result.hold_active,true);
+ assert.equal(calls,1);
+ await assert.rejects(issueFixtureExt001VerifiedProvenance({...settings,revisionNo:2}),
+  {code:'V121_IAM_PROVENANCE_SIGNED_REVISION_MISMATCH'});
+ await assert.rejects(issueFixtureExt001VerifiedProvenance({...settings,receiptId:'bad'}),
+  {code:'V121_IAM_PROVENANCE_INPUT_INVALID'});
+ await assert.rejects(issueFixtureExt001VerifiedProvenance({...settings,attester:null}),
+  {code:'V121_IAM_PROVENANCE_ATTESTER_UNAVAILABLE'});
+ const changedBytes=new Map(artifactBytes);
+ changedBytes.set('EXT-001-E1',Buffer.from('replaced after audit'));
+ await assert.rejects(issueFixtureExt001VerifiedProvenance({...settings,artifactBytes:changedBytes}),
+  {code:'V121_IAM_FILE_DIGEST_MISMATCH'});
+ const reviewerSwapped=structuredClone(envelope);
+ reviewerSwapped.reviewer.reviewer_id=issuerId;
+ await assert.rejects(issueFixtureExt001VerifiedProvenance({...settings,envelope:reviewerSwapped}),
+  {code:'V121_IAM_EVIDENCE_REVIEW_INVALID'});
+ const changedProof=structuredClone(envelope);
+ changedProof.body.revision_no=2;
+ await assert.rejects(issueFixtureExt001VerifiedProvenance({...settings,envelope:changedProof}),
+  {code:'V121_IAM_EVIDENCE_REVIEW_INVALID'});
+ assert.equal(calls,1,'No rejected proof may cause SQL attestation');
+ await assert.rejects(issueFixtureExt001VerifiedProvenance({...settings,
+  attester:{query:async()=>({rows:[{verdict:'WRONG'}]})}}),
+  {code:'V121_IAM_PROVENANCE_ATTESTATION_INDETERMINATE'});
 });
