@@ -1,0 +1,379 @@
+{
+  "schema_version": "v3.2-121-production-handover-v1",
+  "scope": "CI_ONLY_DRAFT",
+  "source_readiness": "docs/market-sales/v3-2-121-release-readiness.json",
+  "draft_pr": 129,
+  "decision": "HOLD_NOT_PRODUCTION_READY",
+  "hold_active": true,
+  "release_eligible": false,
+  "release_authorized": false,
+  "merge_allowed": false,
+  "deploy_allowed": false,
+  "owner_assignment_mode": "ROLE_ONLY_NOT_NAMED",
+  "due_dates_assigned": false,
+  "artifacts_are_production_evidence": false,
+  "phase_order": [
+    "SECURITY_FOUNDATION",
+    "CRYPTO_AND_AUDIT_ANCHORS",
+    "MONITORING_AND_PROVENANCE",
+    "SALES_STUDENT_RECONCILIATION",
+    "FINANCE_AND_ACADEMIC_RECONCILIATION",
+    "DISASTER_RECOVERY_AND_CROSS_MODULE_TEST",
+    "INDEPENDENT_UAT_CHANGE_CONTROL"
+  ],
+  "tasks": [
+    {
+      "id": "EXT-001",
+      "title": "生产 IAM 权限与身份审查",
+      "owner_domain": "SECURITY",
+      "owner_role": "SECURITY_EVIDENCE_OWNER",
+      "reviewer_domain": "AUDIT",
+      "reviewer_role": "AUDIT_INDEPENDENT_REVIEWER",
+      "phase": 1,
+      "depends_on": [],
+      "evidence_requirements": [
+        {
+          "id": "EXT-001-E1",
+          "description": "生产 IAM 角色与服务账号导出（脱敏、版本可追踪）",
+          "required": true
+        },
+        {
+          "id": "EXT-001-E2",
+          "description": "最小权限、职责隔离、越权拒绝的独立验证记录",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "安全/审计分别核验凭据边界与访问拒绝",
+        "身份清单覆盖验签、审计、销售、财务、教务及部署角色"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-002",
+      "title": "不可绕过的签名验证与密钥生命周期",
+      "owner_domain": "SECURITY",
+      "owner_role": "SECURITY_EVIDENCE_OWNER",
+      "reviewer_domain": "AUDIT",
+      "reviewer_role": "AUDIT_INDEPENDENT_REVIEWER",
+      "phase": 2,
+      "depends_on": [
+        "EXT-001"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-002-E1",
+          "description": "受信验签服务、HSM/KMS 配置与密钥托管证明",
+          "required": true
+        },
+        {
+          "id": "EXT-002-E2",
+          "description": "签名伪造、撤销、轮换、重放及绕过路径的生产级测试报告",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "验证所有准入路径必须验签且不可使用 attester 凭据绕过",
+        "密钥撤销与恢复有独立审计及分权操作记录"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-003",
+      "title": "外部不可篡改存证与可信时间",
+      "owner_domain": "AUDIT",
+      "owner_role": "AUDIT_EVIDENCE_OWNER",
+      "reviewer_domain": "SECURITY",
+      "reviewer_role": "SECURITY_INDEPENDENT_REVIEWER",
+      "phase": 2,
+      "depends_on": [
+        "EXT-001"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-003-E1",
+          "description": "独立 WORM 存证服务与保留策略证明",
+          "required": true
+        },
+        {
+          "id": "EXT-003-E2",
+          "description": "可信时间戳、跨系统恢复及历史回滚识别的外部核对报告",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "独立审计方验证存证源与 CRM 管理权限不共用",
+        "在数据库管理员篡改与回滚演练中仍能发现异常"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-004",
+      "title": "验签身份安全监控与事件演练",
+      "owner_domain": "SECURITY",
+      "owner_role": "SECURITY_EVIDENCE_OWNER",
+      "reviewer_domain": "AUDIT",
+      "reviewer_role": "AUDIT_INDEPENDENT_REVIEWER",
+      "phase": 3,
+      "depends_on": [
+        "EXT-001",
+        "EXT-002"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-004-E1",
+          "description": "监控覆盖矩阵、告警到安全隔离的真实运行记录",
+          "required": true
+        },
+        {
+          "id": "EXT-004-E2",
+          "description": "异常签发、账号失陷、故障恢复的独立演练及复盘",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "完成异常签发阻断时延与漏报评估",
+        "监控失效时写入必须默认拒绝，恢复不得自动解除隔离"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-005",
+      "title": "学生归属与销售历史核对",
+      "owner_domain": "SALES",
+      "owner_role": "SALES_EVIDENCE_OWNER",
+      "reviewer_domain": "AUDIT",
+      "reviewer_role": "AUDIT_INDEPENDENT_REVIEWER",
+      "phase": 4,
+      "depends_on": [
+        "EXT-001",
+        "EXT-009"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-005-E1",
+          "description": "脱敏学生主档与按需家庭关联核对表",
+          "required": true
+        },
+        {
+          "id": "EXT-005-E2",
+          "description": "原始订单、归因变更和补偿记录的只读对账及差异清单",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "BR-M04-001：学生为单位、同家庭兄弟姐妹按需关联",
+        "销售原订单不可覆盖，所有错配均有责任链与待处理记录"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-006",
+      "title": "财务资金与补偿记录验收",
+      "owner_domain": "FINANCE",
+      "owner_role": "FINANCE_EVIDENCE_OWNER",
+      "reviewer_domain": "AUDIT",
+      "reviewer_role": "AUDIT_INDEPENDENT_REVIEWER",
+      "phase": 5,
+      "depends_on": [
+        "EXT-005",
+        "EXT-001"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-006-E1",
+          "description": "脱敏收款/退款/对账流水与业务订单关联核验",
+          "required": true
+        },
+        {
+          "id": "EXT-006-E2",
+          "description": "差错补偿、独立复核及账务回滚不可变记录",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "每笔资金变更可从原交易追溯且账实一致",
+        "资金归属恢复须财务独立复核且不得触发销售或教务自动解隔"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-007",
+      "title": "教务履约与学生关联验收",
+      "owner_domain": "ACADEMIC",
+      "owner_role": "ACADEMIC_EVIDENCE_OWNER",
+      "reviewer_domain": "AUDIT",
+      "reviewer_role": "AUDIT_INDEPENDENT_REVIEWER",
+      "phase": 5,
+      "depends_on": [
+        "EXT-005",
+        "EXT-001"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-007-E1",
+          "description": "脱敏排课/课消/交付记录与学生主档关联核验",
+          "required": true
+        },
+        {
+          "id": "EXT-007-E2",
+          "description": "错误学生关联纠正方案、补偿和历史保全验收记录",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "履约历史不得直接覆盖，跨学生转移有可追溯补偿",
+        "教务异常不因销售与财务通过而自动解除 HOLD"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-008",
+      "title": "跨服务恢复和故障演练",
+      "owner_domain": "OPERATIONS",
+      "owner_role": "OPERATIONS_EVIDENCE_OWNER",
+      "reviewer_domain": "SECURITY",
+      "reviewer_role": "SECURITY_INDEPENDENT_REVIEWER",
+      "phase": 6,
+      "depends_on": [
+        "EXT-002",
+        "EXT-003",
+        "EXT-004",
+        "EXT-006",
+        "EXT-007"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-008-E1",
+          "description": "多服务灾备、消息投递及补偿恢复演练记录",
+          "required": true
+        },
+        {
+          "id": "EXT-008-E2",
+          "description": "幂等、故障注入、并发竞争与回滚后的对账记录",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "冷启动恢复后资金/订单/履约与审计历史保持一致",
+        "任何演练失败都保留停机、HOLD 与独立审计证据"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-009",
+      "title": "证据来源与隐私合规独立审核",
+      "owner_domain": "AUDIT",
+      "owner_role": "AUDIT_EVIDENCE_OWNER",
+      "reviewer_domain": "SECURITY",
+      "reviewer_role": "SECURITY_INDEPENDENT_REVIEWER",
+      "phase": 3,
+      "depends_on": [
+        "EXT-003"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-009-E1",
+          "description": "证据来源、收集授权、保留期限与脱敏处理证明",
+          "required": true
+        },
+        {
+          "id": "EXT-009-E2",
+          "description": "链外取证、独立复核、哈希锚点比对与版本留存清单",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "外部证据可证明事实来源，不仅是同库摘要一致",
+        "独立审计符合最小访问、隐私与保留要求"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    },
+    {
+      "id": "EXT-010",
+      "title": "生产变更与多部门 UAT 正式门槛",
+      "owner_domain": "OPERATIONS",
+      "owner_role": "OPERATIONS_EVIDENCE_OWNER",
+      "reviewer_domain": "AUDIT",
+      "reviewer_role": "AUDIT_INDEPENDENT_REVIEWER",
+      "phase": 7,
+      "depends_on": [
+        "EXT-001",
+        "EXT-002",
+        "EXT-003",
+        "EXT-004",
+        "EXT-005",
+        "EXT-006",
+        "EXT-007",
+        "EXT-008",
+        "EXT-009"
+      ],
+      "evidence_requirements": [
+        {
+          "id": "EXT-010-E1",
+          "description": "各前置门槛的独立验收签章与可追溯版本清单",
+          "required": true
+        },
+        {
+          "id": "EXT-010-E2",
+          "description": "六部门 UAT、灰度/回滚计划及部署审批证据",
+          "required": true
+        }
+      ],
+      "acceptance_checks": [
+        "所有前置门槛由独立主体复核通过后才可提请生产变更",
+        "本 CI-only 清单本身没有解隔/合并/部署授权路径"
+      ],
+      "package_status": "NOT_COLLECTED",
+      "evidence_artifact_refs": [],
+      "independent_review_status": "NOT_REVIEWED",
+      "manual_signoff_status": "NOT_SIGNED",
+      "handoff_receipt_ref": null
+    }
+  ],
+  "signoff_domains": [
+    "SECURITY",
+    "AUDIT",
+    "SALES",
+    "FINANCE",
+    "ACADEMIC",
+    "OPERATIONS"
+  ],
+  "explicit_handoff_rule": "Evidence must be collected externally, verified independently, version-bound and audited; this template cannot authorize any release."
+}
