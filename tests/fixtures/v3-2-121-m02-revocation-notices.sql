@@ -1009,3 +1009,94 @@ LEFT JOIN LATERAL(
  ORDER BY r.remediation_version DESC LIMIT 1
 ) latest ON TRUE;
 REVOKE ALL ON v106_test.fixture_uat_remediation_diagnostics FROM PUBLIC;
+
+-- Stateless cold-start rebuild of committed UAT history (single PostgreSQL fixture).
+-- It never attempts repair, release, or changing stored events. Integrity gaps fail closed.
+CREATE FUNCTION v106_test.fixture_rebuild_uat_state(p_org uuid,p_failure uuid)
+RETURNS TABLE(
+ incident_scope uuid, event_scope uuid, latest_version integer,
+ latest_remediation uuid, version_count integer, latest_accepted_reviews integer,
+ history_complete boolean, reviews_consistent boolean, domains_held integer,
+ emergency_stop_active boolean, status text, hold_active boolean,
+ release_eligible boolean
+) LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $rebuild$
+DECLARE
+ min_version integer;
+ distinct_evidence integer;
+ event_present boolean;
+BEGIN
+ IF session_user<>'v106_state_reader' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_REBUILD_ROLE_SCOPE_DENIED';
+ END IF;
+ SELECT f.incident_id,f.event_id INTO incident_scope,event_scope
+ FROM v106_test.fixture_uat_failures f
+ WHERE f.organization_id=p_org AND f.failure_id=p_failure;
+ IF incident_scope IS NULL THEN
+  RAISE EXCEPTION 'V121_REBUILD_FAILURE_UNKNOWN';
+ END IF;
+ -- Each PostgreSQL statement sees a consistent committed MVCC snapshot.
+ SELECT count(*)::integer,min(r.remediation_version),max(r.remediation_version),
+        count(DISTINCT r.new_evidence_digest)::integer
+ INTO version_count,min_version,latest_version,distinct_evidence
+ FROM v106_test.fixture_uat_remediations r
+ WHERE r.organization_id=p_org AND r.failure_id=p_failure;
+ SELECT r.remediation_id INTO latest_remediation
+ FROM v106_test.fixture_uat_remediations r
+ WHERE r.organization_id=p_org AND r.failure_id=p_failure
+ ORDER BY r.remediation_version DESC LIMIT 1;
+ SELECT count(*)::integer INTO latest_accepted_reviews
+ FROM v106_test.fixture_uat_remediation_reviews rv
+ WHERE rv.organization_id=p_org AND rv.remediation_id=latest_remediation
+   AND rv.decision='ACCEPTED_FOR_REVIEW';
+ history_complete:=(version_count>0 AND min_version=1 AND
+                     latest_version=version_count AND distinct_evidence=version_count);
+ SELECT NOT EXISTS (
+  SELECT 1 FROM v106_test.fixture_uat_remediations r
+  JOIN v106_test.fixture_uat_failures f ON
+   f.organization_id=r.organization_id AND f.failure_id=r.failure_id
+  JOIN v106_test.fixture_uat_remediation_reviews rv ON
+   rv.organization_id=r.organization_id AND rv.remediation_id=r.remediation_id
+  WHERE r.organization_id=p_org AND r.failure_id=p_failure
+   AND (rv.review_evidence_digest<>r.new_evidence_digest OR
+        rv.reviewer_id=r.remediated_by OR rv.reviewer_id=f.failed_by OR
+        EXISTS(SELECT 1 FROM v106_test.fixture_uat_remediation_reviews rv2
+          WHERE rv2.organization_id=rv.organization_id
+           AND rv2.remediation_id=rv.remediation_id
+           AND rv2.reviewer_domain<>rv.reviewer_domain
+           AND rv2.reviewer_id=rv.reviewer_id))
+ ) INTO reviews_consistent;
+ SELECT count(*)::integer INTO domains_held
+ FROM v106_test.fixture_cross_module_holds h
+ WHERE h.organization_id=p_org AND h.incident_id=incident_scope
+   AND h.module_name IN ('SALES','FINANCE','ACADEMIC')
+   AND h.hold_active IS TRUE AND h.release_eligible IS FALSE;
+ SELECT st.issuance_blocked INTO emergency_stop_active
+ FROM v106_test.fixture_recovery_emergency_stops st
+ WHERE st.organization_id=p_org AND st.incident_id=incident_scope;
+ emergency_stop_active:=COALESCE(emergency_stop_active,false);
+ SELECT EXISTS(SELECT 1 FROM v106_test.fixture_external_security_events ev
+  WHERE ev.organization_id=p_org AND ev.incident_id=incident_scope
+    AND ev.event_id=event_scope) INTO event_present;
+ IF NOT event_present THEN
+  status:='ALERT_PROVENANCE_MISSING';
+ ELSIF NOT history_complete THEN
+  status:='HISTORY_INCOMPLETE';
+ ELSIF NOT reviews_consistent THEN
+  status:='REVIEW_INTEGRITY_INVALID';
+ ELSIF domains_held<>3 THEN
+  status:='CROSS_MODULE_HOLD_INCOMPLETE';
+ ELSIF NOT emergency_stop_active THEN
+  status:='EMERGENCY_STOP_MISSING';
+ ELSE
+  status:='REBUILT_STILL_HOLD';
+ END IF;
+ hold_active:=true;
+ release_eligible:=false;
+ RETURN NEXT;
+END;
+$rebuild$;
+REVOKE ALL ON FUNCTION v106_test.fixture_rebuild_uat_state(uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_rebuild_uat_state(uuid,uuid)
+ TO v106_state_reader;
