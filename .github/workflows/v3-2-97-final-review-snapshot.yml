@@ -1,0 +1,22 @@
+name: V3.2-97 isolated final review snapshot
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-final-review-snapshot.mjs'
+      - 'tests/security/v3-2-97-m02-final-review-snapshot.test.mjs'
+      - '.github/workflows/v3-2-97-final-review-snapshot.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-final-review-snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate final review snapshot syntax
+        run: node --check src/cross-module-final-review-snapshot.mjs
+      - name: Run final snapshot and recovery combined regressions
+        run: node --test tests/security/v3-2-97-m02-final-review-snapshot.test.mjs tests/security/v3-2-96-m02-unified-recovery-conclusion-gate.test.mjs tests/security/v3-2-95-m02-recovery-conclusion-validity.test.mjs
