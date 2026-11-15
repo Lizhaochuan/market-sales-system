@@ -17,6 +17,7 @@ const host=process.env.PGHOST||'127.0.0.1';
 const admin=new pg.Pool({host,database:'v106_isolated',user:'postgres',password:'postgres'});
 const writer=new pg.Pool({host,database:'v106_isolated',user:'v106_writer_a',password:'test_only_a'});
 const receiptWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_receipt_writer_a',password:'test_only_receipt_a'});
+const auditReader=new pg.Pool({host,database:'v106_isolated',user:'v106_audit_reader',password:'test_only_auditor'});
 const receiptAttestationKey=randomBytes(32);
 const hmacReceipt=value=>createHmac('sha256',receiptAttestationKey).update(value).digest('hex');
 const keyPair=generateKeyPairSync('ed25519');
@@ -46,8 +47,9 @@ test.before(async()=>{
  await admin.query("CREATE ROLE v106_writer_b LOGIN PASSWORD 'test_only_b'");
  await admin.query("CREATE ROLE v106_receipt_writer_a LOGIN INHERIT PASSWORD 'test_only_receipt_a'");
  await admin.query('GRANT v106_writer_a TO v106_receipt_writer_a');
+ await admin.query("CREATE ROLE v106_audit_reader LOGIN PASSWORD 'test_only_auditor'");
  await admin.query('CREATE SCHEMA v106_test');
- await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b');
+ await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader');
  await admin.query(`CREATE TABLE v106_test.fixture_incident_gap_manifest_heads(
  organization_id uuid,incident_id uuid,sequence integer,event_digest text,hold_active boolean,
  PRIMARY KEY(organization_id,incident_id))`);
@@ -83,7 +85,7 @@ test.before(async()=>{
  ledger=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:proofAuthority});
  service=createIsolatedRevocationNoticeService({ledger,clock:()=>100});
 });
-test.after(async()=>{await receiptWriter.end();await writer.end();await admin.end();});
+test.after(async()=>{await auditReader.end();await receiptWriter.end();await writer.end();await admin.end();});
 test('SQL source binding and durable enqueue + replay',async()=>{
  const first=await service.enqueue(input);
  assert.equal(first.notice_accepted,true,JSON.stringify(first));
@@ -589,4 +591,49 @@ test('fixture key events are auditable, secret-free and append-only',async()=>{
  await assert.rejects(admin.query('UPDATE v106_test.fixture_receipt_key_audit SET actor=\'changed\' WHERE organization_id=$1',[a]),/V121_KEY_AUDIT_APPEND_ONLY/);
  await assert.rejects(admin.query('DELETE FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1',[a]),/V121_KEY_AUDIT_APPEND_ONLY/);
  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1',[a])).rows[0].n,5);
+});
+
+test('independent audit reader sees metadata but no key or mutation privileges',async()=>{
+ const rows=await auditReader.query('SELECT organization_id,key_version,event_kind,actor,event_digest FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1 ORDER BY event_id',[a]);
+ assert.equal(rows.rowCount,5);
+ assert.ok(rows.rows.every(r=>r.event_digest.length===64));
+ await assert.rejects(auditReader.query('SELECT * FROM v106_test.fixture_receipt_attestation_secrets'),/permission denied/);
+ await assert.rejects(auditReader.query('INSERT INTO v106_test.fixture_receipt_key_audit(organization_id,key_version,event_kind,actor,event_digest) VALUES($1,5,\'KEY_ISSUED\',\'forged\',$2)',[a,'0'.repeat(64)]),/permission denied/);
+ await assert.rejects(auditReader.query('DELETE FROM v106_test.fixture_receipt_key_audit'),/permission denied/);
+ await assert.rejects(auditReader.query('SELECT * FROM v106_test.fixture_revocation_negative_receipts'),/permission denied/);
+});
+test('corrupt active key issuance audit fails closed without changing HOLD receipts',async()=>{
+ const version=3;
+ const stored=await admin.query('SELECT event_digest FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1 AND key_version=$2 AND event_kind=$3',[a,version,'KEY_ISSUED']);
+ assert.equal(stored.rowCount,1);
+ const key=await admin.query('SELECT attestation_key FROM v106_test.fixture_receipt_attestation_secrets WHERE organization_id=$1 AND key_version=3 AND active=true',[a]);
+ assert.equal(key.rowCount,1);
+ const q=await service.enqueue({...input,epoch:94});
+ const signer='00000000-0000-4000-8000-000000000094';
+ const receipt=issuedFixtureReceipt(q.notice_id,signer,7);
+ const adapter=createIsolatedPostgresRevocationNotices({receiptAttestationKey:key.rows[0].attestation_key,
+  receiptAttestationVersion:3,receiptPool:receiptWriter,pool:writer,receiptPublicKey:keyPair.publicKey,
+  receiptClock:()=>150,receiptProofAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2}),
+  leaseGate:createFixtureLeaseGate({publicKey:fixtureLeaseKeys.publicKey,clock:()=>150,
+   loadAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2,lease_sequence:7})})});
+ // Simulate privileged database tampering without granting the app such privilege.
+ await admin.query('ALTER TABLE v106_test.fixture_receipt_key_audit DISABLE TRIGGER fixture_key_audit_immutable');
+ try{
+  await admin.query('UPDATE v106_test.fixture_receipt_key_audit SET event_digest=$4 WHERE organization_id=$1 AND key_version=$2 AND event_kind=$3',[a,version,'KEY_ISSUED','0'.repeat(64)]);
+ }finally{
+  await admin.query('ALTER TABLE v106_test.fixture_receipt_key_audit ENABLE TRIGGER fixture_key_audit_immutable');
+ }
+ try{
+  await assert.rejects(adapter.appendNegativeReceipt(receipt),/V121_RECEIPT_KEY_AUDIT_UNVERIFIED/);
+  const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+  assert.equal(count.rows[0].n,0);
+  const marker=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',[a,incident,signer]);
+  assert.equal(marker.rows[0].n,0);
+ }finally{
+  await admin.query('ALTER TABLE v106_test.fixture_receipt_key_audit DISABLE TRIGGER fixture_key_audit_immutable');
+  try{await admin.query('UPDATE v106_test.fixture_receipt_key_audit SET event_digest=$4 WHERE organization_id=$1 AND key_version=$2 AND event_kind=$3',[a,version,'KEY_ISSUED',stored.rows[0].event_digest]);}
+  finally{await admin.query('ALTER TABLE v106_test.fixture_receipt_key_audit ENABLE TRIGGER fixture_key_audit_immutable');}
+ }
+ const result=await adapter.appendNegativeReceipt(receipt);
+ assert.equal(result.hold_active,true);
 });
