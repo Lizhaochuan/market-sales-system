@@ -224,3 +224,42 @@ test('remote recheck is mandatory before attestation, with no SQL call on invali
  }),'V121_IAM_SOURCE_CONTENT_MISMATCH');
  assert.equal(issued,1,'Failed source verification must not issue DB attestation');
 });
+
+
+test('distinct fixture identities must not share the same underlying Ed25519 public key',async()=>{
+ const x=setup();
+ const alias=new Map(x.sourceKeys);
+ alias.set(id.audit,{...alias.get(id.audit),publicKey:k.primary.publicKey});
+ await rejects(()=>verifyFixtureExt001SourceVersion({...x.options,sourceKeys:alias}),
+  'V121_IAM_SOURCE_SIGNATURE_INVALID');
+ // Even valid independently signed witness records must not alias a
+ // submitting or reviewing actor's trusted cryptographic identity.
+ const x2=setup();
+ const aliases=new Map(x2.options.trustedKeys);
+ aliases.set(id.issuer,{...aliases.get(id.issuer),publicKey:k.primary.publicKey});
+ await rejects(()=>verifyFixtureExt001SourceVersion({...x2.options,trustedKeys:aliases}),
+  'V121_IAM_EVIDENCE_REVIEW_INVALID');
+});
+
+test('revocation during fixture remote reads rejects admission without issuing attestation',async()=>{
+ const x=setup();
+ let issued=0,reads=0;
+ const attester={query:async()=>{
+  issued++;
+  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+ }};
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,
+  receiptId:'00000000-0000-4000-8000-0000000000e6',
+  attester,
+  primaryReader:async rec=>{
+   reads++;
+   const result=await x.primaryReader(rec);
+   if(reads===2){
+    x.sourceKeys.set(id.primary,{...x.sourceKeys.get(id.primary),status:'REVOKED'});
+   }
+   return result;
+  }
+ }),'V121_IAM_SOURCE_TRUST_INVALID');
+ assert.equal(issued,0,'source revoked during read cannot issue an attestation');
+});
