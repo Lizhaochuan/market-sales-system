@@ -1,5 +1,5 @@
 // V3.2-121 CI-only independent Ed25519 audit proof: no production authority or storage.
-import {sign, verify, randomUUID} from 'node:crypto';
+import {sign, verify, randomUUID, createHash} from 'node:crypto';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIGEST=/^[0-9a-f]{64}$/;
@@ -135,4 +135,36 @@ export async function issueFixtureVerifiedAnchorTicket({
    s,anchor.signature_b64,s.observed_digest]
  );
  return ticket;
+}
+
+
+// Read-only out-of-band CI monitor. Its signal is NOT proof of external IAM,
+// and it never grants an authorization or writes to the attester database.
+export function inspectFixtureStoredAdmission({admission,publicKeys,keyStates}){
+ const proof={statement:admission?.signed_statement,signature_b64:admission?.signature_b64};
+ const raw=JSON.stringify([
+  admission?.organization_id,admission?.failure_id,admission?.snapshot_sequence,
+  admission?.signer_id,admission?.observed_digest,proof.statement,proof.signature_b64
+ ]);
+ const digest=createHash('sha256').update(raw).digest('hex');
+ const mismatched=!proof.statement ||
+  admission.organization_id!==proof.statement.organization_id ||
+  admission.failure_id!==proof.statement.failure_id ||
+  admission.snapshot_sequence!==proof.statement.snapshot_sequence ||
+  admission.signer_id!==proof.statement.signer_id ||
+  admission.observed_digest!==proof.statement.observed_digest;
+ if(mismatched){
+  return Object.freeze({anomaly:'UNEXPECTED_ATTESTATION',
+   evidence_digest:digest,hold_active:true,release_eligible:false});
+ }
+ try{
+  inspectFixtureArchivedAuditAnchor({anchor:proof,publicKeys,keyStates});
+  return Object.freeze({anomaly:null,evidence_digest:digest,
+   hold_active:true,release_eligible:false});
+ }catch(error){
+  return Object.freeze({anomaly:
+   error?.code==='V121_ANCHOR_SIGNATURE_INVALID'?'ATTESTER_SIGNATURE_INVALID':
+   'UNEXPECTED_ATTESTATION',evidence_digest:digest,
+   hold_active:true,release_eligible:false});
+ }
 }
