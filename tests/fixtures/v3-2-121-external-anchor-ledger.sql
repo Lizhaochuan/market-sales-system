@@ -39,6 +39,11 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
 DECLARE seq integer;
 DECLARE old_state text;
 BEGIN
+ -- A transaction-wide snapshot can observe a pre-revocation key after waiting.
+ -- Fail closed: lifecycle transitions require READ COMMITTED visibility.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(
   'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
  SELECT event_sequence,event_kind INTO seq,old_state
@@ -79,8 +84,17 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
 DECLARE seq integer;
 DECLARE latest_state text;
 BEGIN
+ -- Snapshot-isolation readers may reuse a pre-revocation state after lock wait.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ -- Global order: checkpoint scope, then signing-key scope; key lifecycle
+ -- changes acquire only the signing-key scope. This prevents a write from
+ -- passing an earlier key-status read after a concurrent retirement/revocation.
  PERFORM pg_advisory_xact_lock(hashtextextended(
   'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
  SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
  WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
  -- First anchor can refer to an existing business snapshot with sequence > 1.
