@@ -329,3 +329,9 @@
 - 新增独立 `v121_iam_provenance_attester` 模拟身份与只能追加的 `fixture_iam_provenance_proofs` 记录。证明绑定机构、收据 UUID、递增版本、签名版本 UUID、E1/E2 哈希、完整双签名包摘要、两份签名的各自摘要、SECURITY 和 AUDIT 双方主体以及有效期。收据 writer 无权生成证明，且必须在统一事务锁内找到与收据每一项输入均完全匹配的证明，否则返回 `V121_IAM_PROVENANCE_MISSING_OR_MISMATCH`；原收据写入入口不再接受没有独立来源证明的记录。
 - `issueFixtureExt001VerifiedProvenance` 在申请证明前**再次核对双签名、签发者信任状态、签名声明中的版本和原始 E1/E2 字节**，任何异常都不会调用 SQL attester。CI 合同/集成测试覆盖文件替换后沿用旧签名、旧审核跨版本借用、伪造摘要、writer 无凭据登记、非 attester 冒用与两份不同证明竞争同一版本。保留既有过期、撤回和历史不可覆盖验收。
 - **不可超出的安全结论**：此处只能证明 CI 提供的两个合成 Buffer 和已签声明一致，无法独立证明这些字节来自真实 IAM，也无法检测此后没有重新读取的远程文件被替换。数据库本身不原生验 Ed25519，依然信任隔离 attester 身份；其凭据遭攻破仍可能造假。生产实现必须由受信文件版本/内容寻址存储、外部取证和真正独立 IAM 审核补齐，不能把此 CI 检查称为生产证据完整性已验收。`EXT-001=UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`，Draft PR #129 / HOLD 不变。
+
+## V121 / EXT-001 双来源可信存储版本与二次重读（CI-only）
+
+- 新增 `cross-module-v121-iam-source-version.mjs`，模拟两个相互独立的外部证据来源（主档与审计镜像），分别对绑定 `revision_no`、`revision_id`、包摘要、E1/E2 固定对象版本 ID、generation 和原始字节 SHA-256 的来源清单签名。校验过程中均使用显式受信公钥验证签名和有效状态；源签名身份不得与 SECURITY/AUDIT 证据签名身份混用。
+- 对 E1/E2 各自执行两轮主存储和审计镜像读取，要求当前对象版本、代数、真实 Buffer SHA-256、模拟不可变锁和最近观测时间一致。版本回退或替换、镜像滞后、对象删除、来源宕机、取消锁定、过期元数据或签名无效时，`issueFixtureExt001FromTwoSources` 不得申请数据库准入凭证。正向结果只能声明合成证据的当前版本自洽，不能声明已连接真实外部来源。
+- 新增合同负向测试并纳入 V121 GitHub Actions。**实际生产可信版本 ID、云提供者授权与独立 WORM、真实审计镜像可信签名和取证仍未验证**；任何模拟读写器都不是生产凭据或正式审核身份。既有写入路径在生产落地前仍须由 IAM 强制隔离。EXT-001 保持 `UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`，PR #129 Draft / HOLD / 不合并 / 不部署。
