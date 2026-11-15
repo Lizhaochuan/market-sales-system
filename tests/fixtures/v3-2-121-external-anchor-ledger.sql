@@ -2,7 +2,7 @@
 -- This is NOT independent WORM storage; postgres superuser controls both DBs.
 CREATE SCHEMA v121_anchor;
 REVOKE ALL ON SCHEMA v121_anchor FROM PUBLIC;
-GRANT USAGE ON SCHEMA v121_anchor TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester;
+GRANT USAGE ON SCHEMA v121_anchor TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security;
 
 CREATE FUNCTION v121_anchor.no_change() RETURNS trigger
 LANGUAGE plpgsql SET search_path=pg_catalog AS $$
