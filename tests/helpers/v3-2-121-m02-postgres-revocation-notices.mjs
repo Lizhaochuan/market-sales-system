@@ -1,13 +1,15 @@
 // V121 disposable PostgreSQL adapter. SQL verifies revocation before enqueue.
 // This is not a network sender or evidence of real-world acknowledgement.
-import {createHash} from 'node:crypto';
+import {createHash,createHmac} from 'node:crypto';
 import {deriveFixtureRevocationNoticeId} from '../../src/cross-module-revocation-notice-contract.mjs';
 import {verifyFixtureNegativeReceiptProof} from '../../src/cross-module-fixture-receipt-proof.mjs';
 const sha=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const fail=c=>{const e=new Error(c);e.code=c;throw e;};
 const scopeParams=x=>[x.organization_id,x.incident_id];
-export function createIsolatedPostgresRevocationNotices({pool,receiptPool,receiptProofAuthority,receiptPublicKey,receiptClock,
+export function createIsolatedPostgresRevocationNotices({pool,receiptPool,receiptAttestationKey,receiptProofAuthority,receiptPublicKey,receiptClock,
  beforeReceiptCommit=async()=>{},afterReceiptCommit=async()=>{},leaseGate}={}){
+ if(!Buffer.isBuffer(receiptAttestationKey)||receiptAttestationKey.length!==32)
+  throw TypeError('NOTICE_ATTESTATION_KEY_REQUIRED');
  if(!receiptPool||typeof receiptPool.connect!=='function')
   throw TypeError('NOTICE_RECEIPT_WRITER_REQUIRED');
  if(!leaseGate||typeof leaseGate.verifyLease!=='function')
@@ -251,8 +253,10 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptPool,receip
      notice_id:input.notice_id,receipt_sequence:input.receipt_sequence,
      receipt_state:input.receipt_state,previous_digest:previous,proof:input.proof,lease:input.lease};
     const digest=sha(payload);
-    await c.query('SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text)',
-     [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,JSON.stringify(payload)]);
+    const serialized=JSON.stringify(payload);
+    const attestation=createHmac('sha256',receiptAttestationKey).update(serialized).digest('hex');
+    await c.query('SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)',
+     [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,serialized,attestation]);
     await beforeReceiptCommit({notice_id:input.notice_id,duplicate:false});
     await checkProof(input);
     await checkLease(input);
