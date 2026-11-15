@@ -1,0 +1,61 @@
+name: V3.2-111 independent evidence responsibility and negative receipt review
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-independent-evidence-review.mjs'
+      - 'tests/security/v3-2-111-m02-independent-evidence-review.test.mjs'
+      - 'spec/v3-2-111-m02-independent-evidence-responsibility.json'
+      - 'docs/V3.2-111_M02_INDEPENDENT_EVIDENCE_RESPONSIBILITY.md'
+      - '.github/workflows/v3-2-111-independent-evidence-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-three-party-evidence-review:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install disposable runner runtime
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Validate independent evidence contract code syntax
+        run: |
+          node --check src/cross-module-independent-evidence-review.mjs
+          node --check tests/security/v3-2-111-m02-independent-evidence-review.test.mjs
+      - name: Run V111 independent signers delayed revocation and V110 negative receipt contract checks
+        run: node --test tests/security/v3-2-111-m02-independent-evidence-review.test.mjs
+      - name: Validate schema owners non-production scope and no real authorization
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-111-m02-independent-evidence-responsibility.json'));if(s.parent_pr!==117||s.evidence_tests.length!==13||s.responsibility_matrix.length!==6||s.responsibility_matrix.some(x=>x.assigned_person!=='UNASSIGNED')||s.production_runtime_wired!==false||s.production_database_touched!==false||s.real_finance_signatures_verified!==false||s.real_academic_signatures_verified!==false||s.real_atomic_handoff_verified!==false||s.handoff_allowed!==false||s.finance_authorized!==false||s.academic_authorized!==false||s.compensation_write_allowed!==false||s.release_eligible!==false||s.hold_active!==true||s.merge_authorized!==false||s.deploy_authorized!==false||s.external_contract_status!=='proposed-unimplemented'||s.production_migration_039_created!==false)process.exit(1)"
+      - name: Create disposable checkpoint lease and negative receipt SQL fixtures
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+      - name: Regress V110 signed loss negative receipt and durable SQL revocation
+        run: node --test tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+      - name: Regress V109 lease V108 causal race V107 signed SQL and V106 transaction
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Check V105 unresolved external admission evidence
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress eighteen original isolated M02 security suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
