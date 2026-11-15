@@ -2,7 +2,7 @@
 import {createHash, verify} from 'node:crypto';
 const sha=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const HEX=/^[a-f0-9]{64}$/;
-const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const FIELDS=['organization_id','incident_id','signer_id','notice_id','authority_epoch','revocation_watermark','lease_sequence','issued_at_ms','expires_at_ms'];
 const exact=(x,fields)=>x!==null&&typeof x==='object'&&!Array.isArray(x)&&Object.keys(x).length===fields.length&&fields.every(k=>Object.hasOwn(x,k));
 const fail=code=>{const e=new Error(code);e.code=code;throw e;};
