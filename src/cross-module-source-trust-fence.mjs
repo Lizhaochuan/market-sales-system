@@ -110,6 +110,7 @@ function sourceProof(x,domain,scope,t,trust){
   !Number.isSafeInteger(x.revocation_sequence)||x.revocation_sequence<0||
   !SHA.test(x.revocation_digest)||!SHA.test(x.evidence_digest)||
   !validTime(x.issued_at_ms,x.expires_at_ms,t)||
+  x.issued_at_ms<expected.entry.activated_at_ms||
   typeof x.signature!=='string')
   fault('TRUST_SOURCE_ENVELOPE_INVALID');
  let sig;
