@@ -2688,7 +2688,7 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
     rows:fabricated,anchor:externalArchive.get('fixture-separate-checkpoint-2'),
     previousAnchor:externalArchive.get('fixture-separate-checkpoint-1'),
     organizationId:a,publicKeys,keyStates,nowMs:Date.now(),minimumEventCount:6
-   }),{code:'V121_KEY_ANCHOR_CONTENT_MISMATCH'});
+   }),{code:'V121_KEY_ANCHOR_PREVIOUS_MISMATCH'});
    assert.throws(()=>verifyFixtureIamKeyExternalAnchor({
     rows:history.slice(0,4),anchor:externalArchive.get('fixture-separate-checkpoint-2'),
     previousAnchor:externalArchive.get('fixture-separate-checkpoint-1'),
