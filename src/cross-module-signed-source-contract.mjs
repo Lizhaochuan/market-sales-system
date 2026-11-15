@@ -57,10 +57,18 @@ export function createIsolatedSignedSourceContract({
   !Number.isSafeInteger(timeoutMs)||timeoutMs<10||timeoutMs>10000)
   throw TypeError('Three isolated readers, pinned fixture keys and test clock are required');
  const keys={};
+ const pinnedFingerprints=new Set();
  for(const domain of DOMAINS){
   const key=createPublicKey(fixturePublicKeys[domain]);
   if(key.asymmetricKeyType!=='ed25519')
    throw TypeError('Only fixture Ed25519 source keys are supported');
+  // Separate simulated domains must not silently share the same test trust root.
+  // This is only fixture key isolation, not a production trust relationship.
+  const fingerprint=createHash('sha256').update(
+   key.export({type:'spki',format:'der'})).digest('hex');
+  if(pinnedFingerprints.has(fingerprint))
+   throw TypeError('Fixture domains must pin distinct Ed25519 public keys');
+  pinnedFingerprints.add(fingerprint);
   keys[domain]=key;
  }
  const seen=new Map(),lastClock=new Map(),queues=new Map();
