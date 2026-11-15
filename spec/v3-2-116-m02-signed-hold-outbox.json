@@ -1,0 +1,168 @@
+{
+  "schema_version": "v3.2-116-m02-signed-hold-outbox-negative-receipt-v1",
+  "module": "M02",
+  "scope": "CI_ONLY_SIGNED_HOLD_OUTBOX_AND_NEGATIVE_RECEIPT",
+  "parent_pr": 122,
+  "parent_sha": "ed692c703c7bff585d9056c0b553320dfb04ed44",
+  "parent_ci": [
+    {
+      "run_id": 43666196819,
+      "result": "completed/success"
+    },
+    {
+      "run_id": 43666196810,
+      "result": "completed/success"
+    }
+  ],
+  "source": "src/cross-module-hold-outbox-protocol.mjs",
+  "postgres_adapter": "tests/helpers/v3-2-116-m02-postgres-hold-outbox.mjs",
+  "postgres_ddl": "tests/fixtures/v3-2-116-m02-hold-outbox.sql",
+  "postgres_setup": "scripts/v3-2-116-setup-hold-outbox.mjs",
+  "integration_test": "tests/integration/v3-2-116-m02-hold-outbox-delivery.test.mjs",
+  "event_chain": {
+    "ancestor": "V115 append-only HOLD_PENDING_EXTERNAL_AUTHORITY records",
+    "verified_all_hash_chain_entries_up_to_latest": true,
+    "held_scope": [
+      "organization_id",
+      "incident_id",
+      "student_id"
+    ],
+    "bounded_sequence": 64,
+    "no_hold_is_not_release": true,
+    "stale_upstream_data_is_not_authority": true,
+    "holds_remain_irreversible_in_test": true
+  },
+  "source_authentication": {
+    "fixture_ed25519_source_public_key": true,
+    "source_signature_fields": [
+      "schema_version",
+      "organization_id",
+      "incident_id",
+      "student_id",
+      "hold_sequence",
+      "hold_event_digest",
+      "source_epoch",
+      "source_revision",
+      "revocation_sequence",
+      "issued_at_ms",
+      "expires_at_ms",
+      "fixture_only"
+    ],
+    "pinned_key_for_disposable_ci_only": true,
+    "independent_real_external_pki": false,
+    "organization_authorized_source_issuer": false,
+    "persistent_signing_key_custody_proven": false,
+    "source_revocation_status_externally_verified": false
+  },
+  "message_contract": {
+    "message_kind": "hold_invalidation",
+    "message_status": "PENDING_NEGATIVE_FIXTURE_RECEIPT",
+    "hold_sequence_equals_source_hold_sequence": true,
+    "message_digest_binds_scope_hold_digest_and_source_proof": true,
+    "single_sql_transaction_for_outbox_insert": true,
+    "mandatory_previous_outbox_message_for_sequence_gt_one": true,
+    "duplicate_hold_sequence_denied": true,
+    "local_commit_is_not_remote_delivery": true,
+    "after_commit_unknown_returns_blocked": true,
+    "per_process_local_queues_and_db_advisory_lock": true,
+    "actual_production_outbox_publisher": false,
+    "at_least_once_external_delivery_worker": false,
+    "external_transport_attempted": false
+  },
+  "negative_receipt_contract": {
+    "separate_fixture_recipient_ed25519_public_key": true,
+    "identical_source_and_recipient_keys_denied": true,
+    "only_disposition": "fixture_received_still_blocked",
+    "negative_receipt_requires_signed_scope_and_message_digest": true,
+    "negative_receipt_sequence_requires_previous_receipt_for_later_messages": true,
+    "duplicate_or_replay_denied": true,
+    "no_positive_receipt_format": true,
+    "no_authorization_from_negative_ack": true,
+    "actual_remote_acceptance_verified": false,
+    "acknowledgement_persisted_only_to_disposable_postgres": true
+  },
+  "sql_boundary": {
+    "engine": "PostgreSQL 16 ephemeral GitHub Actions service",
+    "db_name": "v106_isolated",
+    "schema": "v106_test",
+    "tables": [
+      "fixture_hold_outbox",
+      "fixture_hold_outbox_negative_receipts"
+    ],
+    "hard_guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "tenant_rls": "FORCE RLS",
+    "actor_roles": [
+      "v106_writer_a",
+      "v106_writer_b"
+    ],
+    "immutable_outbox_to_writer": true,
+    "immutable_receipts_to_writer": true,
+    "serializable_insert_and_confirmation": true,
+    "previous_source_hold_transaction_committed_before_outbox_insert": true,
+    "v115_hold_and_v116_outbox_atomically_written_together": false,
+    "multi_service_atomic_delivery": false,
+    "end_to_end_exactly_once_delivery_proven": false,
+    "production_migration_created": false,
+    "production_database_connected": false,
+    "production_business_table_touched": false
+  },
+  "cases": [
+    "OUT-01",
+    "OUT-02",
+    "OUT-03",
+    "OUT-04",
+    "OUT-05",
+    "OUT-06",
+    "OUT-07",
+    "OUT-08",
+    "OUT-09",
+    "OUT-10",
+    "OUT-11",
+    "OUT-12",
+    "OUT-13",
+    "OUT-14",
+    "OUT-15",
+    "OUT-16",
+    "OUT-17",
+    "OUT-18",
+    "OUT-19",
+    "OUT-20"
+  ],
+  "safety": {
+    "all_real_owners": "UNASSIGNED",
+    "status_of_external_contract": "proposed-unimplemented",
+    "sixteen_external_admissions": "UNVERIFIED",
+    "r01_to_r10": "UNVERIFIED",
+    "six_real_cross_module_authority_conditions": "UNVERIFIED",
+    "no_production_chromium_or_contract_uat": true,
+    "original_order_payment_saleevent_lesson_compensation_history_preserved": true,
+    "student_is_primary_entity": true,
+    "family_optional_for_real_siblings": true,
+    "production_migration_039_added": false,
+    "edu_management_system_changed": false
+  },
+  "hard_denials": {
+    "external_source_verified": false,
+    "external_recipient_verified": false,
+    "external_authority_verified": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "production_integration_allowed": false,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "explicit_unverified_gaps": [
+    "Signed fixture source and recipient are not real independent organizations or authorized signers",
+    "Neither real source revocation nor transport loss recovery guarantees are implemented",
+    "The V115 HOLD is a previously committed SQL record, and V116 outbox is inserted later; they do not form one creation transaction",
+    "The negative receipt only records a fixture acknowledgement, not independently witnessed delivery to a real system",
+    "A last-read-to-outbox-source-change window remains and cross-system causal barrier is absent",
+    "No production events, cron, worker, retries, network transport, identity/IAM or remote acceptance",
+    "Receipt history can show a recorded event while the remote result is unknown in a real deployment"
+  ],
+  "next_stage": "V3.2-117 isolated pending-delivery reconciliation, signed cancellation and never-release failure classification; real integration gated"
+}
