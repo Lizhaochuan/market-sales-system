@@ -154,21 +154,22 @@ export function createIsolatedHoldGapScanner({
    try{
     const t=now(scope);
     const saved=await ledger.scan(scope,t,receiptOverdueMs);
-    if(!exact(saved,['accepted','event_digest','reason_code','report'])||
+    if(!exact(saved,['accepted','sequence','event_digest','reason_code','report'])||
      saved.accepted!==true||
      saved.reason_code!=='FIXTURE_GAP_SCAN_APPENDED'||
      !SHA.test(saved.event_digest)||
+     !Number.isSafeInteger(saved.sequence)||saved.sequence<1||
      !exact(saved.report,['checked_through','hold_head_digest',
       'outbox_prefix','negative_receipt_prefix','gaps','gap_digest',
       'snapshot_digest']))
      fail('GAP_SCAN_SQL_REPLAY_CONFLICT_OR_UNCERTAIN');
     await afterCommit({scope,report:saved.report});
     const [head,event,current]=await Promise.all([
-     ledger.head(scope),ledger.event(scope,saved.sequence??0),
+     ledger.head(scope),ledger.event(scope,saved.sequence),
      ledger.snapshot(scope,now(scope),receiptOverdueMs)
     ]);
     // The returned committed sequence is a real SQL row identifier.
-    if(!head||!Number.isSafeInteger(head.sequence)||
+    if(!head||head.sequence!==saved.sequence||
      head.event_digest!==saved.event_digest||
      !exact(event,AUDIT)||sha(event)!==saved.event_digest)
      fail('GAP_SCAN_COMMIT_READBACK_UNVERIFIED');
