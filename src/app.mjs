@@ -18,6 +18,14 @@ function needText(x,name,max=300) {
   if(typeof x!=='string'||!x.trim()||x.trim().length>max)fail(422,'VALIDATION_ERROR',name+'不能为空或长度超限');
   return x.trim();
 }
+function optionalText(x,name,max=1000) {
+  if(x==null)return null;
+  if(typeof x!=='string')fail(422,'VALIDATION_ERROR',name+'格式不正确');
+  const trimmed=x.trim();
+  if(!trimmed)return null;
+  if(trimmed.length>max)fail(422,'VALIDATION_ERROR',name+'长度不能超过'+max+'字');
+  return trimmed;
+}
 function object(x,fields) {
   if(!x||typeof x!=='object'||Array.isArray(x))fail(422,'VALIDATION_ERROR','请求内容格式不正确');
   for(const key of Object.keys(x))if(!fields.includes(key))fail(422,'VALIDATION_ERROR','包含不支持的业务字段');
@@ -211,7 +219,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     }
     case 'listEvents': {
       const r=await c.query(
-        "SELECT e.id AS event_id,e.event_type,e.occurred_at,c.display_name AS contact_display_name "+
+        "SELECT e.id AS event_id,e.contact_id,e.event_type,e.occurred_at,e.original_source_text,c.display_name AS contact_display_name "+
         "FROM ms.contact_events e LEFT JOIN ms.contacts c ON c.id=e.contact_id "+
         "WHERE e.organization_id=$1 AND ($2::boolean OR e.recorded_by=$3) "+
         "ORDER BY e.occurred_at DESC,e.id LIMIT 100",
@@ -229,8 +237,31 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     }
     case 'listLeads': {
       const r=await c.query(
-        "SELECT l.id AS lead_id,l.lead_state,l.created_at,c.display_name AS contact_display_name "+
+        "SELECT l.id AS lead_id,l.contact_id,l.lead_state,l.created_at,"+
+        "c.display_name AS contact_display_name,"+
+        "e.event_type AS source_event_type,e.occurred_at AS source_occurred_at,"+
+        "e.original_source_text AS source_notes,"+
+        "COALESCE((SELECT json_agg(json_build_object("+
+        "'student_id',s.id,'display_name',s.display_name,'confirmation_state',ls.confirmation_state"+
+        ") ORDER BY s.display_name,s.id) "+
+        "FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id "+
+        "WHERE ls.lead_id=l.id AND s.organization_id=$1 AND s.archived_at IS NULL "+
+        "AND ($2::boolean OR s.owner_user_id=$3 OR EXISTS ("+
+        "SELECT 1 FROM ms.data_scope_grants g WHERE g.user_id=$3 AND g.resource_type='student' "+
+        "AND g.scope_type='specific' AND g.scope_ref=s.id AND g.revoked_at IS NULL "+
+        "AND (g.expires_at IS NULL OR g.expires_at>now())))),'[]'::json) AS linked_students,"+
+        "COALESCE((SELECT json_agg(json_build_object("+
+        "'student_id',s.id,'display_name',s.display_name,'relation_type',sc.relation_type"+
+        ") ORDER BY s.display_name,s.id) "+
+        "FROM ms.student_contacts sc JOIN ms.students s ON s.id=sc.student_id "+
+        "WHERE l.contact_id IS NOT NULL AND sc.contact_id=l.contact_id AND sc.valid_to IS NULL "+
+        "AND s.organization_id=$1 AND s.archived_at IS NULL "+
+        "AND ($2::boolean OR s.owner_user_id=$3 OR EXISTS ("+
+        "SELECT 1 FROM ms.data_scope_grants g WHERE g.user_id=$3 AND g.resource_type='student' "+
+        "AND g.scope_type='specific' AND g.scope_ref=s.id AND g.revoked_at IS NULL "+
+        "AND (g.expires_at IS NULL OR g.expires_at>now())))),'[]'::json) AS contact_linked_students "+
         "FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id "+
+        "LEFT JOIN ms.contact_events e ON e.id=l.source_event_id AND e.organization_id=$1 "+
         "WHERE l.organization_id=$1 AND ($2::boolean OR l.owner_user_id=$3) "+
         "ORDER BY l.created_at DESC,l.id LIMIT 100",
         [org,ctx.manager,actor]);
@@ -297,17 +328,19 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       return {contact_id:x.id,display_name:name,do_not_contact:x.do_not_contact};
     }
     case 'createEvent': {
-      object(body,['contact_id','channel_id','event_type','occurred_at','source_evidence_ref']);
+      object(body,['contact_id','channel_id','event_type','occurred_at','source_evidence_ref','original_source_text']);
       const contact=body.contact_id?await getContact(c,ctx,body.contact_id):null;
       if(body.channel_id)await orgEntity(c,'marketing_channels',body.channel_id,org,'渠道');
       const when=Date.parse(body.occurred_at);
       if(!Number.isFinite(when))fail(422,'VALIDATION_ERROR','咨询发生时间格式不正确');
       const type=needText(body.event_type,'咨询类型',50);
-      const r=await c.query('INSERT INTO ms.contact_events(organization_id,contact_id,channel_id,event_type,occurred_at,source_evidence_ref,recorded_by)'+
-        ' VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-        [org,contact?.id||null,body.channel_id||null,type,new Date(when),sourceName(body.source_evidence_ref)||null,actor]);
-      await audit(c,ctx,'contact_event',r.rows[0].id,'CONTACT_EVENT_CREATED','登记了一次真实客户咨询');
-      return {event_id:r.rows[0].id};
+      const notes=optionalText(body.original_source_text,'咨询备注',1000);
+      const r=await c.query('INSERT INTO ms.contact_events(organization_id,contact_id,channel_id,event_type,occurred_at,source_evidence_ref,original_source_text,recorded_by)'+
+        ' VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+        [org,contact?.id||null,body.channel_id||null,type,new Date(when),sourceName(body.source_evidence_ref)||null,notes,actor]);
+      await audit(c,ctx,'contact_event',r.rows[0].id,'CONTACT_EVENT_CREATED',
+        notes?'登记了一次真实客户咨询（含沟通备注）':'登记了一次真实客户咨询');
+      return {event_id:r.rows[0].id,original_source_text:notes};
     }
     case 'linkContact': {
       object(body,['contact_id','relation_type','verification_state','is_primary','permission_basis_ref']);

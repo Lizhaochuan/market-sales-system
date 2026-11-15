@@ -17,6 +17,7 @@
     <p class="eyebrow">V3.2-02 · ISOLATED DEMO</p>
     <h1>登录演示工作台</h1>
     <p class="muted">这里只使用虚构数据。没有真实客户、正式账号、收款或 CRM 课时操作。</p>
+    <div id="session-expired-notice" class="form-hint warning" role="alert" hidden></div>
     <form id="login-form" class="field-stack">
       <label>选择演示员工
         <select name="account_code" required>
@@ -63,15 +64,16 @@
     <div class="sidebar-bottom">
       <div class="demo-note"><strong>隔离演示环境</strong><p>当前未连接真实 CRM、正式收款或教学课时。</p></div>
       <div class="user-row"><span class="avatar" id="avatar">A</span><span><strong id="staff-name">演示员工</strong><small id="staff-role">销售顾问</small></span></div>
-      <a class="text-button" href="http://127.0.0.1:3300/app" target="_blank" rel="noopener noreferrer">学生共享与转交审批（独立本机测试）</a>
-      <p class="fineprint">需单独启动本机授权服务并使用测试签名身份。本演示登录不会代替权限审批身份。</p>
+      <button id="student-access-entry" class="text-button" type="button" aria-expanded="false">学生共享与转交审批（独立服务说明）</button>
+      <p id="student-access-note" class="fineprint" hidden>学生共享与转交审批属于独立的严格员工权限服务（默认需在受限 3300 端口另行启动 student-access-server 并使用独立签名身份），当前隔离演示工作台未启用该独立服务；本演示登录也不会代替权限审批身份。</p>
+      <p class="fineprint">如需测试独立审批，请由本地管理员另行启动严格模式授权服务。本演示登录不会代替权限审批身份。</p>
       <button id="logout-button" class="text-button">退出演示账号</button>
     </div>
   </aside>
   <main class="main">
     <header class="topbar">
       <div><p class="eyebrow" id="page-eyebrow">业务总览</p><h1 id="page-title">工作概览</h1></div>
-      <div class="topbar-actions"><span class="status-pill"><span class="status-dot"></span>本机测试环境</span><button id="refresh-button" class="secondary" type="button">刷新数据</button></div>
+      <div class="topbar-actions"><span class="status-pill"><span class="status-dot"></span>本机测试环境</span><span id="session-countdown" class="status-pill session-pill" hidden>会话剩余 30:00</span><button id="refresh-button" class="secondary" type="button">刷新数据</button></div>
     </header>
 
     <p id="strict-scope-note" class="strict-scope-note" hidden>严格员工权限测试模式：本人学生/联系人、待核实关联和真实咨询可操作；联系人交接、撤回、争议均须独立主管批准；只读已核实学生关系的最小信息，不改变学生负责人及已有咨询。线索、商机、家庭审核和收款仍关闭。</p>
@@ -520,6 +522,7 @@
             <label>关联联系人 <select name="contact_id" data-options="contacts" required></select></label>
             <label>咨询方式 <select name="event_type"><option value="电话咨询">电话咨询</option><option value="到店咨询">到店咨询</option><option value="微信咨询">微信咨询</option><option value="线上咨询">线上咨询</option></select></label>
             <label>实际发生时间 <input name="occurred_at" type="datetime-local" required></label>
+            <label id="event-notes-row">咨询沟通备注（选填，勿填手机号或微信号）<textarea name="original_source_text" rows="3" maxlength="1000" placeholder="记录本次咨询提到的年级、兴趣科目或期望时段等（请勿填真实手机号或微信号）"></textarea></label>
             <button class="primary" type="submit">保存本次咨询</button>
           </form>
         </article>
@@ -534,6 +537,7 @@
           <h3>关联线索与具体学生</h3>
           <form id="lead-link-form" class="field-stack">
             <label>选择线索 <select name="lead_id" data-options="leads" required></select></label>
+            <p id="lead-link-candidate-hint" class="form-hint" hidden></p>
             <label>选择已确认涉及的学生 <select name="student_id" data-options="students" required></select></label>
             <label>确认依据说明 <input name="evidence_ref" maxlength="100" required placeholder="例如：家长口头确认记录"></label>
             <button class="secondary" type="submit">关联学生（待核实）</button>
@@ -868,6 +872,10 @@
         <div class="panel-header"><h3>我的实际咨询记录（不按学生人数重复计算）</h3></div>
         <div id="strict-consultation-list" class="record-list"></div>
       </article>
+      <article class="panel space-top" id="demo-events-card">
+        <div class="panel-header"><h3>已记录的咨询与沟通备注</h3><span id="events-total" class="count">0 条</span></div>
+        <div id="events-list" class="record-list"></div>
+      </article>
       <article class="panel space-top"><div class="panel-header"><h3>销售线索</h3><span id="leads-total" class="count">0 条</span></div><div id="leads-list" class="record-list"></div></article>
     </section>
 
@@ -877,6 +885,7 @@
         <article class="panel">
           <h3>新建销售商机</h3>
           <form id="opportunity-form" class="field-stack">
+            <p id="opportunity-carry-hint" class="form-hint" hidden></p>
             <label>关联学生 <select name="student_id" data-options="students" required></select></label>
             <label>预计金额（元） <input name="predicted_yuan" type="text" inputmode="decimal" placeholder="例如：6000.00"></label>
             <p class="form-hint">预计金额仅用于销售预测，不代表实际收款或成交。</p>

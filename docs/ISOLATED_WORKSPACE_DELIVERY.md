@@ -61,7 +61,8 @@ npm run start:isolated
 ## 验证与结果归属
 
 - `npm run test:workspace`：真实 PostgreSQL、HTTP、权限、版本冲突、精确重试、并发扫描、持久历史、故障回滚、HOLD 案件阻断。
-- `tests/browser/isolated-workspace.spec.mjs`：实际浏览器完成任务、多课程报价编辑、报名意向、移动布局、脚本注入保护、接口失败清空及退出后延迟请求隔离。
+- `tests/browser/isolated-workspace.spec.mjs`：实际浏览器完成任务、多课程报价编辑、报名意向、移动布局、脚本注入保护、接口失败清空及退出后延迟请求隔离，并覆盖 8 步 UAT 交互修复与 401 内存草稿恢复。
+- [隔离工作台 8 步 UAT 修复与 AI/开发交接记录](docs/ISOLATED_WORKSPACE_UAT_HANDOFF.md)：记录 `47cbfa6` 之后围绕咨询备注、线索学生/商机衔接、任务默认次日时间、试听快捷时段、报价课程顺序、会话倒计时与内存草稿保护、跨顾问时间清理及 3300 入口说明的详细改动、测试验证与后续待办。
 - 现有完整核心 CI 现已覆盖 PR #129 的 base 分支，继续执行全部核心/权限测试与全部浏览器测试；此前只运行 M02 局部工作流不再被当作全项目证据。
 - 最终通过的提交和 GitHub Actions 链接记录在 PR 说明中。文档不把一次本地成功扩大成生产验收，也不通过修改文档反复触发新的开发阶段。
 

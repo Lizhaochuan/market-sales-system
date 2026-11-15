@@ -79,19 +79,48 @@ test('V3.2-02 served Chinese UI and isolated demo login with authorized business
       assert.ok((await get('/api/v1/contacts',B.token)).data.items.some(x=>x.contact_id===ids.contact));
       assert.equal((await get('/api/v1/family-groups',B.token)).status,403);
     });
-    await t.test('real consultation has one creator, and lead list is staff scoped',async()=>{
+    await t.test('real consultation has one creator, optional notes are scoped and lead enrichment never leaks shared-parent siblings',async()=>{
+      const tooLong='x'.repeat(1001);
+      const bad=await post('/api/v1/contact-events',{
+        contact_id:ids.contact,event_type:'电话咨询',occurred_at:'2026-11-13T13:00:00Z',
+        original_source_text:tooLong
+      },A.token);
+      assert.equal(bad.status,422);
       const e=await post('/api/v1/contact-events',{
-        contact_id:ids.contact,event_type:'电话咨询',occurred_at:'2026-11-13T13:00:00Z'
+        contact_id:ids.contact,event_type:'电话咨询',occurred_at:'2026-11-13T13:00:00Z',
+        original_source_text:'  关注周末英语班，希望周六试听  '
       },A.token);
       assert.equal(e.status,200);ids.event=e.data.event_id;
+      assert.equal(e.data.original_source_text,'关注周末英语班，希望周六试听');
+      const aEvents=(await get('/api/v1/contact-events',A.token)).data.items;
+      const storedEvent=aEvents.find(x=>x.event_id===ids.event);
+      assert.ok(storedEvent);
+      assert.equal(storedEvent.original_source_text,'关注周末英语班，希望周六试听');
       assert.equal((await get('/api/v1/contact-events',B.token)).data.items.some(x=>x.event_id===ids.event),false);
+      const linkA=await post('/api/v1/students/'+ids.a+'/contacts',{
+        contact_id:ids.contact,relation_type:'母亲'},A.token);
+      assert.equal(linkA.status,200);
       const theft=await post('/api/v1/leads',{source_event_ref:ids.event},B.token);
       assert.equal(theft.status,403);
       const lead=await post('/api/v1/leads',{source_event_ref:ids.event},A.token);
       assert.equal(lead.status,200);
       const duplicate=await post('/api/v1/leads',{source_event_ref:ids.event},A.token);
       assert.equal(duplicate.status,409,'A real consultation must not create duplicate leads');
-      assert.ok((await get('/api/v1/leads',A.token)).data.items.some(x=>x.lead_id===lead.data.lead_id));
+      const aLeadBefore=(await get('/api/v1/leads',A.token)).data.items.find(x=>x.lead_id===lead.data.lead_id);
+      assert.ok(aLeadBefore);
+      assert.equal(aLeadBefore.source_notes,'关注周末英语班，希望周六试听');
+      assert.equal(aLeadBefore.source_event_type,'电话咨询');
+      assert.deepEqual(aLeadBefore.linked_students,[]);
+      assert.deepEqual(aLeadBefore.contact_linked_students.map(s=>s.student_id),[ids.a]);
+      assert.equal(aLeadBefore.contact_linked_students.some(s=>s.student_id===ids.b),false);
+      const linked=await post('/api/v1/leads/'+lead.data.lead_id+'/students',{
+        student_ids:[ids.a],evidence_ref:'家长口头确认',confirmation_state:'pending_review'
+      },A.token);
+      assert.equal(linked.status,200);
+      const aLeadAfter=(await get('/api/v1/leads',A.token)).data.items.find(x=>x.lead_id===lead.data.lead_id);
+      assert.equal(aLeadAfter.linked_students.length,1);
+      assert.equal(aLeadAfter.linked_students[0].student_id,ids.a);
+      assert.equal(aLeadAfter.linked_students[0].confirmation_state,'pending_review');
       assert.ok(!(await get('/api/v1/leads',B.token)).data.items.some(x=>x.lead_id===lead.data.lead_id));
     });
     await t.test('opportunities are scoped to each student, not the shared parent',async()=>{
