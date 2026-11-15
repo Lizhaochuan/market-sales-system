@@ -1,0 +1,21 @@
+name: V3.2-121 M02 isolated notice contract
+on:
+  push:
+    branches:
+      - chatgpt/v3-2-121-m02-revocation-notices
+  pull_request:
+    paths:
+      - 'src/cross-module-revocation-notice-contract.mjs'
+      - 'tests/contracts/v3-2-121-revocation-notices.test.mjs'
+      - '.github/workflows/v3-2-121-m02-notices.yml'
+jobs:
+  notice-unit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test tests/contracts/v3-2-121-revocation-notices.test.mjs
