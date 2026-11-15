@@ -1,0 +1,22 @@
+name: V3.2-98 isolated final review independent attestation
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-final-review-attestation.mjs'
+      - 'tests/security/v3-2-98-m02-final-review-attestation.test.mjs'
+      - '.github/workflows/v3-2-98-final-review-attestation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-independent-attestation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check final review attestation
+        run: node --check src/cross-module-final-review-attestation.mjs
+      - name: Integrate current final snapshot and independent internal review
+        run: node --test tests/security/v3-2-98-m02-final-review-attestation.test.mjs tests/security/v3-2-97-m02-final-review-snapshot.test.mjs tests/security/v3-2-96-m02-unified-recovery-conclusion-gate.test.mjs
