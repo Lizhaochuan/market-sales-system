@@ -352,6 +352,7 @@ test('source reading that outlasts the manifest expiry does not reach SQL',async
    time=196_000;
    return {...result,observed_at_ms:196_000};
   },
+  auditReader:async rec=>({...await x.auditReader(rec),observed_at_ms:196_000}),
   receiptId:'00000000-0000-4000-8000-0000000000e6',
   attester:{query:async()=>{issued++;return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};}}
  }),'V121_IAM_SOURCE_MANIFEST_INVALID');
