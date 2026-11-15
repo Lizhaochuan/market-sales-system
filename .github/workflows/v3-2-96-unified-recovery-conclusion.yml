@@ -1,0 +1,22 @@
+name: V3.2-96 isolated unified recovery conclusion gate
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-unified-recovery-conclusion-gate.mjs'
+      - 'tests/security/v3-2-96-m02-unified-recovery-conclusion-gate.test.mjs'
+      - '.github/workflows/v3-2-96-unified-recovery-conclusion.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-unified-recovery:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify unified conclusion syntax
+        run: node --check src/cross-module-unified-recovery-conclusion-gate.mjs
+      - name: Run recovery, pending and combined fail-closed regressions
+        run: node --test tests/security/v3-2-96-m02-unified-recovery-conclusion-gate.test.mjs tests/security/v3-2-95-m02-recovery-conclusion-validity.test.mjs tests/security/v3-2-88-m02-unified-pending-review-report.test.mjs
