@@ -2,7 +2,7 @@
 -- This is NOT independent WORM storage; postgres superuser controls both DBs.
 CREATE SCHEMA v121_anchor;
 REVOKE ALL ON SCHEMA v121_anchor FROM PUBLIC;
-GRANT USAGE ON SCHEMA v121_anchor TO v121_anchor_reader,v121_anchor_writer;
+GRANT USAGE ON SCHEMA v121_anchor TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester;
 
 CREATE FUNCTION v121_anchor.no_change() RETURNS trigger
 LANGUAGE plpgsql SET search_path=pg_catalog AS $$
@@ -66,6 +66,334 @@ CREATE TRIGGER key_event_immutable BEFORE UPDATE OR DELETE ON v121_anchor.key_ev
 FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
 REVOKE ALL ON v121_anchor.key_events FROM PUBLIC;
 GRANT SELECT ON v121_anchor.key_events TO v121_anchor_reader;
+
+-- Only the separated fixture verification principal can issue an admission.
+-- The trusted JS verifier first checks the Ed25519 signature with registered
+-- public keys; this DB admission is NOT itself an Ed25519 verification.
+CREATE TABLE v121_anchor.verified_admissions (
+ admission_id uuid NOT NULL,
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ snapshot_sequence integer NOT NULL CHECK(snapshot_sequence>0),
+ signer_id uuid NOT NULL,
+ signed_statement jsonb NOT NULL,
+ signature_b64 text NOT NULL,
+ observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64}
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ snapshot_sequence integer NOT NULL CHECK(snapshot_sequence>0),
+ signer_id uuid NOT NULL,
+ signed_statement jsonb NOT NULL,
+ signature_b64 text NOT NULL CHECK(signature_b64 ~ '^[A-Za-z0-9+/]{86}==$'),
+ observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64} RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
+DECLARE seq integer;
+DECLARE latest_state text;
+DECLARE admitted record;
+BEGIN
+ -- Snapshot-isolation readers may reuse a pre-revocation state after lock wait.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ -- Global order: checkpoint scope, then signing-key scope; key lifecycle
+ -- changes acquire only the signing-key scope. This prevents a write from
+ -- passing an earlier key-status read after a concurrent retirement/revocation.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
+ SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ -- First anchor can refer to an existing business snapshot with sequence > 1.
+ IF (seq IS NOT NULL AND NEW.snapshot_sequence<>seq+1) OR
+    (seq IS NULL AND NEW.snapshot_sequence<1) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=NEW.organization_id AND signer_id=NEW.signer_id
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ SELECT * INTO admitted FROM v121_anchor.verified_admissions
+ WHERE organization_id=NEW.organization_id AND admission_id=NEW.admission_id;
+ IF NOT FOUND THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_MISSING';
+ END IF;
+ IF admitted.failure_id IS DISTINCT FROM NEW.failure_id OR
+    admitted.snapshot_sequence IS DISTINCT FROM NEW.snapshot_sequence OR
+    admitted.signer_id IS DISTINCT FROM NEW.signer_id OR
+    admitted.signed_statement IS DISTINCT FROM NEW.signed_statement OR
+    admitted.signature_b64 IS DISTINCT FROM NEW.signature_b64 OR
+    admitted.observed_digest IS DISTINCT FROM NEW.observed_digest THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_MISMATCH';
+ END IF;
+ IF NEW.signed_statement->>'organization_id' IS DISTINCT FROM NEW.organization_id::text OR
+    NEW.signed_statement->>'failure_id' IS DISTINCT FROM NEW.failure_id::text OR
+    NEW.signed_statement->>'snapshot_sequence' IS DISTINCT FROM NEW.snapshot_sequence::text OR
+    NEW.signed_statement->>'signer_id' IS DISTINCT FROM NEW.signer_id::text OR
+    NEW.signed_statement->>'observed_digest' IS DISTINCT FROM trim(NEW.observed_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_SCOPE_INVALID';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER checkpoint_before_insert BEFORE INSERT ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.checkpoint_gate();
+CREATE TRIGGER checkpoint_immutable BEFORE UPDATE OR DELETE ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.checkpoints FROM PUBLIC;
+GRANT SELECT ON v121_anchor.checkpoints TO v121_anchor_reader;
+
+-- Writer has no direct table DML, no access to registry or event controls.
+CREATE FUNCTION v121_anchor.append_checkpoint(
+ p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64),p_admission uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $$
+BEGIN
+ IF session_user<>'v121_anchor_writer' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_WRITER_SCOPE_DENIED';
+ END IF;
+ INSERT INTO v121_anchor.checkpoints
+  (organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest,admission_id)
+ VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest,p_admission);
+END;
+$$;
+REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) TO v121_anchor_writer;
+),
+ issued_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(organization_id,admission_id),
+ FOREIGN KEY(organization_id,signer_id)
+  REFERENCES v121_anchor.signers(organization_id,signer_id)
+);
+CREATE TRIGGER admission_immutable BEFORE UPDATE OR DELETE
+ ON v121_anchor.verified_admissions
+ FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.verified_admissions FROM PUBLIC;
+GRANT SELECT ON v121_anchor.verified_admissions TO v121_anchor_reader;
+
+-- No direct DML is granted to the attester. A compromised writer principal
+-- cannot mint one of these tickets or overwrite an issued admission.
+CREATE FUNCTION v121_anchor.attest_verified_checkpoint(
+ p_admission uuid,p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $attest$
+DECLARE latest_state text;
+DECLARE latest_sequence integer;
+BEGIN
+ IF session_user<>'v121_anchor_attester' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ATTESTER_ROLE_DENIED';
+ END IF;
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ IF p_admission IS NULL OR p_failure IS NULL OR p_signer IS NULL OR
+    p_seq IS NULL OR p_seq<1 OR p_statement IS NULL OR
+    p_signature IS NULL OR p_signature !~ '^[A-Za-z0-9+/]{86}==
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ snapshot_sequence integer NOT NULL CHECK(snapshot_sequence>0),
+ signer_id uuid NOT NULL,
+ signed_statement jsonb NOT NULL,
+ signature_b64 text NOT NULL CHECK(signature_b64 ~ '^[A-Za-z0-9+/]{86}==$'),
+ observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64}$'),
+ PRIMARY KEY(organization_id,failure_id,snapshot_sequence),
+ FOREIGN KEY(organization_id,signer_id)
+ REFERENCES v121_anchor.signers(organization_id,signer_id)
+);
+CREATE FUNCTION v121_anchor.checkpoint_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
+DECLARE seq integer;
+DECLARE latest_state text;
+BEGIN
+ -- Snapshot-isolation readers may reuse a pre-revocation state after lock wait.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ -- Global order: checkpoint scope, then signing-key scope; key lifecycle
+ -- changes acquire only the signing-key scope. This prevents a write from
+ -- passing an earlier key-status read after a concurrent retirement/revocation.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
+ SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ -- First anchor can refer to an existing business snapshot with sequence > 1.
+ IF (seq IS NOT NULL AND NEW.snapshot_sequence<>seq+1) OR
+    (seq IS NULL AND NEW.snapshot_sequence<1) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=NEW.organization_id AND signer_id=NEW.signer_id
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ IF NEW.signed_statement->>'organization_id' IS DISTINCT FROM NEW.organization_id::text OR
+    NEW.signed_statement->>'failure_id' IS DISTINCT FROM NEW.failure_id::text OR
+    NEW.signed_statement->>'snapshot_sequence' IS DISTINCT FROM NEW.snapshot_sequence::text OR
+    NEW.signed_statement->>'signer_id' IS DISTINCT FROM NEW.signer_id::text OR
+    NEW.signed_statement->>'observed_digest' IS DISTINCT FROM trim(NEW.observed_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_SCOPE_INVALID';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER checkpoint_before_insert BEFORE INSERT ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.checkpoint_gate();
+CREATE TRIGGER checkpoint_immutable BEFORE UPDATE OR DELETE ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.checkpoints FROM PUBLIC;
+GRANT SELECT ON v121_anchor.checkpoints TO v121_anchor_reader;
+
+-- Writer has no direct table DML, no access to registry or event controls.
+CREATE FUNCTION v121_anchor.append_checkpoint(
+ p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $$
+BEGIN
+ IF session_user<>'v121_anchor_writer' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_WRITER_SCOPE_DENIED';
+ END IF;
+ INSERT INTO v121_anchor.checkpoints
+  (organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest)
+ VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+END;
+$$;
+REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) TO v121_anchor_writer;
+ OR
+    p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ snapshot_sequence integer NOT NULL CHECK(snapshot_sequence>0),
+ signer_id uuid NOT NULL,
+ signed_statement jsonb NOT NULL,
+ signature_b64 text NOT NULL CHECK(signature_b64 ~ '^[A-Za-z0-9+/]{86}==$'),
+ observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64}$'),
+ PRIMARY KEY(organization_id,failure_id,snapshot_sequence),
+ FOREIGN KEY(organization_id,signer_id)
+ REFERENCES v121_anchor.signers(organization_id,signer_id)
+);
+CREATE FUNCTION v121_anchor.checkpoint_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
+DECLARE seq integer;
+DECLARE latest_state text;
+BEGIN
+ -- Snapshot-isolation readers may reuse a pre-revocation state after lock wait.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ -- Global order: checkpoint scope, then signing-key scope; key lifecycle
+ -- changes acquire only the signing-key scope. This prevents a write from
+ -- passing an earlier key-status read after a concurrent retirement/revocation.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
+ SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ -- First anchor can refer to an existing business snapshot with sequence > 1.
+ IF (seq IS NOT NULL AND NEW.snapshot_sequence<>seq+1) OR
+    (seq IS NULL AND NEW.snapshot_sequence<1) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=NEW.organization_id AND signer_id=NEW.signer_id
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ IF NEW.signed_statement->>'organization_id' IS DISTINCT FROM NEW.organization_id::text OR
+    NEW.signed_statement->>'failure_id' IS DISTINCT FROM NEW.failure_id::text OR
+    NEW.signed_statement->>'snapshot_sequence' IS DISTINCT FROM NEW.snapshot_sequence::text OR
+    NEW.signed_statement->>'signer_id' IS DISTINCT FROM NEW.signer_id::text OR
+    NEW.signed_statement->>'observed_digest' IS DISTINCT FROM trim(NEW.observed_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_SCOPE_INVALID';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER checkpoint_before_insert BEFORE INSERT ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.checkpoint_gate();
+CREATE TRIGGER checkpoint_immutable BEFORE UPDATE OR DELETE ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.checkpoints FROM PUBLIC;
+GRANT SELECT ON v121_anchor.checkpoints TO v121_anchor_reader;
+
+-- Writer has no direct table DML, no access to registry or event controls.
+CREATE FUNCTION v121_anchor.append_checkpoint(
+ p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $$
+BEGIN
+ IF session_user<>'v121_anchor_writer' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_WRITER_SCOPE_DENIED';
+ END IF;
+ INSERT INTO v121_anchor.checkpoints
+  (organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest)
+ VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+END;
+$$;
+REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) TO v121_anchor_writer;
+ THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_INVALID';
+ END IF;
+ -- Same lock ordering as the checkpoint append gate; revocation obtains
+ -- the key lock and therefore cannot interleave between admission and insert
+ -- in a caller-owned transaction.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||p_org::text||'|'||p_failure::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||p_org::text||'|'||p_signer::text,0));
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=p_org AND signer_id=p_signer
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ IF p_statement->>'organization_id' IS DISTINCT FROM p_org::text OR
+    p_statement->>'failure_id' IS DISTINCT FROM p_failure::text OR
+    p_statement->>'snapshot_sequence' IS DISTINCT FROM p_seq::text OR
+    p_statement->>'signer_id' IS DISTINCT FROM p_signer::text OR
+    p_statement->>'observed_digest' IS DISTINCT FROM trim(p_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_SCOPE_INVALID';
+ END IF;
+ SELECT MAX(snapshot_sequence) INTO latest_sequence FROM v121_anchor.checkpoints
+ WHERE organization_id=p_org AND failure_id=p_failure;
+ IF latest_sequence IS NOT NULL AND p_seq<>latest_sequence+1 THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ INSERT INTO v121_anchor.verified_admissions
+  (admission_id,organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest)
+ VALUES(p_admission,p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+END;
+$attest$;
+REVOKE ALL ON FUNCTION v121_anchor.attest_verified_checkpoint(
+ uuid,uuid,uuid,integer,uuid,jsonb,text,char(64)) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.attest_verified_checkpoint(
+ uuid,uuid,uuid,integer,uuid,jsonb,text,char(64)) TO v121_anchor_attester;
 
 CREATE TABLE v121_anchor.checkpoints (
  organization_id uuid NOT NULL,
@@ -143,6 +471,390 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
- uuid,uuid,integer,uuid,jsonb,text,char(64)) FROM PUBLIC;
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v121_anchor.append_checkpoint(
- uuid,uuid,integer,uuid,jsonb,text,char(64)) TO v121_anchor_writer;
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) TO v121_anchor_writer;
+),
+ admission_id uuid NOT NULL,
+ PRIMARY KEY(organization_id,failure_id,snapshot_sequence),
+ UNIQUE(organization_id,admission_id),
+ FOREIGN KEY(organization_id,admission_id)
+ REFERENCES v121_anchor.verified_admissions(organization_id,admission_id),
+ FOREIGN KEY(organization_id,signer_id)
+ REFERENCES v121_anchor.signers(organization_id,signer_id)
+);
+CREATE FUNCTION v121_anchor.checkpoint_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
+DECLARE seq integer;
+DECLARE latest_state text;
+BEGIN
+ -- Snapshot-isolation readers may reuse a pre-revocation state after lock wait.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ -- Global order: checkpoint scope, then signing-key scope; key lifecycle
+ -- changes acquire only the signing-key scope. This prevents a write from
+ -- passing an earlier key-status read after a concurrent retirement/revocation.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
+ SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ -- First anchor can refer to an existing business snapshot with sequence > 1.
+ IF (seq IS NOT NULL AND NEW.snapshot_sequence<>seq+1) OR
+    (seq IS NULL AND NEW.snapshot_sequence<1) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=NEW.organization_id AND signer_id=NEW.signer_id
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ IF NEW.signed_statement->>'organization_id' IS DISTINCT FROM NEW.organization_id::text OR
+    NEW.signed_statement->>'failure_id' IS DISTINCT FROM NEW.failure_id::text OR
+    NEW.signed_statement->>'snapshot_sequence' IS DISTINCT FROM NEW.snapshot_sequence::text OR
+    NEW.signed_statement->>'signer_id' IS DISTINCT FROM NEW.signer_id::text OR
+    NEW.signed_statement->>'observed_digest' IS DISTINCT FROM trim(NEW.observed_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_SCOPE_INVALID';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER checkpoint_before_insert BEFORE INSERT ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.checkpoint_gate();
+CREATE TRIGGER checkpoint_immutable BEFORE UPDATE OR DELETE ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.checkpoints FROM PUBLIC;
+GRANT SELECT ON v121_anchor.checkpoints TO v121_anchor_reader;
+
+-- Writer has no direct table DML, no access to registry or event controls.
+CREATE FUNCTION v121_anchor.append_checkpoint(
+ p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $$
+BEGIN
+ IF session_user<>'v121_anchor_writer' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_WRITER_SCOPE_DENIED';
+ END IF;
+ INSERT INTO v121_anchor.checkpoints
+  (organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest)
+ VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+END;
+$$;
+REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) TO v121_anchor_writer;
+),
+ issued_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(organization_id,admission_id),
+ FOREIGN KEY(organization_id,signer_id)
+  REFERENCES v121_anchor.signers(organization_id,signer_id)
+);
+CREATE TRIGGER admission_immutable BEFORE UPDATE OR DELETE
+ ON v121_anchor.verified_admissions
+ FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.verified_admissions FROM PUBLIC;
+GRANT SELECT ON v121_anchor.verified_admissions TO v121_anchor_reader;
+
+-- No direct DML is granted to the attester. A compromised writer principal
+-- cannot mint one of these tickets or overwrite an issued admission.
+CREATE FUNCTION v121_anchor.attest_verified_checkpoint(
+ p_admission uuid,p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $attest$
+DECLARE latest_state text;
+DECLARE latest_sequence integer;
+BEGIN
+ IF session_user<>'v121_anchor_attester' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ATTESTER_ROLE_DENIED';
+ END IF;
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ IF p_admission IS NULL OR p_failure IS NULL OR p_signer IS NULL OR
+    p_seq IS NULL OR p_seq<1 OR p_statement IS NULL OR
+    p_signature IS NULL OR p_signature !~ '^[A-Za-z0-9+/]{86}==
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ snapshot_sequence integer NOT NULL CHECK(snapshot_sequence>0),
+ signer_id uuid NOT NULL,
+ signed_statement jsonb NOT NULL,
+ signature_b64 text NOT NULL CHECK(signature_b64 ~ '^[A-Za-z0-9+/]{86}==$'),
+ observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64}$'),
+ PRIMARY KEY(organization_id,failure_id,snapshot_sequence),
+ FOREIGN KEY(organization_id,signer_id)
+ REFERENCES v121_anchor.signers(organization_id,signer_id)
+);
+CREATE FUNCTION v121_anchor.checkpoint_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
+DECLARE seq integer;
+DECLARE latest_state text;
+BEGIN
+ -- Snapshot-isolation readers may reuse a pre-revocation state after lock wait.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ -- Global order: checkpoint scope, then signing-key scope; key lifecycle
+ -- changes acquire only the signing-key scope. This prevents a write from
+ -- passing an earlier key-status read after a concurrent retirement/revocation.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
+ SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ -- First anchor can refer to an existing business snapshot with sequence > 1.
+ IF (seq IS NOT NULL AND NEW.snapshot_sequence<>seq+1) OR
+    (seq IS NULL AND NEW.snapshot_sequence<1) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=NEW.organization_id AND signer_id=NEW.signer_id
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ IF NEW.signed_statement->>'organization_id' IS DISTINCT FROM NEW.organization_id::text OR
+    NEW.signed_statement->>'failure_id' IS DISTINCT FROM NEW.failure_id::text OR
+    NEW.signed_statement->>'snapshot_sequence' IS DISTINCT FROM NEW.snapshot_sequence::text OR
+    NEW.signed_statement->>'signer_id' IS DISTINCT FROM NEW.signer_id::text OR
+    NEW.signed_statement->>'observed_digest' IS DISTINCT FROM trim(NEW.observed_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_SCOPE_INVALID';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER checkpoint_before_insert BEFORE INSERT ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.checkpoint_gate();
+CREATE TRIGGER checkpoint_immutable BEFORE UPDATE OR DELETE ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.checkpoints FROM PUBLIC;
+GRANT SELECT ON v121_anchor.checkpoints TO v121_anchor_reader;
+
+-- Writer has no direct table DML, no access to registry or event controls.
+CREATE FUNCTION v121_anchor.append_checkpoint(
+ p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $$
+BEGIN
+ IF session_user<>'v121_anchor_writer' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_WRITER_SCOPE_DENIED';
+ END IF;
+ INSERT INTO v121_anchor.checkpoints
+  (organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest)
+ VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+END;
+$$;
+REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) TO v121_anchor_writer;
+ OR
+    p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ snapshot_sequence integer NOT NULL CHECK(snapshot_sequence>0),
+ signer_id uuid NOT NULL,
+ signed_statement jsonb NOT NULL,
+ signature_b64 text NOT NULL CHECK(signature_b64 ~ '^[A-Za-z0-9+/]{86}==$'),
+ observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64}$'),
+ PRIMARY KEY(organization_id,failure_id,snapshot_sequence),
+ FOREIGN KEY(organization_id,signer_id)
+ REFERENCES v121_anchor.signers(organization_id,signer_id)
+);
+CREATE FUNCTION v121_anchor.checkpoint_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
+DECLARE seq integer;
+DECLARE latest_state text;
+BEGIN
+ -- Snapshot-isolation readers may reuse a pre-revocation state after lock wait.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ -- Global order: checkpoint scope, then signing-key scope; key lifecycle
+ -- changes acquire only the signing-key scope. This prevents a write from
+ -- passing an earlier key-status read after a concurrent retirement/revocation.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
+ SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ -- First anchor can refer to an existing business snapshot with sequence > 1.
+ IF (seq IS NOT NULL AND NEW.snapshot_sequence<>seq+1) OR
+    (seq IS NULL AND NEW.snapshot_sequence<1) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=NEW.organization_id AND signer_id=NEW.signer_id
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ IF NEW.signed_statement->>'organization_id' IS DISTINCT FROM NEW.organization_id::text OR
+    NEW.signed_statement->>'failure_id' IS DISTINCT FROM NEW.failure_id::text OR
+    NEW.signed_statement->>'snapshot_sequence' IS DISTINCT FROM NEW.snapshot_sequence::text OR
+    NEW.signed_statement->>'signer_id' IS DISTINCT FROM NEW.signer_id::text OR
+    NEW.signed_statement->>'observed_digest' IS DISTINCT FROM trim(NEW.observed_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_SCOPE_INVALID';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER checkpoint_before_insert BEFORE INSERT ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.checkpoint_gate();
+CREATE TRIGGER checkpoint_immutable BEFORE UPDATE OR DELETE ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.checkpoints FROM PUBLIC;
+GRANT SELECT ON v121_anchor.checkpoints TO v121_anchor_reader;
+
+-- Writer has no direct table DML, no access to registry or event controls.
+CREATE FUNCTION v121_anchor.append_checkpoint(
+ p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $$
+BEGIN
+ IF session_user<>'v121_anchor_writer' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_WRITER_SCOPE_DENIED';
+ END IF;
+ INSERT INTO v121_anchor.checkpoints
+  (organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest)
+ VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+END;
+$$;
+REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) TO v121_anchor_writer;
+ THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_INVALID';
+ END IF;
+ -- Same lock ordering as the checkpoint append gate; revocation obtains
+ -- the key lock and therefore cannot interleave between admission and insert
+ -- in a caller-owned transaction.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||p_org::text||'|'||p_failure::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||p_org::text||'|'||p_signer::text,0));
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=p_org AND signer_id=p_signer
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ IF p_statement->>'organization_id' IS DISTINCT FROM p_org::text OR
+    p_statement->>'failure_id' IS DISTINCT FROM p_failure::text OR
+    p_statement->>'snapshot_sequence' IS DISTINCT FROM p_seq::text OR
+    p_statement->>'signer_id' IS DISTINCT FROM p_signer::text OR
+    p_statement->>'observed_digest' IS DISTINCT FROM trim(p_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_SCOPE_INVALID';
+ END IF;
+ SELECT MAX(snapshot_sequence) INTO latest_sequence FROM v121_anchor.checkpoints
+ WHERE organization_id=p_org AND failure_id=p_failure;
+ IF latest_sequence IS NOT NULL AND p_seq<>latest_sequence+1 THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ INSERT INTO v121_anchor.verified_admissions
+  (admission_id,organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest)
+ VALUES(p_admission,p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+END;
+$attest$;
+REVOKE ALL ON FUNCTION v121_anchor.attest_verified_checkpoint(
+ uuid,uuid,uuid,integer,uuid,jsonb,text,char(64)) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.attest_verified_checkpoint(
+ uuid,uuid,uuid,integer,uuid,jsonb,text,char(64)) TO v121_anchor_attester;
+
+CREATE TABLE v121_anchor.checkpoints (
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ snapshot_sequence integer NOT NULL CHECK(snapshot_sequence>0),
+ signer_id uuid NOT NULL,
+ signed_statement jsonb NOT NULL,
+ signature_b64 text NOT NULL CHECK(signature_b64 ~ '^[A-Za-z0-9+/]{86}==$'),
+ observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64}$'),
+ PRIMARY KEY(organization_id,failure_id,snapshot_sequence),
+ FOREIGN KEY(organization_id,signer_id)
+ REFERENCES v121_anchor.signers(organization_id,signer_id)
+);
+CREATE FUNCTION v121_anchor.checkpoint_gate() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,v121_anchor AS $$
+DECLARE seq integer;
+DECLARE latest_state text;
+BEGIN
+ -- Snapshot-isolation readers may reuse a pre-revocation state after lock wait.
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ -- Global order: checkpoint scope, then signing-key scope; key lifecycle
+ -- changes acquire only the signing-key scope. This prevents a write from
+ -- passing an earlier key-status read after a concurrent retirement/revocation.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-anchor-key|'||NEW.organization_id::text||'|'||NEW.signer_id::text,0));
+ SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ -- First anchor can refer to an existing business snapshot with sequence > 1.
+ IF (seq IS NOT NULL AND NEW.snapshot_sequence<>seq+1) OR
+    (seq IS NULL AND NEW.snapshot_sequence<1) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
+ END IF;
+ SELECT event_kind INTO latest_state FROM v121_anchor.key_events
+ WHERE organization_id=NEW.organization_id AND signer_id=NEW.signer_id
+ ORDER BY event_sequence DESC LIMIT 1;
+ IF latest_state IS DISTINCT FROM 'REGISTERED' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_KEY_NOT_ACTIVE';
+ END IF;
+ IF NEW.signed_statement->>'organization_id' IS DISTINCT FROM NEW.organization_id::text OR
+    NEW.signed_statement->>'failure_id' IS DISTINCT FROM NEW.failure_id::text OR
+    NEW.signed_statement->>'snapshot_sequence' IS DISTINCT FROM NEW.snapshot_sequence::text OR
+    NEW.signed_statement->>'signer_id' IS DISTINCT FROM NEW.signer_id::text OR
+    NEW.signed_statement->>'observed_digest' IS DISTINCT FROM trim(NEW.observed_digest) THEN
+  RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_SCOPE_INVALID';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER checkpoint_before_insert BEFORE INSERT ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.checkpoint_gate();
+CREATE TRIGGER checkpoint_immutable BEFORE UPDATE OR DELETE ON v121_anchor.checkpoints
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.checkpoints FROM PUBLIC;
+GRANT SELECT ON v121_anchor.checkpoints TO v121_anchor_reader;
+
+-- Writer has no direct table DML, no access to registry or event controls.
+CREATE FUNCTION v121_anchor.append_checkpoint(
+ p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
+ p_statement jsonb,p_signature text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $$
+BEGIN
+ IF session_user<>'v121_anchor_writer' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_WRITER_SCOPE_DENIED';
+ END IF;
+ INSERT INTO v121_anchor.checkpoints
+  (organization_id,failure_id,snapshot_sequence,signer_id,
+   signed_statement,signature_b64,observed_digest)
+ VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+END;
+$$;
+REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.append_checkpoint(
+ uuid,uuid,integer,uuid,jsonb,text,char(64),uuid) TO v121_anchor_writer;
