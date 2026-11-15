@@ -117,8 +117,9 @@ function checkKeySeparation(envelope,trustedKeys,sourceKeys,primary,audit){
   if(!entry?.publicKey) fail('V121_IAM_SOURCE_TRUST_INVALID');
   let publicKey;
   try{
-   publicKey=createPublicKey(entry.publicKey);
-   if(publicKey.asymmetricKeyType!=='ed25519')
+   publicKey=entry.publicKey?.type==='public'
+    ?entry.publicKey:createPublicKey(entry.publicKey);
+   if(publicKey.type!=='public'||publicKey.asymmetricKeyType!=='ed25519')
     fail('V121_IAM_SOURCE_TRUST_INVALID');
   }catch{
    fail('V121_IAM_SOURCE_TRUST_INVALID');
