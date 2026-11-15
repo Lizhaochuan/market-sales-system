@@ -781,16 +781,43 @@ CREATE TABLE v106_test.fixture_uat_remediations (
  organization_id uuid NOT NULL,
  failure_id uuid NOT NULL,
  remediation_id uuid NOT NULL,
+ remediation_version integer NOT NULL DEFAULT 1 CHECK(remediation_version>=1),
  new_evidence_digest char(64) NOT NULL CHECK(
   new_evidence_digest ~ '^[a-f0-9]{64}$' AND new_evidence_digest <> repeat('0',64)),
  remediated_by uuid NOT NULL,
  remediation_note_digest char(64) NOT NULL CHECK(remediation_note_digest ~ '^[a-f0-9]{64}$'),
  PRIMARY KEY(organization_id,remediation_id),
  UNIQUE(organization_id,failure_id,remediation_id),
+ UNIQUE(organization_id,failure_id,remediation_version),
  FOREIGN KEY(organization_id,failure_id)
   REFERENCES v106_test.fixture_uat_failures(organization_id,failure_id)
 );
 REVOKE ALL ON v106_test.fixture_uat_remediations FROM PUBLIC;
+-- Serialize attempts per incident failure to disallow version gaps and digest reuse.
+CREATE FUNCTION v106_test.fixture_require_next_remediation_version() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $version_gate$
+DECLARE previous_version integer;
+BEGIN
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ SELECT COALESCE(MAX(remediation_version),0) INTO previous_version
+ FROM v106_test.fixture_uat_remediations
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ IF NEW.remediation_version<>previous_version+1 THEN
+  RAISE EXCEPTION 'V121_UAT_REMEDIATION_VERSION_NOT_NEXT';
+ END IF;
+ IF EXISTS(SELECT 1 FROM v106_test.fixture_uat_remediations
+  WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id
+   AND new_evidence_digest=NEW.new_evidence_digest) THEN
+  RAISE EXCEPTION 'V121_UAT_REMEDIATION_DIGEST_REUSED';
+ END IF;
+ RETURN NEW;
+END;
+$version_gate$;
+CREATE TRIGGER fixture_uat_remediation_version_before_insert BEFORE INSERT
+ ON v106_test.fixture_uat_remediations FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_require_next_remediation_version();
 CREATE TRIGGER fixture_uat_remediations_immutable BEFORE UPDATE OR DELETE
  ON v106_test.fixture_uat_remediations FOR EACH ROW
  EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
@@ -842,6 +869,18 @@ BEGIN
  IF owner_id IS NULL THEN
   RAISE EXCEPTION 'V121_UAT_REMEDIATION_NOT_FOUND';
  END IF;
+ IF NOT EXISTS(SELECT 1 FROM v106_test.fixture_uat_remediations r
+  WHERE r.organization_id=p_org AND r.remediation_id=p_remediation
+   AND r.remediation_version=(SELECT MAX(latest.remediation_version)
+    FROM v106_test.fixture_uat_remediations latest
+    WHERE latest.organization_id=r.organization_id AND latest.failure_id=r.failure_id)) THEN
+  RAISE EXCEPTION 'V121_UAT_REMEDIATION_SUPERSEDED';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM v106_test.fixture_uat_remediations r
+  WHERE r.organization_id=p_org AND r.remediation_id=p_remediation
+   AND r.new_evidence_digest=p_digest) THEN
+  RAISE EXCEPTION 'V121_UAT_REVIEW_EVIDENCE_MISMATCH';
+ END IF;
  IF p_reviewer=owner_id OR p_reviewer=original_reviewer OR EXISTS(
   SELECT 1 FROM v106_test.fixture_uat_remediation_reviews
   WHERE organization_id=p_org AND remediation_id=p_remediation
@@ -862,18 +901,23 @@ REVOKE ALL ON FUNCTION v106_test.fixture_record_uat_remediation_review(
 GRANT EXECUTE ON FUNCTION v106_test.fixture_record_uat_remediation_review(
  uuid,uuid,uuid,text,text,char(64)) TO v106_closeout_writer;
 
--- Explicitly a diagnostic: dual ACCEPTED_FOR_REVIEW does not resolve original failure.
+-- Diagnostics count ONLY the latest attempt's review decisions; old approvals never carry.
 CREATE VIEW v106_test.fixture_uat_remediation_diagnostics AS
 SELECT f.organization_id,f.incident_id,f.event_id,f.failure_id,
- count(DISTINCT r.remediation_id)::integer AS attempts,
- count(DISTINCT rv.reviewer_domain) FILTER(WHERE rv.decision='ACCEPTED_FOR_REVIEW')::integer
-  AS accepted_review_roles,
+ (SELECT count(*)::integer FROM v106_test.fixture_uat_remediations r
+  WHERE r.organization_id=f.organization_id AND r.failure_id=f.failure_id) AS attempts,
+ latest.remediation_version AS latest_version,
+ latest.remediation_id AS latest_remediation_id,
+ (SELECT count(*)::integer FROM v106_test.fixture_uat_remediation_reviews rv
+  WHERE rv.organization_id=f.organization_id
+   AND rv.remediation_id=latest.remediation_id
+   AND rv.decision='ACCEPTED_FOR_REVIEW') AS accepted_review_roles,
  true::boolean AS original_failure_retained,
  true::boolean AS hold_active,false::boolean AS release_eligible
 FROM v106_test.fixture_uat_failures f
-LEFT JOIN v106_test.fixture_uat_remediations r
- ON r.organization_id=f.organization_id AND r.failure_id=f.failure_id
-LEFT JOIN v106_test.fixture_uat_remediation_reviews rv
- ON rv.organization_id=r.organization_id AND rv.remediation_id=r.remediation_id
-GROUP BY f.organization_id,f.incident_id,f.event_id,f.failure_id;
+LEFT JOIN LATERAL(
+ SELECT r.remediation_id,r.remediation_version FROM v106_test.fixture_uat_remediations r
+ WHERE r.organization_id=f.organization_id AND r.failure_id=f.failure_id
+ ORDER BY r.remediation_version DESC LIMIT 1
+) latest ON TRUE;
 REVOKE ALL ON v106_test.fixture_uat_remediation_diagnostics FROM PUBLIC;
