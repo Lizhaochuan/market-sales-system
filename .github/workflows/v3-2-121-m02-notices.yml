@@ -21,6 +21,7 @@ on:
       - 'tests/contracts/v3-2-121-production-handover.test.mjs'
       - 'tests/contracts/v3-2-121-iam-evidence.test.mjs'
       - 'src/cross-module-v121-iam-evidence.mjs'
+      - 'tests/fixtures/v3-2-121-ext001-iam-evidence-ledger.sql'
       - 'docs/market-sales/v3-2-121-ext001-iam-evidence-intake.md'
       - 'src/cross-module-v121-production-handover.mjs'
       - 'docs/market-sales/v3-2-121-production-handover.json'
