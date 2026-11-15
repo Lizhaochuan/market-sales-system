@@ -124,6 +124,21 @@ CREATE TABLE v106_test.fixture_receipt_attestation_secrets (
  PRIMARY KEY(organization_id,key_version)
 );
 REVOKE ALL ON v106_test.fixture_receipt_attestation_secrets FROM PUBLIC;
+CREATE UNIQUE INDEX fixture_attestation_one_active ON v106_test.fixture_receipt_attestation_secrets(organization_id) WHERE active IS TRUE;
+CREATE FUNCTION v106_test.fixture_attestation_no_reactivation() RETURNS trigger
+LANGUAGE plpgsql AS $
+BEGIN
+ IF NEW.organization_id<>OLD.organization_id OR
+    NEW.key_version<>OLD.key_version OR
+    NEW.attestation_key<>OLD.attestation_key OR
+    (OLD.active IS FALSE AND NEW.active IS TRUE) THEN
+  RAISE EXCEPTION 'V121_ATTESTATION_KEY_IMMUTABLE';
+ END IF;
+ RETURN NEW;
+END $;
+CREATE TRIGGER fixture_attestation_immutable BEFORE UPDATE ON v106_test.fixture_receipt_attestation_secrets
+FOR EACH ROW EXECUTE FUNCTION v106_test.fixture_attestation_no_reactivation();
+
 CREATE FUNCTION v106_test.fixture_append_negative_receipt(
  p_organization uuid,p_incident uuid,p_notice char(64),p_sequence integer,
  p_state text,p_previous char(64),p_digest char(64),p_payload text,p_attestation text,p_key_version integer)
