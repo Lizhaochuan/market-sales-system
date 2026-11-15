@@ -1491,7 +1491,7 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
  await admin.query('REVOKE CONNECT ON DATABASE v121_anchor_isolated FROM PUBLIC');
  await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer');
  const ledgerAdmin=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
- const anchorReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
+ let anchorReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
  const anchorWriter=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
  const stateReader=new pg.Client({host,database:'v106_isolated',user:'v106_state_reader',password:'test_only_state_reader'});
  try{
@@ -1560,12 +1560,13 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
   // New client proves proof and public key survived the writer and reader sessions.
   const restartedReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
   await restartedReader.connect();
-  try{
+  anchorReader=restartedReader;
+  {
    const saved=(await restartedReader.query('SELECT signed_statement,signature_b64 FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=4',[a,failure])).rows[0];
    const persistedKey=(await restartedReader.query('SELECT public_key_der FROM v121_anchor.signers WHERE organization_id=$1 AND signer_id=$2',[a,signer1])).rows[0].public_key_der;
    assert.ok(Buffer.from(persistedKey).equals(keys1.publicKey.export({type:'spki',format:'der'})));
    assert.deepEqual({statement:saved.signed_statement,signature_b64:saved.signature_b64},proof1);
-  }finally{await restartedReader.end();}
+  }
   await register(signer2,2,keys2);
   await appendEvent(signer1,2,'RETIRED');
   state.set(signer1,'RETIRED');
