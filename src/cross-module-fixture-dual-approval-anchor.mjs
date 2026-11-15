@@ -49,8 +49,8 @@ export function createFixtureRecoveryGate({approverKeys,clock,readAudit,readAnch
   }
   const audit=await readAudit(request);
   if(!exact(audit,['organization_id','key_version','event_kind','event_digest'])||
-    audit.organization_id!==request.organization_id||audit.key_version!==request.key_version||
-    audit.event_kind!=='KEY_ISSUED'||audit.event_digest!==request.audit_digest)
+    audit.organization_id!==request.organization_id||audit.key_version!==request.key_version-1||
+    audit.event_kind!=='KEY_REVOKED'||audit.event_digest!==request.audit_digest)
    error('RECOVERY_AUDIT_MISMATCH');
   const anchor=await readAnchor({request_digest:requestDigest,audit_digest:request.audit_digest,organization_id:request.organization_id});
   if(!exact(anchor,['request_digest','audit_digest','anchored','source'])||
