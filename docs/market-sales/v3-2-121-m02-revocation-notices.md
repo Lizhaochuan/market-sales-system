@@ -311,3 +311,9 @@
 - `src/cross-module-v121-production-handover.mjs` 强制比对缺口 ID 和责任域、复核方独立性、证据项编号与完整性、依赖有向无环关系、阶段顺序、前置门槛不能被删除，以及所有签署和证据均为空。只读诊断恒定输出 `HOLD_NOT_PRODUCTION_READY`，不生成批准、解除隔离或部署操作。
 - `tests/contracts/v3-2-121-production-handover.test.mjs` 对伪造验收完成、捏造证据链接、删除前置关系、签名假完成、责任归属错误和循环依赖进行负向验证，并随 V121 CI 自动执行。现有 10 项生产缺口依旧 `UNVERIFIED`、6 个责任域依旧 `NOT_SIGNED`；没有任何真实证据包、实名责任人或截止日期被本轮虚构。
 - 明确下一次真实交接从 `EXT-001`（SECURITY 负责生产 IAM、AUDIT 独立核验）开始；实际责任人确认、具体证据收集及审批须在受控的外部工作流中执行。PR #129 继续 Draft / CI-only / HOLD，不合并、不部署、不改变真实业务数据。
+
+## V121 / EXT-001 生产 IAM 证据接收与隔离验真契约（CI-only）
+- 新增 `docs/market-sales/v3-2-121-ext001-iam-evidence-intake.md`，规定 SECURITY 提交、AUDIT 独立复核、E1 权限身份清单和 E2 最小权限负向测试的真实证据格式与隐私保护要求。真实身份、配置版本、日志来源、证据摘要、时效与受控存储必须在外部可信交接工作流中确认，禁止把认证秘密或未经脱敏的个人/资金/履约记录提交仓库。
+- `src/cross-module-v121-iam-evidence.mjs` 仅处理**内存中的合成证据**，严格要求 `CI_FIXTURE_ONLY`、`fixture://` 引用、E1/E2 摘要、八类模拟权限身份及其工作负载/MFA 模式、八项明确拒绝的越权测试。合成材料由 SECURITY 临时密钥签名，AUDIT 独立临时密钥对材料 SHA-256 摘要及模拟审核结论签名；验证器只接受从外部传入的受信公钥及有效状态，并拒绝改动、缺失、过期、跨机构或职责冲突。
+- `tests/contracts/v3-2-121-iam-evidence.test.mjs` 覆盖结构完整性、角色独立、证据过期、弱认证与未拒绝的跨模块权限、签名篡改、信任密钥吊销以及不会更新生产矩阵。新增测试已纳入 V3.2-121 GitHub Actions。
+- **边界**：CI 合成资料证明的只是验收接口与检查规则；未获得任何真实生产 IAM 导出、证据字节、可信身份签署或安全审计复核。`EXT-001` 继续为 `UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`；所有后续缺口、HOLD 以及禁止合并与部署约束保持不变。
