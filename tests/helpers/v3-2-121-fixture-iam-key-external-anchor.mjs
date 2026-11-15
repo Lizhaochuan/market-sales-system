@@ -101,6 +101,15 @@ export function signFixtureIamKeyExternalAnchor({
    previousAnchor.statement?.organization_id!==organizationId||
    previousAnchor.statement?.event_count>=current.event_count))
   fail('V121_KEY_ANCHOR_ROLLBACK');
+ // An external checkpoint pins the ENTIRE historical prefix, not merely
+ // the signature of a new tail that refers to the old checkpoint digest.
+ if(previousAnchor){
+  canonicalStatement(previousAnchor.statement);
+  const prefix=rebuildFixtureIamKeyEvents(
+   rows.slice(0,previousAnchor.statement.event_count),organizationId);
+  if(prefix.head_event_digest!==previousAnchor.statement.head_event_digest)
+   fail('V121_KEY_ANCHOR_PREVIOUS_MISMATCH');
+ }
  const statement={
   schema_version:'v1',scope:'CI_FIXTURE_ONLY',organization_id:organizationId,
   event_count:current.event_count,head_event_digest:current.head_event_digest,
@@ -134,6 +143,20 @@ export function verifyFixtureIamKeyExternalAnchor({
  if(s.previous_anchor_digest!==expected||
    (previousAnchor&&previousAnchor.statement.event_count>=s.event_count))
   fail('V121_KEY_ANCHOR_PREVIOUS_MISMATCH');
+ if(previousAnchor){
+  const prior=encodedProof(previousAnchor);
+  const previousSigner=previousAnchor.statement.signer_id;
+  let previousValid=false;
+  try{
+   previousValid=publicKeys.has(previousSigner) &&
+    verify(null,prior.message,publicKeys.get(previousSigner),prior.bytes);
+  }catch{previousValid=false;}
+  if(!previousValid)fail('V121_KEY_ANCHOR_PREVIOUS_MISMATCH');
+  const prefix=rebuildFixtureIamKeyEvents(
+   rows.slice(0,previousAnchor.statement.event_count),organizationId);
+  if(prefix.head_event_digest!==previousAnchor.statement.head_event_digest)
+   fail('V121_KEY_ANCHOR_PREVIOUS_MISMATCH');
+ }
  const current=rebuildFixtureIamKeyEvents(rows,organizationId);
  if(current.event_count!==s.event_count||
    current.head_event_digest!==s.head_event_digest)
