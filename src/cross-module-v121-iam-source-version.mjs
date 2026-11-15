@@ -4,6 +4,7 @@
 import {createHash, createPublicKey, sign, verify} from 'node:crypto';
 import {
  fingerprintFixtureExt001ForIntake,
+ encodeFixtureExt001SourceAuthorization,
  issueFixtureExt001VerifiedProvenance
 } from './cross-module-v121-iam-evidence.mjs';
 
@@ -251,6 +252,19 @@ export async function issueFixtureExt001FromTwoSources(args){
  const verified=await verifyFixtureExt001SourceVersion({
   ...args,nowMs:clock(),clock
  });
+ if(typeof args.sourceAuthSigner!=='function' ||
+    !Number.isSafeInteger(args.sourceKeyVersion) || args.sourceKeyVersion<1)
+  fail('V121_IAM_SOURCE_AUTH_REQUIRED');
+ const sourceBindingDigest=sha(encode('v121-ext001-source-binding-v1',args.sourceProof));
+ const sourceFingerprint=fingerprintFixtureExt001ForIntake(args.envelope,{
+  trustedKeys:args.trustedKeys,nowMs:clock()
+ });
+ const payload=encodeFixtureExt001SourceAuthorization({
+  ...sourceFingerprint,receipt_id:args.receiptId
+ },sourceBindingDigest,args.sourceKeyVersion);
+ const sourceMac=await args.sourceAuthSigner(payload);
+ if(typeof sourceMac!=='string'||!/^[a-f0-9]{64}$/.test(sourceMac))
+  fail('V121_IAM_SOURCE_AUTH_INVALID');
  const result=await issueFixtureExt001VerifiedProvenance({
   envelope:args.envelope,
   artifactBytes:verified.artifactBytes,
@@ -261,7 +275,8 @@ export async function issueFixtureExt001FromTwoSources(args){
   attester:args.attester,
   // The signed manifest plus both witness signatures are bound into the
   // isolated SQL provenance row, not merely displayed in JS output.
-  sourceBindingDigest:sha(encode('v121-ext001-source-binding-v1',args.sourceProof))
+  sourceBindingDigest,
+  sourceAuthorization:{key_version:args.sourceKeyVersion,mac:sourceMac}
  });
  // A database attestation may finish after a source has been revoked,
  // replaced, or expired. A failed post-check cannot undo a committed SQL
