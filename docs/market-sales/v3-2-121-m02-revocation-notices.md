@@ -68,3 +68,10 @@
 - 新增 7 项 Node 合约测试及 CI。**此验证器目前是独立组件，尚未绑定 SQL 回执事务；不能标记为完整协调协议，也不能关闭分布式最后读竞态。**
 - 租约有效不代表真实身份系统已授权、真实撤权水位已冻结、真实接收人已收到通知。进程内水位不会替代持久共享防回滚状态；后续需设计持久水位、SQL 绑定及失败恢复。
 - 所有标志继续 HOLD；`release_eligible=false`、`merge_authorized=false`、`deploy_authorized=false`。六方外部责任人及正式 UAT 仍未验收。
+
+## V121 durable signer watermark (CI-only)
+- 一次性 PostgreSQL 表 `fixture_signer_watermarks` 在租户/异常/模拟签署者维度保存最大已观察的 authority epoch 与撤权水位；FORCE RLS、受限角色禁止 DELETE，SQL trigger 禁止 UPDATE 回退。
+- `appendNegativeReceipt` 的 SERIALIZABLE 事务在来源核验及模拟签名校验后，对签署者水位行加锁；旧水位拒绝，新水位与回执同事务持久化，失败 ROLLBACK。新进程使用同一测试数据库也能检测旧回执。
+- 集成测试验证持久水位、跨 adapter 重启旧签名重放、直接 SQL 水位回退、删除权限和跨租户不可见。
+- **安全限制**：当前仅测试数据库内的水位，尚未绑定独立短租约验证器的 lease_sequence；没有真实 IAM 授权签名、网络水位权威来源或跨系统原子一致性。持久水位仅记录本地最大已观察值，不代表能够证明实际外部撤权时刻。
+- 继续保持六方真实负责人 UNASSIGNED、正式 UAT 未通过、HOLD、Draft、禁止合并和部署。
