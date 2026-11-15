@@ -67,7 +67,11 @@ function checkManifest(manifest,envelope,fingerprint,nowMs){
      rec.sha256!==signedArtifact.sha256)
    fail('V121_IAM_SOURCE_MANIFEST_INVALID');
  }
- if(manifest.objects[0].object_ref===manifest.objects[1].object_ref)
+ // Each synthetic E1/E2 evidence object must have a distinct pinned
+ // version identity. An aliased version makes a two-object coverage claim
+ // ambiguous even when references and content digests differ.
+ if(manifest.objects[0].object_ref===manifest.objects[1].object_ref ||
+    manifest.objects[0].object_version_id===manifest.objects[1].object_version_id)
   fail('V121_IAM_SOURCE_MANIFEST_INVALID');
 }
 
