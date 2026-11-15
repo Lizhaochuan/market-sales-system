@@ -56,3 +56,22 @@ CREATE POLICY v118_heads_a ON v106_test.fixture_hold_gap_scan_heads FOR ALL TO v
 CREATE POLICY v118_heads_b ON v106_test.fixture_hold_gap_scan_heads FOR ALL TO v106_writer_b
  USING(organization_id='22222222-2222-4222-8222-222222222222'::uuid)
  WITH CHECK(organization_id='22222222-2222-4222-8222-222222222222'::uuid);
+
+-- Database-side monotonicity protects against a writer that skips the JS guard.
+CREATE FUNCTION v106_test.v118_monotone_gap_head() RETURNS trigger
+LANGUAGE plpgsql AS $guard_fn$
+BEGIN
+ IF NEW.hold_active IS DISTINCT FROM TRUE OR
+    NEW.sequence<=OLD.sequence OR
+    NEW.checked_through<OLD.checked_through OR
+    NEW.outbox_prefix<OLD.outbox_prefix OR
+    NEW.negative_receipt_prefix<OLD.negative_receipt_prefix THEN
+  RAISE EXCEPTION 'V118 reconciliation head watermark regression forbidden'
+   USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END;
+$guard_fn$;
+CREATE TRIGGER v118_gap_head_monotone
+ BEFORE UPDATE ON v106_test.fixture_hold_gap_scan_heads
+ FOR EACH ROW EXECUTE FUNCTION v106_test.v118_monotone_gap_head();
