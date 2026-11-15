@@ -1,0 +1,237 @@
+{
+  "schema_version": "v3.2-112-m02-untrusted-evidence-intake-v1",
+  "module": "M02",
+  "scope": "CI_ONLY_METADATA_QUARANTINE_NO_REAL_OWNER_CONFIRMATION",
+  "parent_pr": 118,
+  "parent_head_sha": "77cf2f6a06473e87d22d41fa6f0b7681e4a39d6b",
+  "parent_ci": [
+    {
+      "run_id": 43663893399,
+      "conclusion": "success",
+      "scope": "isolated_node_and_postgres"
+    },
+    {
+      "run_id": 43663893339,
+      "conclusion": "success",
+      "scope": "prior_18_stage_node_review"
+    }
+  ],
+  "implementation": "src/cross-module-evidence-intake-quarantine.mjs",
+  "integration_test": "tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs",
+  "disposable_sql_fixture": "tests/fixtures/v3-2-112-m02-evidence-intake.sql",
+  "disposable_sql_adapter": "tests/helpers/v3-2-112-m02-evidence-intake-ledger.mjs",
+  "disposable_sql_setup": "scripts/v3-2-112-setup-evidence-intake-sql.mjs",
+  "acceptance_mode": "RECEIVE_UNTRUSTED_METADATA_ONLY",
+  "candidate_owner_is_verified": false,
+  "external_submission_is_authentic": false,
+  "stage111_source_signatures_are_real": false,
+  "schema_claim_version": "v3.2-112-ci-untrusted-evidence-claim-v1",
+  "claim_fields": [
+    "schema_version",
+    "submission_id",
+    "organization_id",
+    "incident_id",
+    "student_id",
+    "family_id",
+    "owner_role",
+    "claimed_owner_id",
+    "claimed_submitter_id",
+    "claimed_source_system",
+    "evidence_type",
+    "source_revision",
+    "source_revocation_sequence",
+    "original_history_digest",
+    "evidence_digest",
+    "linked_v110_notice_digest",
+    "submitted_at_ms",
+    "expires_at_ms",
+    "claimed_approval_state",
+    "fixture_only"
+  ],
+  "accepted_claimed_approval_state": "UNVERIFIED_SUBMISSION",
+  "stored_status": "PENDING_INDEPENDENT_VERIFICATION",
+  "allowed_final_output": "BLOCKED_EVIDENCE_RECEIVED_PENDING_EXTERNAL_VERIFICATION",
+  "receiver_prohibits_raw_personal_and_financial_documents": true,
+  "chain": {
+    "independent_scope": [
+      "organization_id",
+      "incident_id",
+      "student_id"
+    ],
+    "immutable_event_columns": [
+      "sequence",
+      "submission_id",
+      "event_payload",
+      "event_digest"
+    ],
+    "head_sequence_monotonic": true,
+    "previous_digest_checked_before_append": true,
+    "transaction": "SERIALIZABLE INSERT event and advance latest head atomically",
+    "unique_submission_id_per_scope": true,
+    "exact_postcommit_readback": true,
+    "constrained_writer_cannot_update_delete_events": true,
+    "operator_owned_database_trust_roots": false
+  },
+  "roles": [
+    {
+      "owner_role": "sales_owner",
+      "claimed_source_system": "crm_sales",
+      "evidence_type": "student_order_attribution",
+      "assigned_person": "UNASSIGNED",
+      "outside_signature_authority_verified": false,
+      "required_production_evidence": [
+        "real student and original SaleEvent lineage",
+        "source-administered authorization and revocation",
+        "unmodified original order history"
+      ]
+    },
+    {
+      "owner_role": "finance_owner",
+      "claimed_source_system": "finance_ledger",
+      "evidence_type": "payment_ownership_reconciliation",
+      "assigned_person": "UNASSIGNED",
+      "outside_signature_authority_verified": false,
+      "required_production_evidence": [
+        "independent funds ledger and receipt reconciliation",
+        "real finance signatory appointment",
+        "signed revocation state and payment owner"
+      ]
+    },
+    {
+      "owner_role": "academic_owner",
+      "claimed_source_system": "academic_ledger",
+      "evidence_type": "lesson_fulfilment_reconciliation",
+      "assigned_person": "UNASSIGNED",
+      "outside_signature_authority_verified": false,
+      "required_production_evidence": [
+        "independent lesson entitlement ledger",
+        "real academic signatory appointment",
+        "signed role revocation and fulfilment snapshot"
+      ]
+    },
+    {
+      "owner_role": "security_identity_owner",
+      "claimed_source_system": "identity_provider",
+      "evidence_type": "identity_key_revocation",
+      "assigned_person": "UNASSIGNED",
+      "outside_signature_authority_verified": false,
+      "required_production_evidence": [
+        "identity and organization binding",
+        "key custody and rotation provenance",
+        "trusted revocation delivery"
+      ]
+    },
+    {
+      "owner_role": "integration_owner",
+      "claimed_source_system": "integration_service",
+      "evidence_type": "cross_domain_barrier_contract",
+      "assigned_person": "UNASSIGNED",
+      "outside_signature_authority_verified": false,
+      "required_production_evidence": [
+        "source-side atomic barrier ownership",
+        "real three-party approval receipt",
+        "uncertain commit and compensation protocol"
+      ]
+    },
+    {
+      "owner_role": "database_owner",
+      "claimed_source_system": "audit_store",
+      "evidence_type": "audit_checkpoint_evidence",
+      "assigned_person": "UNASSIGNED",
+      "outside_signature_authority_verified": false,
+      "required_production_evidence": [
+        "administered trustworthy read-only and audit writer privileges",
+        "database crash recovery UAT",
+        "tamper-resistant approval audit"
+      ]
+    }
+  ],
+  "integration_with_prior_stages": {
+    "stage_111_independent_test_signatures": "UNTRUSTED_FIXTURE_NOT_PRODUCTION",
+    "stage_110_negative_receipt_link": "OPTIONAL_UNVERIFIED_CLAIM_SHA_NOT_REAL_ATOMIC_PROOF",
+    "stage_109_source_lease": "UNTRUSTED_FIXTURE_NOT_REAL_SOURCE_BARRIER",
+    "manual_assignment": "NOT_SUPPORTED_BY_CI; HUMAN CONFIRMATION REQUIRED",
+    "promotion_to_verified": "NOT_IMPLEMENTED",
+    "production_write_protected": true
+  },
+  "tests": [
+    "INTAKE-01",
+    "INTAKE-02",
+    "INTAKE-03",
+    "INTAKE-04",
+    "INTAKE-05",
+    "INTAKE-06",
+    "INTAKE-07",
+    "INTAKE-08",
+    "INTAKE-09",
+    "INTAKE-10",
+    "INTAKE-11",
+    "INTAKE-12",
+    "INTAKE-13",
+    "INTAKE-14"
+  ],
+  "hard_denials": {
+    "external_authority_verified": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "production_integration_allowed": false,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "actual_postgresql_16_disposable_ci_database_used": true,
+  "organization_administered_real_database_verified": false,
+  "postgresql_production_connected": false,
+  "production_schema_migration_039_created": false,
+  "historical_migration_range_only_from_upstream_specs": "001-038",
+  "sixteen_external_admission_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "six_real_external_authority_requirements": "UNVERIFIED",
+  "real_external_contract_status": "proposed-unimplemented",
+  "real_finance_academic_source_approvals_verified": false,
+  "external_key_provenance_verified": false,
+  "staff_revocation_authority_verified": false,
+  "last_observation_to_handoff_race_closed": false,
+  "chromium_and_contract_uat": "NOT_RUN",
+  "student_primary": true,
+  "family_optional": true,
+  "original_orders_payments_saleevent_lessons_compensation_preserved": true,
+  "edu_management_system_modified": false,
+  "new_production_data_tables": false,
+  "top_risks": [
+    {
+      "id": "INTAKE-P0-01",
+      "status": "OPEN",
+      "detail": "A metadata claim is not a real owner appointment or external approval"
+    },
+    {
+      "id": "INTAKE-P0-02",
+      "status": "OPEN",
+      "detail": "No real sales/finance/academic identity or key provenance is available"
+    },
+    {
+      "id": "INTAKE-P0-03",
+      "status": "OPEN",
+      "detail": "No real external transactional barrier or handoff acceptance receipt"
+    },
+    {
+      "id": "INTAKE-P1-01",
+      "status": "OPEN",
+      "detail": "Writer role can alter mutable head; append verifies digest but not external tamper-proof source"
+    },
+    {
+      "id": "INTAKE-P1-02",
+      "status": "OPEN",
+      "detail": "Receipt hash in metadata not independently authenticated against V110"
+    },
+    {
+      "id": "INTAKE-P1-03",
+      "status": "OPEN",
+      "detail": "No production evidence-upload privacy, retention and malware scanning controls"
+    }
+  ],
+  "next_stage": "V3.2-113: independent verifier assignment, quarantined evidence completeness and external trust proof contract; no automatic release"
+}
