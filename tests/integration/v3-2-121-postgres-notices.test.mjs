@@ -19,6 +19,7 @@ const host=process.env.PGHOST||'127.0.0.1';
 const admin=new pg.Pool({host,database:'v106_isolated',user:'postgres',password:'postgres'});
 const writer=new pg.Pool({host,database:'v106_isolated',user:'v106_writer_a',password:'test_only_a'});
 const receiptWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_receipt_writer_a',password:'test_only_receipt_a'});
+const issuerWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_key_issuer',password:'test_only_key_issuer'});
 const auditReader=new pg.Pool({host,database:'v106_isolated',user:'v106_audit_reader',password:'test_only_auditor'});
 const receiptAttestationKey=randomBytes(32);
 const hmacReceipt=value=>createHmac('sha256',receiptAttestationKey).update(value).digest('hex');
@@ -50,8 +51,9 @@ test.before(async()=>{
  await admin.query("CREATE ROLE v106_receipt_writer_a LOGIN INHERIT PASSWORD 'test_only_receipt_a'");
  await admin.query('GRANT v106_writer_a TO v106_receipt_writer_a');
  await admin.query("CREATE ROLE v106_audit_reader LOGIN PASSWORD 'test_only_auditor'");
+ await admin.query("CREATE ROLE v106_key_issuer LOGIN PASSWORD 'test_only_key_issuer'");
  await admin.query('CREATE SCHEMA v106_test');
- await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader');
+ await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader,v106_key_issuer');
  await admin.query(`CREATE TABLE v106_test.fixture_incident_gap_manifest_heads(
  organization_id uuid,incident_id uuid,sequence integer,event_digest text,hold_active boolean,
  PRIMARY KEY(organization_id,incident_id))`);
@@ -87,7 +89,7 @@ test.before(async()=>{
  ledger=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:proofAuthority});
  service=createIsolatedRevocationNoticeService({ledger,clock:()=>100});
 });
-test.after(async()=>{await auditReader.end();await receiptWriter.end();await writer.end();await admin.end();});
+test.after(async()=>{await issuerWriter.end();await auditReader.end();await receiptWriter.end();await writer.end();await admin.end();});
 test('SQL source binding and durable enqueue + replay',async()=>{
  const first=await service.enqueue(input);
  assert.equal(first.notice_accepted,true,JSON.stringify(first));
@@ -670,7 +672,7 @@ function freshRecoveryIssuer({fault,anchorOk=true}={}){
   readAnchor:async e=>({request_digest:e.request_digest,audit_digest:e.audit_digest,
    anchored:anchorOk,source:'FIXTURE_SEPARATE_ARCHIVE'})
  });
- return createFixtureRecoveryIssuance({adminPool:admin,recoveryGate:gate,
+ return createFixtureRecoveryIssuance({issuerPool:issuerWriter,recoveryGate:gate,
   beforeKeyInsert:fault|| (async()=>{})});
 }
 test('two-person recovery issuance and durable replay fencing across adapter instances',async()=>{
@@ -719,4 +721,20 @@ test('recovery fault rolls back durable approval consumption and key issuance to
  assert.equal(retry.hold_active,true);
  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=6')).rows[0].n,1);
  await assert.rejects(admin.query('DELETE FROM v106_test.fixture_recovery_consumptions WHERE key_version=6'),/V121_RECOVERY_CONSUMPTION_IMMUTABLE/);
+});
+
+test('scoped key issuer has no direct DML and cannot impersonate admin or bypass verifier',async()=>{
+ await assert.rejects(issuerWriter.query('SELECT * FROM v106_test.fixture_receipt_attestation_secrets'),/permission denied/);
+ await assert.rejects(issuerWriter.query('SELECT * FROM v106_test.fixture_recovery_consumptions'),/permission denied/);
+ await assert.rejects(issuerWriter.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true'),/permission denied/);
+ await assert.rejects(issuerWriter.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,7,$2,true)',[a,randomBytes(32)]),/permission denied/);
+ await assert.rejects(issuerWriter.query('DELETE FROM v106_test.fixture_recovery_consumptions'),/permission denied/);
+ const badInput=await recoveryInputs(7,'00000000-0000-4000-8000-0000000000f7');
+ await assert.rejects(freshRecoveryIssuer({anchorOk:false}).issue({...badInput,attestationKey:randomBytes(32)}),{code:'RECOVERY_ANCHOR_UNVERIFIED'});
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=7')).rows[0].n,0);
+});
+test('ordinary receipt role cannot execute scoped issuance gateway',async()=>{
+ await assert.rejects(receiptWriter.query('SELECT v106_test.fixture_issue_recovery_key($1::uuid,$2::uuid,$3::uuid,$4::char(64),$5::integer,$6::char(64),$7::uuid,$8::uuid,$9::bytea)',
+  [a,incident,'00000000-0000-4000-8000-0000000000f8','a'.repeat(64),7,'b'.repeat(64),
+   recoveryApproverIds.AUDIT_REVIEW,recoveryApproverIds.SECURITY_REVIEW,randomBytes(32)]),/permission denied/);
 });
