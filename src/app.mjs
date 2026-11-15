@@ -67,6 +67,7 @@ async function getContact(c,ctx,id) {
   return x;
 }
 const routeDefs=[
+  ['POST',/^\/api\/v1\/leads\/([0-9a-f-]+)\/source$/,'updateLeadSource'],
   ['GET',/^\/api\/v1\/isolated-workspace\/([a-z-]+(?:\/[a-z0-9-]+){0,2})$/,'workspace'],
   ['POST',/^\/api\/v1\/isolated-workspace\/([a-z-]+(?:\/[a-z0-9-]+){0,2})$/,'workspace'],
   ['POST',/^\/api\/v1\/students$/,'createStudent'],
@@ -168,6 +169,15 @@ async function handle(c,ctx,op,p,body,requestUrl) {
   if(op==='workspace')return workspaceOperation(c,ctx,{method:body===null?'GET':'POST',parts:p[0].split('/'),body});
   if(op.startsWith('identity'))return identityOperation(c,ctx,op,p,body);
   switch(op){
+    case 'updateLeadSource': {
+      object(body,['source']);
+      if(!['市场转入','主动咨询','家长转介绍','到店','网络咨询','其他','待确认'].includes(body.source))
+        fail(422,'VALIDATION_ERROR','请选择线索来源');
+      const lead=await ownsLead(c,ctx,needId(p[0],'线索'));
+      await c.query('SELECT id FROM ms.leads WHERE id=$1 FOR UPDATE',[lead.id]);
+      await audit(c,ctx,'lead',lead.id,'LEAD_SOURCE_UPDATED','销售调整当前来源',{}, {source:body.source});
+      return {lead_id:lead.id,current_source:body.source};
+    }
     case 'getMe': {
       return {
         staff_id:actor,display_name:ctx.user.display_name,
@@ -241,6 +251,9 @@ async function handle(c,ctx,op,p,body,requestUrl) {
         "c.display_name AS contact_display_name,"+
         "e.event_type AS source_event_type,e.occurred_at AS source_occurred_at,"+
         "e.original_source_text AS source_notes,"+
+        "(SELECT a.after_business_json->>'source' FROM ms.audit_events a WHERE a.organization_id=$1 "+
+        "AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='LEAD_SOURCE_UPDATED' "+
+        "ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS current_source,"+
         "COALESCE((SELECT json_agg(json_build_object("+
         "'student_id',s.id,'display_name',s.display_name,'confirmation_state',ls.confirmation_state"+
         ") ORDER BY s.display_name,s.id) "+

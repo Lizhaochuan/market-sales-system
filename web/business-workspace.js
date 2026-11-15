@@ -16,7 +16,7 @@
   <div id="business-summary" class="scope-grid"></div>
   <form id="business-form" class="field-stack">
    <label>业务类型<select name="kind" id="business-kind"></select></label>
-   <label>名称<input name="title" required maxlength="120"></label>
+   <label>说明（选填，自动命名）<input name="title" maxlength="120" placeholder="可直接留空"></label>
    <label data-business-field="student">学生<select name="student_id" id="business-student"></select></label>
    <label data-business-field="opportunity">商机<select name="opportunity_id" id="business-opportunity"></select></label>
    <p id="business-task-scope-hint" class="form-hint" hidden></p>
@@ -30,8 +30,8 @@
      <button type="button" class="secondary compact-btn" data-trial-time="19:00">晚上 19:00</button>
     </div>
    </div>
-   <label data-business-field="course"><span data-field-label="course">第 1 门课程 · 拟选课程</span><input name="course_label" maxlength="120"></label>
-   <label data-business-field="quantity"><span data-field-label="quantity">第 1 门课程 · 拟购数量（整数）</span><input name="quantity" type="number" min="1" max="10000" value="1"></label>
+   <label data-business-field="course"><span data-field-label="course">第 1 门课程 · 拟选课程</span><input name="course_label" list="business-course-choices" maxlength="120"><datalist id="business-course-choices"><option value="数学"><option value="英语"><option value="语文"><option value="物理"><option value="化学"></datalist></label>
+   <label data-business-field="quantity"><span data-field-label="quantity">第 1 门课程 · 课时数</span><input name="quantity" type="number" min="1" max="10000" value="1"></label>
    <label data-business-field="amount"><span data-field-label="amount">计划金额（元，报价为拟议单价）</span><input name="amount" inputmode="decimal" placeholder="0.00"></label>
    <div data-business-field="extra"><div id="business-extra-lines"></div><button class="secondary" type="button" id="business-add-line">增加课程明细</button></div>
    <p id="business-quote-preview" class="form-hint" hidden></p>
@@ -67,8 +67,8 @@
    if(head)head.textContent='第 '+num+' 门课程明细';
    const lc=row.querySelector('[data-field-label="course"]'),lq=row.querySelector('[data-field-label="quantity"]'),la=row.querySelector('[data-field-label="amount"]');
    if(lc)lc.textContent='第 '+num+' 门课程 · 拟选课程';
-   if(lq)lq.textContent='第 '+num+' 门课程 · 拟购数量';
-   if(la)la.textContent='第 '+num+' 门课程 · 拟议单价（元）';
+   if(lq)lq.textContent='第 '+num+' 门课程 · 课时数';
+   if(la)la.textContent='第 '+num+' 门课程 · 每课时价格（元）';
   });
  }
  function updateTaskHint(){
@@ -107,9 +107,11 @@
     if(!Number.isSafeInteger(sub)||!Number.isSafeInteger(total+sub))throw Error('overflow');
     total+=sub;
    }
-   preview.textContent='拟议总额预览：'+yuan(total)+'（共 '+rawLines.length+' 门课程，按整数分合计，未获正式定价授权）';
+   preview.textContent='报价合计：'+yuan(total)+'（共 '+rawLines.length+' 门课程，按整数分合计，未获正式定价授权）';
+   const opp=summary?.pipeline.find(o=>o.id===$('business-opportunity').value);
+   if(opp?.predicted_amount_cents!=null)preview.textContent+='；此前预计 '+yuan(opp.predicted_amount_cents)+'（仅供参考）';
   }catch{
-   preview.textContent='拟议总额预览：请确认每门课程的数量（正整数）和单价（非负两位小数）';
+   preview.textContent='拟议总额预览：请确认每门课程的课时数（正整数）和单价（非负两位小数）';
   }
   preview.hidden=false;
  }
@@ -141,9 +143,9 @@
   });
   const labelMap={
    time:k==='trials'?'期望试听时间（仅申请，不会直接排课）':k==='quotes'?'报价草稿有效期截止':'计划跟进截止时间',
-   amount:k==='quotes'?'第 1 门课程 · 拟议单价（元）':'计划金额（元，未获财务批准）',
+   amount:k==='quotes'?'第 1 门课程 · 每课时价格（元）':'计划金额（元，未获财务批准）',
    course:'第 1 门课程 · 拟选课程',
-   quantity:'第 1 门课程 · 拟购数量（整数）'
+   quantity:'第 1 门课程 · 课时数'
   };
   for(const [key,txt] of Object.entries(labelMap)){
    const span=form.querySelector('[data-field-label="'+key+'"]');
@@ -171,7 +173,7 @@
   const row=node('div','field-stack');row.classList.add('business-quote-line');
   row.append(node('strong','business-quote-line-head','补充课程明细'));
   const unitVal=value.amount_text!==undefined?value.amount_text:((value.proposed_unit_cents??0)/100).toFixed(2);
-  for(const [field,label,type,initial] of [['course','拟选课程','text',value.course_label||''],['quantity','拟购数量','number',value.quantity??1],['amount','拟议单价（元）','text',unitVal]]){
+  for(const [field,label,type,initial] of [['course','拟选课程','text',value.course_label||''],['quantity','课时数','number',value.quantity??1],['amount','每课时价格（元）','text',unitVal]]){
    const container=node('label');
    container.append(node('span','',label));container.lastChild.dataset.fieldLabel=field;
    const input=node('input');input.type=type;input.dataset.quoteField=field;input.value=initial;input.required=true;
@@ -270,6 +272,10 @@
      await api(root+kind()+'/'+row.id+'/state',{method:'POST',body:{expected_version:row.version,state:next}});await refreshBusiness();
     }));
    }
+   if(kind()==='quotes'&&row.state==='draft')actions.append(button('生成报名意向',async()=>{
+    await window.__openBusinessAction('order-intents',row.student_id,row.opportunity_id);
+    $('business-quote').value=row.id;
+   }));
    card.append(actions);el.append(card);
   }
  }
@@ -347,7 +353,10 @@
   const submit=$('business-save');submit.disabled=true;
   $('business-kind').disabled=true;$('business-reset').disabled=true;
   try{
-   const f=Object.fromEntries(new FormData(event.target));const k=kind();let body={title:f.title};
+   const f=Object.fromEntries(new FormData(event.target));const k=kind();
+   const student=state.students.find(x=>x.student_id===f.student_id);
+   const autoTitle=(student?.display_name||'客户')+'的'+labels[k];
+   let body={title:f.title.trim()||autoTitle};
    if(['tasks','trials','quotes'].includes(k))body={...body,student_id:f.student_id||null,opportunity_id:f.opportunity_id||null};
    if(k==='tasks')body.due_at=f.at?localIso(f.at):null;
    if(k==='trials')body.requested_slot_at=localIso(f.at);
@@ -366,7 +375,7 @@
    if(editing)body.expected_version=editing.version;
    await api(root+k+(editing?'/'+editing.id:''),{method:'POST',body});
    if(session!==sessionEpoch||token!==state.token)return;
-   const selected=k,savedTitle=f.title.trim();reset();$('business-kind').value=selected;await refreshBusiness();
+   const selected=k,savedTitle=body.title;reset();$('business-kind').value=selected;await refreshBusiness();
    toast('已保存'+labels[selected]+'「'+savedTitle+'」，仍待外部确认');
   }catch(e){if(session===sessionEpoch)toast(e.message,true);}finally{if(session===sessionEpoch){saving=false;submit.disabled=false;
    $('business-kind').disabled=false;$('business-reset').disabled=false;}}
@@ -405,6 +414,13 @@
  $('business-reset').addEventListener('click',()=>{const selected=kind();reset();$('business-kind').value=selected;fields();});
  $('business-refresh').addEventListener('click',refreshBusiness);
  $('business-scan').addEventListener('click',()=>scan(true).then(result=>{if(result&&active())toast('已生成 '+result.created+' 条本人本地任务');}));
+ window.__openBusinessAction=async(k,studentId,opportunityId)=>{
+  if(!active()||saving)return;
+  reset();$('business-kind').value=k;setView('business-workspace');await refreshBusiness();
+  $('business-student').value=studentId||'';syncOpportunityOptions(false);
+  $('business-opportunity').value=opportunityId||'';fields();
+  $('business-form').scrollIntoView({block:'start'});
+ };
  window.__refreshBusinessWorkspace=refreshBusiness;
  window.__snapshotBusinessDraft=snapshotDraft;
  window.__restoreBusinessDraft=restoreDraft;

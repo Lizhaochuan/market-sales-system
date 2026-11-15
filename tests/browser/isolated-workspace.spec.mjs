@@ -177,6 +177,12 @@ test('UAT fixes: Step 2 notes/carryover/jump, Step 3 future default, Step 4 pres
  await page.getByRole('button',{name:'关联学生（待核实）'}).click();
  await expect(page.locator('#leads-list')).toContainText('已关联学生（待核实）');
 
+ const leadCard=page.locator('#leads-list .record').filter({hasText:contactName});
+ await leadCard.getByRole('combobox',{name:'当前线索来源'}).selectOption('市场转入');
+ await expect(page.locator('#toast')).toContainText('来源已更新');
+ await page.locator('#refresh-button').click();
+ await expect(leadCard.getByRole('combobox',{name:'当前线索来源'})).toHaveValue('市场转入');
+
  // Step 2(c): one-click jump to create opportunity with student & notes carried over
  await page.getByRole('button',{name:'去建商机（'+studentName+'） →',exact:true}).click();
  await expect(page.locator('#page-title')).toHaveText('销售商机');
@@ -186,16 +192,16 @@ test('UAT fixes: Step 2 notes/carryover/jump, Step 3 future default, Step 4 pres
  await page.getByRole('button',{name:'创建销售商机'}).click();
  await expect(page.locator('#opportunities-list')).toContainText(studentName);
 
- // Step 3: tasks default to tomorrow 10:00 -> creating task does not count as overdue
- await page.locator('#workspace-business-nav').click();
+ // Step 3: one click on the opportunity carries the student and opens a task.
+ await page.locator('#opportunities-list .record').filter({hasText:studentName}).getByRole('button',{name:'记跟进',exact:true}).click();
  await expect(page.locator('#business-status')).toContainText('已读取');
  const defaultTaskAt=await page.locator('#business-form [name="at"]').inputValue();
  expect(defaultTaskAt).toMatch(/T10:00$/);
  expect(new Date(defaultTaskAt).getTime()).toBeGreaterThan(Date.now()+3600_000);
- await expect(page.locator('#business-task-scope-hint')).toContainText('通用待办任务');
+ await expect(page.locator('#business-task-scope-hint')).toContainText(studentName);
  await page.locator('#business-student').selectOption({label:studentName});
  await expect(page.locator('#business-opportunity option:checked')).toContainText(studentName);
- await page.locator('#business-form [name="title"]').fill('明日跟进'+suffix);
+ await expect(page.locator('#business-form [name="title"]')).toHaveValue('');
  await page.locator('#business-save').click();
  await expect(page.locator('#business-records')).toContainText('[跟进任务] · '+studentName);
  await expect(page.locator('#business-summary')).toContainText('逾期任务0');
@@ -218,7 +224,7 @@ test('UAT fixes: Step 2 notes/carryover/jump, Step 3 future default, Step 4 pres
  await page.locator('#business-form [name="course_label"]').fill('数学');
  await page.locator('#business-form [name="quantity"]').fill('1');
  await page.locator('#business-form [name="amount"]').fill('200');
- await expect(page.locator('#business-form [data-field-label="amount"]')).toHaveText('第 1 门课程 · 拟议单价（元）');
+ await expect(page.locator('#business-form [data-field-label="amount"]')).toHaveText('第 1 门课程 · 每课时价格（元）');
  await page.locator('#business-add-line').click();
  await expect(page.locator('#business-extra-lines .business-quote-line-head')).toHaveText('第 2 门课程明细');
  const c1Box=await page.locator('#business-form [name="amount"]').boundingBox();

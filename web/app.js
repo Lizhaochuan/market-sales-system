@@ -763,12 +763,28 @@ function render(){
         });
       }
     }
-    return record(x.contact_display_name||'未指定联系人',details.join(' · '),badge,'询',actions);
+    const card=record(x.contact_display_name||'未指定联系人',details.join(' · '),badge,'询',actions);
+    if(!state.strict){
+      const label=node('label','','当前来源'),source=node('select');
+      source.setAttribute('aria-label','当前线索来源');
+      source.append(option('','请选择来源'));
+      for(const name of ['市场转入','主动咨询','家长转介绍','到店','网络咨询','其他','待确认'])source.append(option(name,name));
+      source.value=x.current_source||'';
+      source.addEventListener('change',async()=>{const previous=x.current_source||'';source.disabled=true;
+        try{await api('/api/v1/leads/'+x.lead_id+'/source',{method:'POST',body:{source:source.value}});x.current_source=source.value;toast('来源已更新');}
+        catch(e){source.value=previous;toast(e.message,true);}finally{source.disabled=false;}});
+      label.append(source);card.append(label);
+    }
+    return card;
   });
   paint('opportunities-list',state.opportunities,x=>record(
     (x.student_display_name||'指定学生')+'的商机',
     '负责人：'+(x.owner_display_name||'待确认')+' · 预计金额：'+yuan(x.predicted_amount_cents),
-    labelStatus(x.lifecycle_state),'商'));
+    labelStatus(x.lifecycle_state),'商',state.strict?[]:[
+      {label:'记跟进',onClick:()=>window.__openBusinessAction?.('tasks',x.student_id,x.opportunity_id)},
+      {label:'约试听',onClick:()=>window.__openBusinessAction?.('trials',x.student_id,x.opportunity_id)},
+      {label:'做报价',onClick:()=>window.__openBusinessAction?.('quotes',x.student_id,x.opportunity_id)}
+    ]));
   paint('families-list',state.families,x=>record(
     x.display_name,'关联学生：'+x.student_count+' 名 · 申请人：'+
       (x.requested_by_name||'原申请待查')+
