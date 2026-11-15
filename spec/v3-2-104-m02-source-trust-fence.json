@@ -1,0 +1,172 @@
+{
+  "schema_version": "v3.2-104-m02-source-trust-fence-v1",
+  "module": "M02",
+  "scope": "CI_ONLY_TRUST_GOVERNANCE_AND_ATOMIC_WATERMARK_CONTRACT",
+  "parent_pr": 110,
+  "parent_head": "8f85a0b78f9e6a7e489852219de9a8a3aab75840",
+  "parent_ci": [
+    43660468834,
+    43660468840,
+    43660468841
+  ],
+  "source_code": "src/cross-module-source-trust-fence.mjs",
+  "test_file": "tests/security/v3-2-104-m02-source-trust-fence.test.mjs",
+  "adapters": {
+    "readTrustRoster": {
+      "request": [
+        "organization_id",
+        "incident_id"
+      ],
+      "response": "Governance-signed roster with per-domain key IDs and revocation proof",
+      "source_authority": "FICTIONAL GOVERNANCE KEY, NOT REAL TRUST ROOT"
+    },
+    "sourceReaders": {
+      "domains": [
+        "sales",
+        "finance",
+        "academic"
+      ],
+      "signature_algorithm": "Ed25519",
+      "signed_payload": "v3.2-104-ci-source-proof-v1",
+      "keys": "Must reference currently active key in governance-signed roster"
+    },
+    "checkpointStore": {
+      "method": "advance(scope,checkpoint)",
+      "required_properties": [
+        "Atomic compare-and-advance in a single serializable transaction",
+        "Durable trusted storage across process restarts, not a local in-memory Map",
+        "Organization/incident scoping; no cross-tenant reads or writes",
+        "Never accept decreasing trust revision, source epoch/revision, revocation sequence or incident generation",
+        "Never accept changed roster digest at the same trust revision",
+        "Never accept changed evidence digest at same source epoch/revision",
+        "Active key change requires increased governance trust revision and explicit old-key revocation evidence",
+        "Reject wall-clock rollback against stored observed_at_ms",
+        "Return accepted, checkpoint_digest, reason_code with exact keys"
+      ],
+      "implemented_in_production": false,
+      "sql_migration_created": false,
+      "simulated_store_only": true
+    }
+  },
+  "governance_roster": {
+    "schema": "v3.2-104-ci-trust-roster-v1",
+    "signed_fields": [
+      "schema_version",
+      "organization_id",
+      "revision",
+      "issued_at_ms",
+      "expires_at_ms",
+      "keys",
+      "revocations",
+      "fixture_only"
+    ],
+    "signer": "separately injected pinned fixture governance Ed25519 key",
+    "revoked_key_event_fields": [
+      "domain",
+      "key_id",
+      "sequence",
+      "revoked_at_ms"
+    ],
+    "requires_distinct_all_signer_keys": true,
+    "requires_exact_one_active_key_per_domain": true,
+    "requires_revocation_event_for_every_retired_key": true,
+    "production_key_rotation_implemented": false,
+    "production_governance_identity_verified": false
+  },
+  "domain_source_proof": {
+    "schema": "v3.2-104-ci-source-proof-v1",
+    "signed_fields": [
+      "schema_version",
+      "domain",
+      "organization_id",
+      "incident_id",
+      "key_id",
+      "trust_revision",
+      "source_epoch",
+      "source_revision",
+      "incident_generation",
+      "revocation_sequence",
+      "revocation_digest",
+      "evidence_digest",
+      "issued_at_ms",
+      "expires_at_ms",
+      "fixture_only"
+    ],
+    "domains": [
+      "sales",
+      "finance",
+      "academic"
+    ],
+    "cross_domain_causal_epoch_required": true,
+    "independent_external_transaction_barrier_implemented": false
+  },
+  "production_database_test_plan": [
+    {
+      "id": "DB-01",
+      "requires": "PostgreSQL isolated test database, independently administered permissions, non-production credentials",
+      "expected": "No production writes"
+    },
+    {
+      "id": "DB-02",
+      "requires": "Durable checkpoint stored with composite unique org+incident key",
+      "expected": "Survives process restart and concurrent workers"
+    },
+    {
+      "id": "DB-03",
+      "requires": "Serializable or conditional atomic monotone compare-and-advance",
+      "expected": "Only valid version wins; rollback attempts are rejected"
+    },
+    {
+      "id": "DB-04",
+      "requires": "Key roster revision and roster SHA-256 bound to checkpoint",
+      "expected": "Equal revision but differing keys rejected"
+    },
+    {
+      "id": "DB-05",
+      "requires": "Old-key revocation proof before signed key rotation",
+      "expected": "No silent substitution or reactivation"
+    },
+    {
+      "id": "DB-06",
+      "requires": "Tenant isolation and unprivileged read/verification role",
+      "expected": "Cross-tenant access denied"
+    },
+    {
+      "id": "DB-07",
+      "requires": "Fault injection during commit and retry",
+      "expected": "No partial advancement or false success"
+    },
+    {
+      "id": "DB-08",
+      "requires": "Full PostgreSQL/Chromium/contract/UAT security evidence",
+      "expected": "No real business authority granted absent independent signoffs"
+    }
+  ],
+  "known_limitations": [
+    "Mock shared Map only models a hypothetical durable atomic adapter; not a real database",
+    "No trusted production governance identity or key custody",
+    "No proven persistent revocation across PostgreSQL, external sources or multiple nodes",
+    "Non-atomic repeated reads leave an after-read race window",
+    "No live finance or academic data verification",
+    "No SQL migration or production runtime integration"
+  ],
+  "external_contract_status": "proposed-unimplemented",
+  "external_admission_checks_16": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "historical_migration_range_from_specs": "001-038",
+  "new_production_migration": false,
+  "student_primary": true,
+  "family_optional": true,
+  "original_orders_funds_saleevent_lessons_compensation_immutable": true,
+  "external_authority_verified": false,
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "production_integration_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "full_postgresql_chromium_contract_external_uat": "NOT_RUN"
+}
