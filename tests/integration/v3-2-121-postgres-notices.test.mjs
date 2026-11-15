@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createHash,generateKeyPairSync,sign} from 'node:crypto';
 import {encodeFixtureReceiptProof} from '../../src/cross-module-fixture-receipt-proof.mjs';
+import {createFixtureLeaseGate,encodeFixtureLease} from '../../src/cross-module-fixture-authority-lease.mjs';
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
@@ -284,4 +285,51 @@ test('SQL trigger prevents direct watermark regression and tenant deletion',asyn
  await assert.rejects(writer.query('DELETE FROM v106_test.fixture_signer_watermarks'),/permission denied/);
  const other=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1',[b]);
  assert.equal(other.rows[0].n,0);
+});
+
+test('leased SQL receipt commits durable sequence and blocks replay after adapter restart',async()=>{
+ const leaseKeys=generateKeyPairSync('ed25519');
+ const signerId='00000000-0000-4000-8000-000000000082';
+ let currentSequence=1;
+ let now=150;
+ const build=(notice_id,sequence)=>{
+  const statement={organization_id:a,incident_id:incident,notice_id,
+   receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',signer_id:signerId,
+   authority_epoch:4,revocation_watermark:2,issued_at_ms:100,expires_at_ms:500};
+  const proof={statement,signature_b64:sign(null,encodeFixtureReceiptProof(statement),keyPair.privateKey).toString('base64')};
+  const lease={organization_id:a,incident_id:incident,signer_id:signerId,notice_id,
+   authority_epoch:4,revocation_watermark:2,lease_sequence:sequence,
+   issued_at_ms:100,expires_at_ms:200};
+  return {organization_id:a,incident_id:incident,notice_id,receipt_sequence:1,
+   receipt_state:'NEGATIVE_RECEIPT',proof,
+   lease:{lease,signature_b64:sign(null,encodeFixtureLease(lease),leaseKeys.privateKey).toString('base64')}};
+ };
+ const adapter=()=>createIsolatedPostgresRevocationNotices({pool:writer,
+  receiptPublicKey:keyPair.publicKey,receiptClock:()=>now,
+  receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:2,active:true}),
+  leaseGate:createFixtureLeaseGate({publicKey:leaseKeys.publicKey,clock:()=>now,
+   loadAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2,lease_sequence:currentSequence})})});
+ const q1=await service.enqueue({...input,epoch:61});
+ const first=build(q1.notice_id,1);
+ const noLease={...first};delete noLease.lease;
+ await assert.rejects(adapter().appendNegativeReceipt(noLease),{code:'NOTICE_RECEIPT_INPUT_INVALID'});
+ assert.equal((await adapter().appendNegativeReceipt(first)).hold_active,true);
+ let row=await writer.query('SELECT lease_sequence FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',[a,incident,signerId]);
+ assert.equal(row.rows[0].lease_sequence,1);
+ currentSequence=2;
+ const q2=await service.enqueue({...input,epoch:62});
+ assert.equal((await adapter().appendNegativeReceipt(build(q2.notice_id,2))).hold_active,true);
+ row=await writer.query('SELECT lease_sequence FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',[a,incident,signerId]);
+ assert.equal(row.rows[0].lease_sequence,2);
+ const q3=await service.enqueue({...input,epoch:63});
+ currentSequence=1;
+ await assert.rejects(adapter().appendNegativeReceipt(build(q3.notice_id,1)),{code:'NOTICE_SIGNER_WATERMARK_REGRESSION'});
+ const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q3.notice_id]);
+ assert.equal(count.rows[0].n,0);
+ currentSequence=3;
+ const q4=await service.enqueue({...input,epoch:64});
+ now=200;
+ await assert.rejects(adapter().appendNegativeReceipt(build(q4.notice_id,3)),{code:'LEASE_EXPIRED'});
+ const total=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q4.notice_id]);
+ assert.equal(total.rows[0].n,0);
 });
