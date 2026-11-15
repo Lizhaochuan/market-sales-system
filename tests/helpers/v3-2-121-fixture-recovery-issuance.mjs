@@ -36,6 +36,12 @@ export function createFixtureRecoveryIssuance({issuerPool,recoveryGate,beforeKey
     real_person_approval:false,merge_authorized:false,deploy_authorized:false});
   }catch(e){
    if(started)await c.query('ROLLBACK').catch(()=>{});
+   // PostgreSQL RAISE EXCEPTION uses P0001; preserve the declared fixture reason.
+   if(e.code==='P0001'&&[
+    'RECOVERY_ALREADY_CONSUMED','RECOVERY_PREVIOUS_KEY_NOT_REVOKED',
+    'RECOVERY_AUDIT_CHANGED','RECOVERY_AUDIT_TAMPERED','RECOVERY_VERSION_NOT_NEXT',
+    'V121_ISSUER_ROLE_SCOPE_DENIED','V121_ISSUANCE_ENVELOPE_INVALID'
+   ].includes(e.message)) e.code=e.message;
    throw e;
   }finally{c.release();}
  }
