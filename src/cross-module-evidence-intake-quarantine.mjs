@@ -92,6 +92,17 @@ export function createIsolatedEvidenceIntakeQuarantine({
      !Number.isSafeInteger(head.sequence)||head.sequence<1||
      !SHA.test(head.event_digest)))
      reject('EVIDENCE_INTAKE_HEAD_UNVERIFIED');
+    if(head!==null){
+     const priorEvent=await ledger.event(scope,head.sequence);
+     if(!exact(priorEvent,RECORD)||
+      priorEvent.schema_version!=='v3.2-112-ci-quarantined-intake-v1'||
+      !exact(priorEvent.scope,['organization_id','incident_id','student_id'])||
+      Object.keys(scope).some(k=>priorEvent.scope[k]!==scope[k])||
+      priorEvent.status!=='PENDING_INDEPENDENT_VERIFICATION'||
+      priorEvent.sequence!==head.sequence||
+      sha(priorEvent)!==head.event_digest)
+      reject('EVIDENCE_INTAKE_PREVIOUS_EVENT_UNVERIFIED');
+    }
     const record={schema_version:'v3.2-112-ci-quarantined-intake-v1',
      scope,sequence:(head?.sequence||0)+1,
      previous_event_digest:head?.event_digest||'0'.repeat(64),
