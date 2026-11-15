@@ -320,6 +320,15 @@ CREATE TABLE v106_test.fixture_recovery_clock (
 INSERT INTO v106_test.fixture_recovery_clock(singleton,now_ms) VALUES(true,150);
 REVOKE ALL ON v106_test.fixture_recovery_clock FROM PUBLIC;
 
+-- Manual incident stop: administrator-owned fixture control, no business role can toggle.
+CREATE TABLE v106_test.fixture_recovery_emergency_stops (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ issuance_blocked boolean NOT NULL DEFAULT true,
+ PRIMARY KEY(organization_id,incident_id)
+);
+REVOKE ALL ON v106_test.fixture_recovery_emergency_stops FROM PUBLIC;
+
 -- SECURITY DEFINER fixture-only issuance gateway.
 -- MAC is signed by disposable verifier after JS signature checks; DB checks MAC independently.
 CREATE FUNCTION v106_test.fixture_issue_recovery_key(
@@ -346,6 +355,13 @@ BEGIN
     p_audit_id IS NULL OR p_security_id IS NULL OR
     p_audit_id=p_security_id OR p_key IS NULL OR octet_length(p_key)<>32 THEN
   RAISE EXCEPTION 'V121_ISSUANCE_ENVELOPE_INVALID';
+ END IF;
+ IF NOT EXISTS (
+  SELECT 1 FROM v106_test.fixture_recovery_emergency_stops
+  WHERE organization_id=p_organization AND incident_id=p_incident
+    AND issuance_blocked IS FALSE
+ ) THEN
+  RAISE EXCEPTION 'V121_ISSUANCE_EMERGENCY_STOP';
  END IF;
  SELECT key_version,active INTO predecessor
  FROM v106_test.fixture_receipt_attestation_secrets
