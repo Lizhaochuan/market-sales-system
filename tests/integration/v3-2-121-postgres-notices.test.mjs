@@ -6,7 +6,7 @@ import {encodeFixtureReceiptProof} from '../../src/cross-module-fixture-receipt-
 import {createFixtureLeaseGate,encodeFixtureLease} from '../../src/cross-module-fixture-authority-lease.mjs';
 import {createFixtureRecoveryGate,encodeFixtureRecoveryRequest,encodeFixtureRecoveryApproval} from '../../src/cross-module-fixture-dual-approval-anchor.mjs';
 import {createFixtureRecoveryIssuance} from '../helpers/v3-2-121-fixture-recovery-issuance.mjs';
-import {signFixtureAuditAnchor,verifyFixtureAuditAnchor,verifyFixtureActiveAuditAnchor,inspectFixtureArchivedAuditAnchor,issueFixtureVerifiedAnchorTicket} from '../helpers/v3-2-121-fixture-external-audit-anchor.mjs';
+import {signFixtureAuditAnchor,verifyFixtureAuditAnchor,verifyFixtureActiveAuditAnchor,inspectFixtureArchivedAuditAnchor,issueFixtureVerifiedAnchorTicket,inspectFixtureStoredAdmission} from '../helpers/v3-2-121-fixture-external-audit-anchor.mjs';
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
@@ -1488,9 +1488,10 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
  await admin.query("CREATE ROLE v121_anchor_reader LOGIN PASSWORD 'test_only_anchor_reader'");
  await admin.query("CREATE ROLE v121_anchor_writer LOGIN PASSWORD 'test_only_anchor_writer'");
  await admin.query("CREATE ROLE v121_anchor_attester LOGIN PASSWORD 'test_only_anchor_attester'");
+ await admin.query("CREATE ROLE v121_anchor_security LOGIN PASSWORD 'test_only_anchor_security'");
  await admin.query('CREATE DATABASE v121_anchor_isolated');
  await admin.query('REVOKE CONNECT ON DATABASE v121_anchor_isolated FROM PUBLIC');
- await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester');
+ await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security');
  const ledgerAdmin=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
  let anchorReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
  const anchorWriter=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
@@ -1945,5 +1946,113 @@ test('attester abuse controls: one active ticket, expiry, service outage and fai
  }finally{
   await Promise.allSettled([businessReader.end(),writer.end(),attester.end(),reader.end()]);
   await ledgerAdmin.end();
+ }
+});
+
+
+test('independent monitor quarantines compromised attester and invalidates all outstanding tickets without erasing history',async()=>{
+ const failure='00000000-0000-4000-8000-0000000000b1';
+ const validSigner='00000000-0000-4000-8000-0000000000ad';
+ const compromisedSigner='00000000-0000-4000-8000-0000000000ae';
+ const validKeys=generateKeyPairSync('ed25519');
+ const badKeys=generateKeyPairSync('ed25519');
+ const evidence=createHash('sha256').update('v121-attester-quarantine-remediation-v13').digest('hex');
+ const note=createHash('sha256').update('v121-attester-quarantine-note').digest('hex');
+ const ledger=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
+ const observer=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
+ const verifier=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_attester',password:'test_only_anchor_attester'});
+ const writer=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
+ const security=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_security',password:'test_only_anchor_security'});
+ const stateReader=new pg.Client({host,database:'v106_isolated',user:'v106_state_reader',password:'test_only_state_reader'});
+ const issueSql='SELECT v121_anchor.attest_verified_checkpoint($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::uuid,$6::jsonb,$7::text,$8::char(64))';
+ const writeSql='SELECT v121_anchor.append_checkpoint($1::uuid,$2::uuid,$3::integer,$4::uuid,$5::jsonb,$6::text,$7::char(64),$8::uuid)';
+ const reportSql='SELECT v121_anchor.report_attester_quarantine($1::uuid,$2::uuid,$3::uuid,$4::text,$5::char(64))';
+ try{
+  await Promise.all([observer.connect(),verifier.connect(),writer.connect(),security.connect(),stateReader.connect()]);
+  for(const [signer,version,pair] of [[validSigner,6,validKeys],[compromisedSigner,7,badKeys]]){
+   await ledger.query('INSERT INTO v121_anchor.signers(organization_id,signer_id,key_version,public_key_der) VALUES($1,$2,$3,$4)',
+    [a,signer,version,pair.publicKey.export({type:'spki',format:'der'})]);
+   await ledger.query('INSERT INTO v121_anchor.key_events(organization_id,signer_id,event_sequence,event_kind,event_reason_digest) VALUES($1,$2,1,$3,$4)',
+    [a,signer,'REGISTERED',note]);
+  }
+  await closeoutWriter.query('SELECT v106_test.fixture_submit_uat_remediation($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::char(64),$6::uuid,$7::char(64))',
+   [a,failure,'00000000-0000-4000-8000-0000000000bf',13,evidence,'00000000-0000-4000-8000-000000000016',note]);
+  const observed=(await stateReader.query('SELECT * FROM v106_test.fixture_observe_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+  assert.equal(observed.remediation_version,13);
+  await admin.query('INSERT INTO v106_test.fixture_uat_state_snapshots(organization_id,failure_id,snapshot_sequence,remediation_version,accepted_review_roles,observed_digest) VALUES($1,$2,10,13,$3,$4)',
+   [a,failure,observed.accepted_review_roles,observed.observed_digest]);
+  const rebuilt=(await stateReader.query('SELECT * FROM v106_test.fixture_rebuild_uat_state($1::uuid,$2::uuid)',[a,failure])).rows[0];
+  const status=(await stateReader.query('SELECT * FROM v106_test.fixture_verify_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+  assert.equal(status.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+  const current={
+   organization_id:a,failure_id:failure,incident_id:rebuilt.incident_scope,event_id:rebuilt.event_scope,
+   snapshot_sequence:10,remediation_version:13,accepted_review_roles:observed.accepted_review_roles,
+   observed_digest:observed.observed_digest,rebuild_status:observed.rebuild_status,
+   verdict:status.verdict,snapshot_matches:status.snapshot_matches,
+   hold_active:status.hold_active,release_eligible:status.release_eligible
+  };
+  const signedStatement=signer=>({
+   organization_id:a,failure_id:failure,incident_id:rebuilt.incident_scope,event_id:rebuilt.event_scope,
+   snapshot_sequence:10,remediation_version:13,accepted_review_roles:observed.accepted_review_roles,
+   observed_digest:observed.observed_digest,signer_id:signer,issued_at_ms:100,expires_at_ms:200
+  });
+  const legit=signFixtureAuditAnchor(signedStatement(validSigner),validKeys.privateKey);
+  const validTicket=await issueFixtureVerifiedAnchorTicket({
+   anchor:legit,publicKeys:new Map([[validSigner,validKeys.publicKey]]),
+   keyStates:new Map([[validSigner,'REGISTERED']]),current,nowMs:150,minimumSequence:10,
+   attester:verifier
+  });
+  // An attacker using only the attester credential can record a format-correct
+  // but cryptographically forged attestation. The separate monitor must detect it.
+  const maliciousTicket=randomUUID();
+  const forgedStatement=signedStatement(compromisedSigner);
+  const forgedSignature='A'.repeat(86)+'==';
+  await verifier.query(issueSql,[maliciousTicket,a,failure,10,compromisedSigner,
+   forgedStatement,forgedSignature,forgedStatement.observed_digest]);
+  const stored=(await observer.query('SELECT organization_id,failure_id,snapshot_sequence,signer_id,signed_statement,signature_b64,observed_digest FROM v121_anchor.verified_admissions WHERE organization_id=$1 AND admission_id=$2',
+   [a,maliciousTicket])).rows[0];
+  const key=(await observer.query('SELECT public_key_der FROM v121_anchor.signers WHERE organization_id=$1 AND signer_id=$2',
+   [a,compromisedSigner])).rows[0].public_key_der;
+  const inspection=inspectFixtureStoredAdmission({
+   admission:stored,publicKeys:new Map([[compromisedSigner,createPublicKey({key,format:'der',type:'spki'})]]),
+   keyStates:new Map([[compromisedSigner,'REGISTERED']])
+  });
+  assert.equal(inspection.anomaly,'ATTESTER_SIGNATURE_INVALID');
+  assert.equal(inspection.release_eligible,false);
+  const before=(await observer.query('SELECT count(*)::int AS n FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=10',[a,failure])).rows[0].n;
+  assert.equal(before,0);
+  const securityEvent=randomUUID();
+  await assert.rejects(writer.query(reportSql,[a,securityEvent,null,inspection.anomaly,inspection.evidence_digest]),/permission denied/);
+  await assert.rejects(verifier.query(reportSql,[a,securityEvent,null,inspection.anomaly,inspection.evidence_digest]),/permission denied/);
+  // Only the independent security identity can record the one-way, org-wide
+  // quarantine. Every pending valid and forged admission then fails closed.
+  await security.query(reportSql,[a,securityEvent,null,inspection.anomaly,inspection.evidence_digest]);
+  const quarantines=(await observer.query('SELECT event_kind,evidence_digest FROM v121_anchor.attester_quarantine_events WHERE organization_id=$1 AND event_id=$2',[a,securityEvent])).rows;
+  assert.equal(quarantines.length,1);
+  assert.equal(quarantines[0].event_kind,'ATTESTER_SIGNATURE_INVALID');
+  const payload=(anchor,ticket)=>[a,failure,10,anchor.statement.signer_id,anchor.statement,
+   anchor.signature_b64,anchor.statement.observed_digest,ticket];
+  await assert.rejects(writer.query(writeSql,payload(legit,validTicket)),/V121_ATTESTER_QUARANTINED/);
+  await assert.rejects(writer.query(writeSql,
+   [a,failure,10,compromisedSigner,forgedStatement,forgedSignature,forgedStatement.observed_digest,maliciousTicket]),
+   /V121_ATTESTER_QUARANTINED/);
+  await assert.rejects(verifier.query(issueSql,[randomUUID(),a,failure,10,validSigner,
+   legit.statement,legit.signature_b64,legit.statement.observed_digest]),/V121_ATTESTER_QUARANTINED/);
+  await assert.rejects(security.query('UPDATE v121_anchor.attester_quarantine_events SET event_kind=$1 WHERE event_id=$2',
+   ['UNEXPECTED_ATTESTATION',securityEvent]),/permission denied/);
+  await assert.rejects(ledger.query('DELETE FROM v121_anchor.attester_quarantine_events WHERE organization_id=$1 AND event_id=$2',[a,securityEvent]),/V121_ANCHOR_LEDGER_IMMUTABLE/);
+  assert.equal((await observer.query('SELECT count(*)::int AS n FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=10',
+   [a,failure])).rows[0].n,0);
+  // Forensic history is append-only even after quarantine and can be examined.
+  assert.equal((await observer.query('SELECT count(*)::int AS n FROM v121_anchor.verified_admissions WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=10',
+   [a,failure])).rows[0].n,2);
+  assert.equal((await observer.query('SELECT max(snapshot_sequence)::int AS seq FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0].seq,9);
+  const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
+  assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
+   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+  assert.equal((await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0].issuance_blocked,true);
+ }finally{
+  await Promise.allSettled([observer.end(),verifier.end(),writer.end(),security.end(),stateReader.end()]);
+  await ledger.end();
  }
 });
