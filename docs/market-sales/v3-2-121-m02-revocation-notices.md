@@ -304,3 +304,10 @@
 - 只读模块 `src/cross-module-v121-release-readiness.mjs` 根据此清单始终产生 `HOLD_NOT_PRODUCTION_READY`、`release_authorized=false`、`merge_allowed=false`、`deploy_allowed=false`、`quarantine_active=true`、`hold_active=true`、`release_eligible=false`。它不包含生产恢复函数、访问令牌或解除隔离入口，且严格拒绝篡改固定的禁用动作、释放标志、外部缺口或未经验证的签署状态。
 - `tests/contracts/v3-2-121-release-readiness.test.mjs` 校验必备 ID 与测试路径、人工审批域、生产缺口和禁止动作，并测试“CI 全部通过也不能授权”“把一个缺口设置为 VERIFIED”“把一名审核人改为 SIGNED”“删掉生产禁用动作”等错误配置都 fail-closed。此检查已加入 V3.2-121 GitHub Actions，并对验收矩阵、只读代码与文档变更触发测试。
 - 该矩阵本身**不是**可用于批准合并和部署的生产变更管理系统；其唯一用途是准确记录当前未通过的正式验收条件，阻止模拟 CI 被错误当成正式授权。PR #129 保持 Draft，不合并、不部署、不修改真实学生、订单、收款或履约历史。BR-M04-001 仍以学生为主单位，家庭按需关联。
+
+## V121 生产验收缺口责任分配与证据交接（CI-only）
+- 以 `docs/market-sales/v3-2-121-production-handover.json` 和 `docs/market-sales/v3-2-121-production-handover.md` 作为**未执行的责任与证据交接计划**；与现有 `v3-2-121-release-readiness.json` 的 10 项 `EXT-001—EXT-010` 保持一一对应。逐项标明责任部门角色、独立复核部门、必备证据包条目、客观验收条件、前置依赖及交接阶段。
+- 顺序约束为：阶段 1 生产 IAM；阶段 2 HSM/密钥与外部 WORM；阶段 3 安全监控与证据来源；阶段 4 学生/销售归属；阶段 5 财务/教务核对；阶段 6 灾备与跨模块演练；阶段 7 依赖**所有前九项**的六部门正式 UAT 与生产变更门槛。顺序仅用于**计划交接**，不代表获得真实生产运行权限。
+- `src/cross-module-v121-production-handover.mjs` 强制比对缺口 ID 和责任域、复核方独立性、证据项编号与完整性、依赖有向无环关系、阶段顺序、前置门槛不能被删除，以及所有签署和证据均为空。只读诊断恒定输出 `HOLD_NOT_PRODUCTION_READY`，不生成批准、解除隔离或部署操作。
+- `tests/contracts/v3-2-121-production-handover.test.mjs` 对伪造验收完成、捏造证据链接、删除前置关系、签名假完成、责任归属错误和循环依赖进行负向验证，并随 V121 CI 自动执行。现有 10 项生产缺口依旧 `UNVERIFIED`、6 个责任域依旧 `NOT_SIGNED`；没有任何真实证据包、实名责任人或截止日期被本轮虚构。
+- 明确下一次真实交接从 `EXT-001`（SECURITY 负责生产 IAM、AUDIT 独立核验）开始；实际责任人确认、具体证据收集及审批须在受控的外部工作流中执行。PR #129 继续 Draft / CI-only / HOLD，不合并、不部署、不改变真实业务数据。
