@@ -1,0 +1,76 @@
+name: V3.2-117 HOLD delivery reconciliation and uncertainty audit
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-hold-delivery-reconciliation.mjs'
+      - 'tests/integration/v3-2-117-m02-hold-delivery-reconciliation.test.mjs'
+      - 'tests/helpers/v3-2-117-m02-postgres-reconciliation.mjs'
+      - 'tests/fixtures/v3-2-117-m02-delivery-reconciliation.sql'
+      - 'scripts/v3-2-117-setup-delivery-reconciliation.mjs'
+      - 'spec/v3-2-117-m02-hold-delivery-reconciliation.json'
+      - 'docs/V3.2-117_M02_HOLD_DELIVERY_RECONCILIATION.md'
+      - '.github/workflows/v3-2-117-delivery-reconciliation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-hold-reconciliation:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install temporary test runner dependencies
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Validate V117 source SQL and Node integration test syntax
+        run: |
+          node --check src/cross-module-hold-delivery-reconciliation.mjs
+          node --check tests/integration/v3-2-117-m02-hold-delivery-reconciliation.test.mjs
+          node --check tests/helpers/v3-2-117-m02-postgres-reconciliation.mjs
+          node --check scripts/v3-2-117-setup-delivery-reconciliation.mjs
+      - name: Initialize disposable V106 V109 V110 V112 V113 V114 V115 V116 and V117 fixtures
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+          node scripts/v3-2-112-setup-evidence-intake-sql.mjs
+          node scripts/v3-2-113-setup-reviewer-assignments.mjs
+          node scripts/v3-2-114-setup-reviewer-lifecycle.mjs
+          node scripts/v3-2-115-setup-review-hold.mjs
+          node scripts/v3-2-116-setup-hold-outbox.mjs
+          node scripts/v3-2-117-setup-delivery-reconciliation.mjs
+      - name: Run V117 signed source cancellation advisory and pending delivery reconciliation
+        run: node --test tests/integration/v3-2-117-m02-hold-delivery-reconciliation.test.mjs
+      - name: Regress V116 signed HOLD outbox and V115 permanent HOLD
+        run: node --test tests/integration/v3-2-116-m02-hold-outbox-delivery.test.mjs tests/integration/v3-2-115-m02-review-invalidation-hold.test.mjs
+      - name: Regress V114 reviewer lifecycle V113 review assignment and V112 evidence intake
+        run: node --test tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs
+      - name: Regress V111 signed domain evidence and V110 negative-only notice
+        run: node --test tests/security/v3-2-111-m02-independent-evidence-review.test.mjs tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+      - name: Regress V109 lease V108 race V107 signed SQL and V106 checkpoint
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Confirm no external source real business approval or production migration
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-117-m02-hold-delivery-reconciliation.json'));const d=s.hard_denials;if(s.parent_pr!==123||s.tests.length!==20||s.classification.length!==6||s.audit.no_real_transport_worker!==true||s.audit.no_live_retry_or_redelivery!==true||s.audit.no_production_migration_039!==true||s.external_contract_status!=='proposed-unimplemented'||s.real_external_network_reliability_and_ordering_proven!==false||Object.entries(d).some(([k,v])=>k==='hold_active'?v!==true:v!==false))process.exit(1)"
+      - name: Recheck V105 external contract admission remains unresolved
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress eighteen isolated V82 through V99 security suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
