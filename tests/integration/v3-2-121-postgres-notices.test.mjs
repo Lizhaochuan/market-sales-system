@@ -12,6 +12,7 @@ import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-p
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
 import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake,verifyFixtureExt001BytesAndFingerprint,issueFixtureExt001VerifiedProvenance,encodeFixtureExt001SourceAuthorization} from '../../src/cross-module-v121-iam-evidence.mjs';
 import {signFixtureExt001SourceManifest,issueFixtureExt001FromTwoSources} from '../../src/cross-module-v121-iam-source-version.mjs';
+import {signFixtureIamKeyExternalAnchor,verifyFixtureIamKeyExternalAnchor} from '../helpers/v3-2-121-fixture-iam-key-external-anchor.mjs';
 const hash=o=>createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const a='11111111-1111-4111-8111-111111111111';
 const b='22222222-2222-4222-8222-222222222222';
@@ -2645,6 +2646,54 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
     [2,createHash('sha256').update(nextSourceKey).digest('hex')],
     [3,createHash('sha256').update(thirdKey).digest('hex')]
    ]);
+   // A CI-only independent signer and archive live outside PostgreSQL.
+   // Their trusted public key is never loaded from an SQL-controlled table.
+   const archiveSigner='00000000-0000-4000-8000-0000000000d7';
+   const archiveKeys=generateKeyPairSync('ed25519');
+   const publicKeys=new Map([[archiveSigner,archiveKeys.publicKey]]);
+   const keyStates=new Map([[archiveSigner,'ACTIVE']]);
+   const externalArchive=new Map();
+   const checkpoint1=signFixtureIamKeyExternalAnchor({
+    rows:history.slice(0,4),organizationId:a,signerId:archiveSigner,
+    privateKey:archiveKeys.privateKey,issuedAtMs:Date.now()
+   });
+   externalArchive.set('fixture-separate-checkpoint-1',checkpoint1);
+   const checkpoint2=signFixtureIamKeyExternalAnchor({
+    rows:history,organizationId:a,signerId:archiveSigner,
+    privateKey:archiveKeys.privateKey,issuedAtMs:Date.now(),
+    previousAnchor:externalArchive.get('fixture-separate-checkpoint-1')
+   });
+   externalArchive.set('fixture-separate-checkpoint-2',checkpoint2);
+   const externalReview=verifyFixtureIamKeyExternalAnchor({
+    rows:history,anchor:externalArchive.get('fixture-separate-checkpoint-2'),
+    previousAnchor:externalArchive.get('fixture-separate-checkpoint-1'),
+    organizationId:a,publicKeys,keyStates,nowMs:Date.now(),minimumEventCount:6
+   });
+   assert.equal(externalReview.verdict,'EXTERNAL_FIXTURE_KEY_AUDIT_MATCH_STILL_HOLD');
+   assert.equal(externalReview.release_eligible,false);
+   // A database owner can recompute its entire LOCAL hash chain after editing
+   // history. That fabricated history must fail against the OUT-OF-BAND signature.
+   const fabricated=structuredClone(history);
+   fabricated[0].recorded_at=new Date(fabricated[0].recorded_at.getTime()+1);
+   let prevHash='0'.repeat(64);
+   for(const e of fabricated){
+    e.previous_event_digest=prevHash;
+    e.event_digest=createHash('sha256').update([
+     'v121-ext001-source-key-event-v1',a,e.event_index,e.key_version,
+     e.event_type,e.key_digest.trim(),prevHash,e.recorded_at.getTime()
+    ].join('|')).digest('hex');
+    prevHash=e.event_digest;
+   }
+   assert.throws(()=>verifyFixtureIamKeyExternalAnchor({
+    rows:fabricated,anchor:externalArchive.get('fixture-separate-checkpoint-2'),
+    previousAnchor:externalArchive.get('fixture-separate-checkpoint-1'),
+    organizationId:a,publicKeys,keyStates,nowMs:Date.now(),minimumEventCount:6
+   }),{code:'V121_KEY_ANCHOR_CONTENT_MISMATCH'});
+   assert.throws(()=>verifyFixtureIamKeyExternalAnchor({
+    rows:history.slice(0,4),anchor:externalArchive.get('fixture-separate-checkpoint-2'),
+    previousAnchor:externalArchive.get('fixture-separate-checkpoint-1'),
+    organizationId:a,publicKeys,keyStates,nowMs:Date.now(),minimumEventCount:6
+   }),{code:'V121_KEY_ANCHOR_CONTENT_MISMATCH'});
    for(let i=0;i<history.length;i++){
     const e=history[i];
     const previous=i===0?'0'.repeat(64):history[i-1].event_digest.trim();
