@@ -82,10 +82,13 @@ export function createIsolatedPostgresReviewerLifecycleLedger({
     await c.query('BEGIN ISOLATION LEVEL SERIALIZABLE');transaction=true;
     await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))',
      ['v114|'+params(s).join('|')]);
-    // Bind to the actual immutable V113 assignment and V112 latest head
-    // INSIDE this transaction, not only to optimistic preflight reads.
+    // Immutable V113 assignment and V114 event roles allow SELECT only.
+    // Serializable SELECT is sufficient for those immutable rows; FOR SHARE
+    // would require an UPDATE-capable role and violate least privilege.
+    // Mutable V112 intake head remains locked with FOR SHARE.
+    // Bind all three audit sources inside this transaction.
     const assigned=await c.query(
-     'SELECT assignment_payload,assignment_digest FROM v106_test.fixture_reviewer_assignments WHERE organization_id=$1 AND incident_id=$2 AND student_id=$3 FOR SHARE',
+     'SELECT assignment_payload,assignment_digest FROM v106_test.fixture_reviewer_assignments WHERE organization_id=$1 AND incident_id=$2 AND student_id=$3',
      params(s));
     const intake=await c.query(
      'SELECT sequence,event_digest FROM v106_test.evidence_intake_heads WHERE organization_id=$1 AND incident_id=$2 AND student_id=$3 FOR SHARE',
@@ -111,7 +114,7 @@ export function createIsolatedPostgresReviewerLifecycleLedger({
     }
     if(existing){
      const p=await c.query(
-      'SELECT event_payload,event_digest FROM v106_test.fixture_reviewer_lifecycle_events WHERE organization_id=$1 AND incident_id=$2 AND student_id=$3 AND sequence=$4 FOR SHARE',
+      'SELECT event_payload,event_digest FROM v106_test.fixture_reviewer_lifecycle_events WHERE organization_id=$1 AND incident_id=$2 AND student_id=$3 AND sequence=$4',
       [...params(s),existing.sequence]);
      if(!p.rowCount)error('V114_SQL_LIFECYCLE_HEAD_WITHOUT_EVENT');
      const prev=JSON.parse(p.rows[0].event_payload);
