@@ -2,7 +2,7 @@
 import {createHash} from 'node:crypto';
 import {computeIsolatedHoldGapReport} from '../../src/cross-module-hold-gap-watermark-scan.mjs';
 import {buildIsolatedIncidentGapManifest} from '../../src/cross-module-incident-gap-manifest.mjs';
-const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const SCOPE=['organization_id','incident_id'],ZERO='0'.repeat(64);
 const EVENT=['schema_version','scope','sequence','previous_event_digest',
  'student_count','hold_event_count','scanned_student_count',
