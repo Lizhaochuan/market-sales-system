@@ -1,0 +1,132 @@
+{
+  "schema_version": "v3.2-101-m02-readonly-verification-facade-v1",
+  "scope": "CI_ONLY_READONLY_ADAPTER_CONTRACT_PROPOSED_UNIMPLEMENTED",
+  "source_code": "src/cross-module-readonly-verification-facade.mjs",
+  "test_file": "tests/security/v3-2-101-m02-readonly-verification-facade.test.mjs",
+  "parent_pr": 107,
+  "parent_head": "f5cc05abbca25a5be0418b5b7cc6ae2acb525bc3",
+  "parent_ci": 43659398819,
+  "fixture_factories": [
+    "V3.2-96",
+    "V3.2-97",
+    "V3.2-98",
+    "V3.2-99"
+  ],
+  "canonical_read_only_endpoint_implemented_for_production": false,
+  "production_server_wired": false,
+  "lifecycle_revocation_overlay_is_mandatory": true,
+  "adapters": {
+    "unifiedRecoveryGate": {
+      "method": "report",
+      "arguments": [
+        "organization_id",
+        "incident_id",
+        "final_reference",
+        "diff_reference",
+        "afterFirstRead"
+      ],
+      "authoritative_in_production": false,
+      "required_reason": "BLOCKED_EXTERNAL_HANDOFF_WITH_CURRENT_FIXTURE_RECOVERY"
+    },
+    "finalReview": {
+      "method": "verify",
+      "arguments": [
+        "reference",
+        "snapshot_digest"
+      ],
+      "authoritative_in_production": false,
+      "required_reason": "BLOCKED_CURRENT_FIXTURE_FINAL_REVIEW_NO_AUTHORITY"
+    },
+    "attestation": {
+      "method": "report",
+      "arguments": [
+        "reference",
+        "snapshot_digest"
+      ],
+      "authoritative_in_production": false,
+      "required_reason": "BLOCKED_CI_ATTESTATION_COMPLETE_NO_EXTERNAL_AUTHORITY"
+    },
+    "attestationLifecycle": {
+      "method": "inspect",
+      "arguments": [
+        "reference",
+        "snapshot_digest",
+        "acknowledgement_digest"
+      ],
+      "authoritative_in_production": false,
+      "required_reason": "BLOCKED_CURRENT_ADMINISTRATIVE_ACKNOWLEDGEMENT",
+      "required_even_when_attestation_current": true
+    },
+    "sourceWatermark": {
+      "method": "getFixtureWatermark",
+      "arguments": [
+        "organization_id",
+        "incident_id"
+      ],
+      "fields": [
+        "organization_id",
+        "incident_id",
+        "source_epoch",
+        "source_revision",
+        "revocation_sequence",
+        "revocation_digest",
+        "incident_generation",
+        "evidence_digest"
+      ],
+      "must_match_scope": true,
+      "transactionally_authoritative_in_production": false
+    }
+  },
+  "roles_and_system_of_record": {
+    "sales": "Student association, lead/order context and incident classification; read source only here",
+    "finance": "Original order, receipt, payment/reconciliation and financial signatory evidence; unavailable",
+    "academic": "Student entitlement, lesson fulfillment and academic signatory evidence; unavailable",
+    "identity": "Real staff identity, role revocation and separation of duties; fixture only",
+    "coordinator": "Cross-system atomic accept/reject and trusted receipt; unavailable"
+  },
+  "input_fields": [
+    "reference",
+    "snapshot_digest",
+    "acknowledgement_digest",
+    "afterFirstRead"
+  ],
+  "required_scope": [
+    "organization_id",
+    "incident_id"
+  ],
+  "output_reason_on_fixture_consistency": "BLOCKED_CURRENT_FIXTURE_REVIEW_WITH_EXTERNAL_GAPS",
+  "output_success_does_not_mean_business_authorization": true,
+  "required_external_gap_codes": [
+    "finance_independent_signature",
+    "academic_independent_signature",
+    "order_payment_reconciliation",
+    "lesson_entitlement_reconciliation",
+    "three_party_acceptance",
+    "atomic_handoff_receipt"
+  ],
+  "failure_handling": "FAIL_CLOSED_AND_NO_WRITES",
+  "non_atomic_read_warning": true,
+  "database_migrations_added": 0,
+  "legacy_migrations_expected_from_upstream_spec": "001-038 (not independently revalidated)",
+  "external_contract_status": "proposed-unimplemented",
+  "sixteen_external_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "student_primary": true,
+  "family_optional": true,
+  "original_order_payment_lesson_history_preserved": true,
+  "completion_criteria_for_production": [
+    "Versioned independently authenticated finance and academic read-only adapters",
+    "Trusted staff identity and revocation service",
+    "Durable audit with verifiable trust root",
+    "Atomic and scoped external handoff receipt with explicit formal contract",
+    "PostgreSQL/Chromium/security and real cross-module contract UAT"
+  ]
+}

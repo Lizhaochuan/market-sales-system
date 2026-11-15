@@ -1,0 +1,31 @@
+name: V3.2-101 isolated revocation-aware read-only facade
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-readonly-verification-facade.mjs'
+      - 'tests/security/v3-2-101-m02-readonly-verification-facade.test.mjs'
+      - 'spec/v3-2-101-m02-readonly-verification-facade.json'
+      - 'docs/V3.2-101_M02_READONLY_VERIFICATION_FACADE.md'
+      - '.github/workflows/v3-2-101-readonly-verification-facade.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-readonly-facade:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read-only facade syntax
+        run: node --check src/cross-module-readonly-verification-facade.mjs
+      - name: Cross-check contract and immutable business-denial flags
+        run: |
+          node --input-type=module -e "import {readFileSync} from 'node:fs'; const s=JSON.parse(readFileSync('spec/v3-2-101-m02-readonly-verification-facade.json')); if(s.parent_pr!==107||s.production_server_wired!==false||s.handoff_allowed!==false||s.finance_authorized!==false||s.academic_authorized!==false||s.release_eligible!==false||s.hold_active!==true||s.external_contract_status!=='proposed-unimplemented')process.exit(1)"
+      - name: Real CI-only instances with revocation-aware facade
+        run: node --test tests/security/v3-2-101-m02-readonly-verification-facade.test.mjs tests/security/v3-2-99-m02-attestation-lifecycle.test.mjs tests/security/v3-2-97-m02-final-review-snapshot.test.mjs
+      - name: Regress all eighteen original isolated M02 stage suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
+      - name: Verify V3.2-100 inventory remains valid
+        run: node --test tests/security/v3-2-100-m02-integration-review.test.mjs
