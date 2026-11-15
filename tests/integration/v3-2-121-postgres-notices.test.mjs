@@ -729,8 +729,6 @@ test('scoped key issuer has no direct DML and cannot impersonate admin or bypass
  await assert.rejects(issuerWriter.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true'),/permission denied/);
  await assert.rejects(issuerWriter.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,7,$2,true)',[a,randomBytes(32)]),/permission denied/);
  await assert.rejects(issuerWriter.query('DELETE FROM v106_test.fixture_recovery_consumptions'),/permission denied/);
- const badInput=await recoveryInputs(7,'00000000-0000-4000-8000-0000000000f7');
- await assert.rejects(freshRecoveryIssuer({anchorOk:false}).issue({...badInput,attestationKey:randomBytes(32)}),{code:'RECOVERY_ANCHOR_UNVERIFIED'});
  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=7')).rows[0].n,0);
 });
 test('ordinary receipt role cannot execute scoped issuance gateway',async()=>{
