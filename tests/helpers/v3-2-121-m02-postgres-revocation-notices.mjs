@@ -77,14 +77,30 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
  });}
  async function listNotices(scope){return read(scope,async c=>{
   await source(c,scope);
-  const r=await c.query('SELECT recipient_id::text,epoch,state,event_payload,event_digest FROM v106_test.fixture_revocation_notices WHERE organization_id=$1 AND incident_id=$2 AND export_version=$3 AND manifest_digest=$4 AND revocation_event_digest=$5 ORDER BY recipient_id,epoch',
+  const r=await c.query('SELECT recipient_id::text,epoch,state,notice_id,event_payload,event_digest FROM v106_test.fixture_revocation_notices WHERE organization_id=$1 AND incident_id=$2 AND export_version=$3 AND manifest_digest=$4 AND revocation_event_digest=$5 ORDER BY recipient_id,epoch',
    [...scopeParams(scope),scope.export_version,scope.manifest_digest,scope.revocation_event_digest]);
-  return r.rows.map(x=>{
+  const results=[];
+  for(const x of r.rows){
    let payload;try{payload=JSON.parse(x.event_payload);}catch{fail('NOTICE_HISTORY_TAMPERED');}
    if(sha(payload)!==x.event_digest||payload.recipient_id!==x.recipient_id||
       payload.epoch!==x.epoch)fail('NOTICE_HISTORY_TAMPERED');
-   return {recipient_id:x.recipient_id,epoch:x.epoch,state:x.state};
-  });
+   const history=await c.query('SELECT receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload FROM v106_test.fixture_revocation_negative_receipts WHERE organization_id=$1 AND incident_id=$2 AND notice_id=$3 ORDER BY receipt_sequence',
+    [...scopeParams(scope),x.notice_id]);
+   let previous='0'.repeat(64);
+   for(let i=0;i<history.rows.length;i++){
+    const h=history.rows[i];let value;
+    try{value=JSON.parse(h.receipt_payload);}catch{fail('NOTICE_RECEIPT_TAMPERED');}
+    if(Number(h.receipt_sequence)!==i+1||value.receipt_sequence!==i+1||
+       value.notice_id!==x.notice_id||value.receipt_state!==h.receipt_state||
+       value.previous_digest!==previous||h.previous_digest!==previous||
+       !['NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE'].includes(h.receipt_state)||
+       sha(value)!==h.receipt_digest)fail('NOTICE_RECEIPT_TAMPERED');
+    previous=h.receipt_digest;
+   }
+   results.push({recipient_id:x.recipient_id,epoch:x.epoch,
+    state:history.rowCount?history.rows.at(-1).receipt_state:x.state});
+  }
+  return results;
  });}
  async function appendNotice(input){
   const noticeInput=Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest','recipient_id','epoch'].map(k=>[k,input[k]]));
@@ -121,5 +137,58 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
   }
   fail('NOTICE_SQL_RETRY_EXHAUSTED');
  }
- return Object.freeze({sourceHeads,listRecipients,listNotices,appendNotice});
+ async function appendNegativeReceipt(input){
+  if(!input||Object.keys(input).sort().join('|')!==
+    ['incident_id','notice_id','organization_id','receipt_sequence','receipt_state'].sort().join('|')||
+    typeof input.notice_id!=='string'||!/^[a-f0-9]{64}$/.test(input.notice_id)||
+    !Number.isSafeInteger(input.receipt_sequence)||input.receipt_sequence<1||
+    input.receipt_sequence>128||
+    !['NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE'].includes(input.receipt_state))
+   fail('NOTICE_RECEIPT_INPUT_INVALID');
+  for(let attempt=0;attempt<4;attempt++){
+   const c=await connect();let started=false;
+   try{
+    await c.query('BEGIN ISOLATION LEVEL SERIALIZABLE');started=true;
+    await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))',
+     ['v121-receipt|'+scopeParams(input).join('|')+'|'+input.notice_id]);
+    const notice=await c.query('SELECT export_version,manifest_digest,revocation_event_digest FROM v106_test.fixture_revocation_notices WHERE organization_id=$1 AND incident_id=$2 AND notice_id=$3',
+     [...scopeParams(input),input.notice_id]);
+    if(notice.rowCount!==1)fail('NOTICE_RECEIPT_TARGET_ABSENT');
+    await source(c,{...input,...notice.rows[0]});
+    const rows=await c.query('SELECT receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload FROM v106_test.fixture_revocation_negative_receipts WHERE organization_id=$1 AND incident_id=$2 AND notice_id=$3 ORDER BY receipt_sequence',
+     [...scopeParams(input),input.notice_id]);
+    let previous='0'.repeat(64);
+    for(let i=0;i<rows.rows.length;i++){
+     const row=rows.rows[i];let event;
+     try{event=JSON.parse(row.receipt_payload);}catch{fail('NOTICE_RECEIPT_TAMPERED');}
+     if(Number(row.receipt_sequence)!==i+1||event.receipt_sequence!==i+1||
+        event.notice_id!==input.notice_id||event.previous_digest!==previous||
+        row.previous_digest!==previous||event.receipt_state!==row.receipt_state||
+        sha(event)!==row.receipt_digest)fail('NOTICE_RECEIPT_TAMPERED');
+     previous=row.receipt_digest;
+    }
+    if(input.receipt_sequence<=rows.rowCount){
+     const row=rows.rows[input.receipt_sequence-1];
+     if(row.receipt_state!==input.receipt_state)fail('NOTICE_RECEIPT_REPLAY_CONFLICT');
+     await c.query('COMMIT');started=false;
+     return {receipt_digest:row.receipt_digest,duplicate:true,hold_active:true};
+    }
+    if(input.receipt_sequence!==rows.rowCount+1)fail('NOTICE_RECEIPT_OUT_OF_ORDER');
+    const payload={organization_id:input.organization_id,incident_id:input.incident_id,
+     notice_id:input.notice_id,receipt_sequence:input.receipt_sequence,
+     receipt_state:input.receipt_state,previous_digest:previous};
+    const digest=sha(payload);
+    await c.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+     [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,JSON.stringify(payload)]);
+    await c.query('COMMIT');started=false;
+    return {receipt_digest:digest,duplicate:false,hold_active:true};
+   }catch(e){
+    if(started)await c.query('ROLLBACK').catch(()=>{});
+    if(['40001','40P01'].includes(e.code)&&attempt<3)continue;
+    throw e;
+   }finally{c.release();}
+  }
+  fail('NOTICE_RECEIPT_RETRY_EXHAUSTED');
+ }
+ return Object.freeze({sourceHeads,listRecipients,listNotices,appendNotice,appendNegativeReceipt});
 }
