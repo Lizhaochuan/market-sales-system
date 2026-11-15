@@ -1,0 +1,112 @@
+{
+  "schema_version": "v3.2-103-m02-trust-boundary-fault-drill-v1",
+  "module": "M02",
+  "parent_pr": 109,
+  "parent_head": "01a74c12bfb6bb2c6db007dd39497f67a7d186f5",
+  "parent_ci": [
+    {
+      "id": 43660147528,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 43660147531,
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "scope": "CI_ONLY_TRUST_BOUNDARY_FAULT_REHEARSAL",
+  "source_patch": "src/cross-module-signed-source-contract.mjs",
+  "test_file": "tests/security/v3-2-103-m02-trust-boundary-fault-drill.test.mjs",
+  "production_trust_anchor_implemented": false,
+  "distinct_fixture_pins_enforced": true,
+  "real_key_rotation_protocol_implemented": false,
+  "key_revocation_service_implemented": false,
+  "restart_durable_watermark_implemented": false,
+  "timeout_cancellation_confirmed": false,
+  "true_cross_domain_causal_consistency_implemented": false,
+  "real_external_origin_verified": false,
+  "observed_or_expected_fault_scenarios": [
+    {
+      "id": "TRUST-01",
+      "severity": "P1",
+      "scenario": "The same public key is configured for two mock domains",
+      "expected": "Constructor rejects duplicate Ed25519 root fingerprints",
+      "status": "FIXTURE_RULE_IMPLEMENTED"
+    },
+    {
+      "id": "TRUST-02",
+      "severity": "P1",
+      "scenario": "Source signing key rotates without approved trust-root ceremony",
+      "expected": "PIN mismatch; no acceptance of new source signature",
+      "status": "FIXTURE_FAULT_REHEARSAL"
+    },
+    {
+      "id": "TRUST-03",
+      "severity": "P1",
+      "scenario": "Single source outage, timeout or late response",
+      "expected": "FAIL_CLOSED; later healthy request also remains business blocked",
+      "status": "FIXTURE_FAULT_REHEARSAL"
+    },
+    {
+      "id": "TRUST-04",
+      "severity": "P1",
+      "scenario": "Three source epochs, revocation or incident generations disagree",
+      "expected": "FAIL_CLOSED; no cross-domain handoff",
+      "status": "FIXTURE_FAULT_REHEARSAL"
+    },
+    {
+      "id": "TRUST-05",
+      "severity": "P1",
+      "scenario": "Past signed source is replayed after in-memory verifier restarts",
+      "expected": "Document acceptance by fresh fixture adapter as unresolved durable monotonic ledger gap",
+      "status": "DEMONSTRATED_UNRESOLVED_GAP"
+    },
+    {
+      "id": "TRUST-06",
+      "severity": "P0",
+      "scenario": "Fixture signer manufactures new, validly signed but untrue records",
+      "expected": "Fixture signature verifies; real finance/academic and business authorization remain FALSE",
+      "status": "DEMONSTRATED_UNRESOLVED_GAP"
+    },
+    {
+      "id": "TRUST-07",
+      "severity": "P1",
+      "scenario": "No independently governed production key rotation, revocation and key custody",
+      "expected": "Reject unexpected keys; production binding prohibited",
+      "status": "UNIMPLEMENTED_PRODUCTION"
+    },
+    {
+      "id": "TRUST-08",
+      "severity": "P1",
+      "scenario": "Read sequence is non-atomic and cannot prove inter-system causal order",
+      "expected": "Document critical missing transaction/causality contract",
+      "status": "UNIMPLEMENTED_PRODUCTION"
+    },
+    {
+      "id": "TRUST-09",
+      "severity": "P2",
+      "scenario": "Timed-out source may complete later; fixture Promise is not cancelable",
+      "expected": "No business write or release ever available; require cancellation/abort in eventual real adapter",
+      "status": "KNOWN_NON_ATOMIC_BEHAVIOR"
+    }
+  ],
+  "external_contract_status": "proposed-unimplemented",
+  "external_admission_checks_16": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "historical_migration_range_from_upstream": "001-038",
+  "new_production_migration": false,
+  "student_primary": true,
+  "family_optional": true,
+  "original_orders_payment_saleevent_lesson_compensation_preserved": true,
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "production_integration_allowed": false,
+  "full_postgresql_chromium_contract_external_uat": "NOT_VERIFIED"
+}
