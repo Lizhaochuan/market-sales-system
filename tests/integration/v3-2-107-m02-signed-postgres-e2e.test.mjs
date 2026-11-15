@@ -42,7 +42,7 @@ function makeHarness(i,config={}){
  const revocations=[];
  const trustRoster=()=>{
   const p={schema_version:'v3.2-104-ci-trust-roster-v1',
-   organization_id,revision,issued_at_ms:clock-500,
+   organization_id,revision,issued_at_ms:clock-100,
    expires_at_ms:clock+60000,keys:domains.flatMap(d=>keys[d].map(k=>({
     domain:d,key_id:k.id,public_key_pem:publicPem(k.pair),status:k.status,
     activated_at_ms:k.activated_at_ms
