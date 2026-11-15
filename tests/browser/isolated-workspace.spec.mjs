@@ -173,7 +173,7 @@ test('UAT fixes: Step 2 notes/carryover/jump, Step 3 future default, Step 4 pres
  await expect(page.locator('#lead-link-candidate-hint')).toBeVisible();
  await expect(page.locator('#lead-link-candidate-hint')).toContainText(studentName);
  await expect(page.locator('#lead-link-form [name="student_id"] option:checked')).toHaveText(studentName);
- await page.locator('#lead-link-form [name="evidence_ref"]').fill('家长面谈确认孩子信息');
+ await expect(page.locator('#lead-link-form [name="evidence_ref"]')).toHaveValue('');
  await page.getByRole('button',{name:'关联学生（待核实）'}).click();
  await expect(page.locator('#leads-list')).toContainText('已关联学生（待核实）');
 

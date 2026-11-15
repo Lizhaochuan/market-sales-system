@@ -2076,7 +2076,7 @@ register('lead-form',async d=>{
 });
 register('lead-link-form',async d=>{
   await api('/api/v1/leads/'+encodeURIComponent(d.lead_id)+'/students',{method:'POST',body:{
-    student_ids:[d.student_id],evidence_ref:d.evidence_ref,confirmation_state:'pending_review'
+    student_ids:[d.student_id],evidence_ref:d.evidence_ref.trim()||'依据未填写（待核实）',confirmation_state:'pending_review'
   }});
   return '线索与学生已建立待核实关联';
 });
