@@ -19,7 +19,11 @@
   box.append(node('div','sidebar-group-title',section));button(label,()=>{group=key;selected=null;detail=null;show();},box,'nav-item');
  }
  const legacyButton=button('历史与管理',()=>{legacy=!legacy;layout();if(legacy)setView('overview');else show();},box,'text-button');
- function layout(){for(const n of oldNav)n.hidden=!legacy||(n.dataset.managerOnly!==undefined&&!state.capabilities.manage_identity_requests&&n.dataset.view==='identity');legacyButton.textContent=legacy?'返回简洁工作台':'历史与管理';}
+ function layout(){
+  $('student-access-entry').hidden=!legacy;
+  const accessHint=$('student-access-note')?.nextElementSibling;if(accessHint?.classList.contains('fineprint'))accessHint.hidden=!legacy;
+  if(!legacy)$('student-access-note').hidden=true;
+  for(const n of oldNav)n.hidden=!legacy||(n.dataset.managerOnly!==undefined&&!state.capabilities.manage_identity_requests&&n.dataset.view==='identity');legacyButton.textContent=legacy?'返回简洁工作台':'历史与管理';}
  function note(msg){$('lead-message').textContent=msg;}
  async function mutate(run,preserve=false){if(busy)return;const draft=preserve?window.__snapshotLeadDraft?.():null;busy=true;const ticket=epoch,token=state.token;panel.querySelectorAll('button').forEach(b=>b.disabled=true);try{await run();if(ticket!==epoch||token!==state.token)return;await refresh();if(ticket!==epoch||token!==state.token)return;if(draft)await window.__restoreLeadDraft(draft);note('已保存');}catch(e){if(ticket===epoch&&token===state.token){note(e.message||'保存失败，请重试');panel.querySelectorAll('button').forEach(b=>b.disabled=false);}}finally{if(ticket===epoch)busy=false;}}
  async function refresh(){if(!enabled||!state.token||state.strict)return;const token=state.token,ticket=++seq;
@@ -85,9 +89,11 @@
  };
  window.__restoreLeadDraft=async draft=>{
   if(!enabled||state.strict||!draft)return false;
+  const token=state.token,ticket=epoch;
   group=draft.group;selected=draft.selected;
   if(selected&&!items.some(l=>l.id===selected))return false;
-  if(selected){detail=await api(root+'/'+selected);}
+  if(selected){const d=await api(root+'/'+selected);if(token!==state.token||ticket!==epoch)return false;detail=d;}
+  if(token!==state.token||ticket!==epoch)return false;
   show();if(draft.editingQuote){const q=detail?.records.find(r=>r.id===draft.editingQuote);if(q)courseForm(q);}
   for(const saved of draft.forms){const f=$(saved.id);if(!f)continue;
    if(saved.id==='lead-course-form'){
@@ -101,6 +107,6 @@
   note('已恢复未保存内容');return true;
  };
  const prior=window.__refreshBusinessWorkspace;window.__refreshBusinessWorkspace=async()=>{if(prior)await prior();await refresh();};
- window.addEventListener('isolated-session-clear',()=>{epoch++;seq++;busy=false;items=[];staff=[];detail=null;selected=null;loginToken=null;box.hidden=true;panel.replaceChildren();});
+ window.addEventListener('isolated-session-clear',()=>{epoch++;seq++;busy=false;items=[];staff=[];detail=null;selected=null;loginToken=null;box.hidden=true;panel.replaceChildren();$('student-access-entry').hidden=false;const hint=$('student-access-note')?.nextElementSibling;if(hint?.classList.contains('fineprint'))hint.hidden=false;});
  fetch('/api/v1/health',{cache:'no-store'}).then(r=>r.json()).then(r=>{enabled=r?.data?.isolated_workspace===true;if(enabled&&state.token&&!state.strict)refresh();}).catch(()=>{});
 })();

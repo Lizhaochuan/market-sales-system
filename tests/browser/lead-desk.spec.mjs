@@ -62,3 +62,19 @@ test('lead draft survives expiry only for the same employee, including two cours
  await page.evaluate(()=>logout('expired'));await login(page,'sales-b');await expect(page.locator('#lead-desk h2')).toHaveCount(0);
  expect(await page.evaluate(()=>[localStorage.length,sessionStorage.length])).toEqual([0,0]);
 });
+test('delayed lead draft restoration cannot reveal A data after switching to B',async({page})=>{
+ await page.goto('/');await login(page);
+ await page.locator('#lead-intake-form').locator('..').locator('summary').click();
+ const name='延迟恢复私有家长'+Date.now();await page.locator('#lead-intake-form [name="contact_name"]').fill(name);
+ await page.locator('#lead-intake-form [name="student_name"]').fill('私有学生');await page.getByRole('button',{name:'保存 Lead',exact:true}).click();
+ await expect(page.locator('#lead-desk h2')).toHaveText(name);
+ await page.evaluate(()=>{window.leadDraftTest=window.__snapshotLeadDraft();});
+ let release;const gate=new Promise(r=>{release=r;});
+ await page.route('**/api/v1/isolated-workspace/leads/*',async route=>{if(route.request().method()==='GET'){await gate;}await route.continue();});
+ const started=page.waitForRequest(r=>/isolated-workspace\/leads\//.test(r.url()));
+ await page.evaluate(()=>{window.pendingRestoreTest=window.__restoreLeadDraft(window.leadDraftTest);});await started;
+ await page.getByRole('button',{name:'退出演示账号'}).click();await login(page,'sales-b');
+ release();await page.evaluate(()=>window.pendingRestoreTest);
+ await expect(page.locator('#lead-desk')).not.toContainText(name);
+ await expect(page.locator('#lead-desk h2')).toHaveCount(0);
+});
