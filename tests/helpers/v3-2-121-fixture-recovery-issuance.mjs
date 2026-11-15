@@ -36,6 +36,9 @@ export function createFixtureRecoveryIssuance({adminPool,recoveryGate,beforeKeyI
    const meta=[request.organization_id,e.key_version,e.event_kind,e.actor].join('|');
    if(createHash('sha256').update(meta).digest('hex')!==e.event_digest)
     fail('RECOVERY_AUDIT_TAMPERED');
+   const prior=await c.query('SELECT 1 FROM v106_test.fixture_recovery_consumptions WHERE organization_id=$1 AND request_id=$2',
+    [request.organization_id,request.request_id]);
+   if(prior.rowCount)fail('RECOVERY_ALREADY_CONSUMED');
    const issued=await c.query('SELECT COALESCE(MAX(key_version),0) AS latest FROM v106_test.fixture_receipt_attestation_secrets WHERE organization_id=$1',
     [request.organization_id]);
    if(Number(issued.rows[0].latest)!==request.key_version-1)
