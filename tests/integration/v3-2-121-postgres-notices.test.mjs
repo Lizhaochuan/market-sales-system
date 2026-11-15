@@ -16,6 +16,7 @@ const extra='00000000-0000-4000-8000-000000000004';
 const host=process.env.PGHOST||'127.0.0.1';
 const admin=new pg.Pool({host,database:'v106_isolated',user:'postgres',password:'postgres'});
 const writer=new pg.Pool({host,database:'v106_isolated',user:'v106_writer_a',password:'test_only_a'});
+const receiptWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_receipt_writer_a',password:'test_only_receipt_a'});
 const keyPair=generateKeyPairSync('ed25519');
 const fixtureLeaseKeys=generateKeyPairSync('ed25519');
 const fixtureSigner='00000000-0000-4000-8000-000000000081';
@@ -41,6 +42,8 @@ function signedReceipt(value){
 test.before(async()=>{
  await admin.query("CREATE ROLE v106_writer_a LOGIN PASSWORD 'test_only_a'");
  await admin.query("CREATE ROLE v106_writer_b LOGIN PASSWORD 'test_only_b'");
+ await admin.query("CREATE ROLE v106_receipt_writer_a LOGIN INHERIT PASSWORD 'test_only_receipt_a'");
+ await admin.query('GRANT v106_writer_a TO v106_receipt_writer_a');
  await admin.query('CREATE SCHEMA v106_test');
  await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b');
  await admin.query(`CREATE TABLE v106_test.fixture_incident_gap_manifest_heads(
@@ -74,10 +77,10 @@ test.before(async()=>{
  await admin.query('INSERT INTO v106_test.fixture_manifest_revocation_heads VALUES($1,$2,1,$3,true)',[a,incident,rd]);
  await admin.query('INSERT INTO v106_test.fixture_revocation_recipients VALUES($1,$2,$3),($1,$2,$4)',[a,incident,recipient,extra]);
  input={organization_id:a,incident_id:incident,recipient_id:recipient,export_version:1,manifest_digest:md,revocation_event_digest:rd,epoch:1};
- ledger=createIsolatedPostgresRevocationNotices({leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:proofAuthority});
+ ledger=createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:proofAuthority});
  service=createIsolatedRevocationNoticeService({ledger,clock:()=>100});
 });
-test.after(async()=>{await writer.end();await admin.end();});
+test.after(async()=>{await receiptWriter.end();await writer.end();await admin.end();});
 test('SQL source binding and durable enqueue + replay',async()=>{
  const first=await service.enqueue(input);
  assert.equal(first.notice_accepted,true,JSON.stringify(first));
@@ -170,7 +173,7 @@ test('receipt cannot skip sequence, use positive ack or rewrite history',async()
 test('receipt cross-tenant write and unknown notice fail closed',async()=>{
  const q=await service.enqueue({...input,epoch:22});
  await assert.rejects(signedReceipt({organization_id:b,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'}),{code:'NOTICE_RECEIPT_TARGET_ABSENT'});
- await assert.rejects(writer.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[b,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']),/row-level security/);
+ await assert.rejects(receiptWriter.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[b,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']),/row-level security/);
 });
 test('coverage snapshot contains consistent recipient set and receipt states',async()=>{
  const scope=Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest'].map(k=>[k,input[k]]));
@@ -184,7 +187,7 @@ test('failed SQL insert rolls back with no partial negative receipt',async()=>{
  const q=await service.enqueue({...input,epoch:24});
  const before=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
  assert.equal(before.rows[0].n,0);
- const client=await writer.connect();
+ const client=await receiptWriter.connect();
  try{
   await client.query('BEGIN');
   await client.query('INSERT INTO v106_test.fixture_revocation_negative_receipts(organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[a,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']);
@@ -419,4 +422,19 @@ test('pre-commit fault rolls back both receipt and signer lease sequence',async(
  assert.equal(receipts.rows[0].n,0);
  const result=await isolatedLeaseWriter(8).appendNegativeReceipt(value);
  assert.equal(result.hold_active,true);
+});
+
+test('ordinary writer role cannot INSERT signed receipt evidence directly',async()=>{
+ const q=await service.enqueue({...input,epoch:81});
+ await assert.rejects(writer.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',
+  [a,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']),/permission denied/);
+ const r=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(r.rows[0].n,0);
+});
+test('receipt adapter cannot accept ordinary writer as privileged receipt connection',async()=>{
+ const q=await service.enqueue({...input,epoch:82});
+ const incorrectlyWired=createIsolatedPostgresRevocationNotices({receiptPool:writer,pool:writer,
+  leaseGate:fixtureGate(),receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
+  receiptProofAuthority:proofAuthority});
+ await assert.rejects(incorrectlyWired.appendNegativeReceipt(fixtureSignedInput(q)),{code:'NOTICE_SQL_CONTEXT_UNTRUSTED'});
 });
