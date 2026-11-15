@@ -21,10 +21,13 @@ const writer=new pg.Pool({host,database:'v106_isolated',user:'v106_writer_a',pas
 const receiptWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_receipt_writer_a',password:'test_only_receipt_a'});
 const issuerWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_key_issuer',password:'test_only_key_issuer'});
 const securityEventWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_security_event_writer',password:'test_only_security_events'});
+const closeoutWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_closeout_writer',password:'test_only_closeout'});
 const auditReader=new pg.Pool({host,database:'v106_isolated',user:'v106_audit_reader',password:'test_only_auditor'});
 const receiptAttestationKey=randomBytes(32);
 const approvalAttestationKey=randomBytes(32);
 const securityEventKey=randomBytes(32);
+const closeoutSecurityKey=randomBytes(32);
+const closeoutAuditKey=randomBytes(32);
 const hmacReceipt=value=>createHmac('sha256',receiptAttestationKey).update(value).digest('hex');
 const keyPair=generateKeyPairSync('ed25519');
 const fixtureLeaseKeys=generateKeyPairSync('ed25519');
@@ -56,8 +59,9 @@ test.before(async()=>{
  await admin.query("CREATE ROLE v106_audit_reader LOGIN PASSWORD 'test_only_auditor'");
  await admin.query("CREATE ROLE v106_key_issuer LOGIN PASSWORD 'test_only_key_issuer'");
  await admin.query("CREATE ROLE v106_security_event_writer LOGIN PASSWORD 'test_only_security_events'");
+ await admin.query("CREATE ROLE v106_closeout_writer LOGIN PASSWORD 'test_only_closeout'");
  await admin.query('CREATE SCHEMA v106_test');
- await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader,v106_key_issuer,v106_security_event_writer');
+ await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader,v106_key_issuer,v106_security_event_writer,v106_closeout_writer');
  await admin.query(`CREATE TABLE v106_test.fixture_incident_gap_manifest_heads(
  organization_id uuid,incident_id uuid,sequence integer,event_digest text,hold_active boolean,
  PRIMARY KEY(organization_id,incident_id))`);
@@ -82,6 +86,7 @@ test.before(async()=>{
  await admin.query('INSERT INTO v106_test.fixture_recovery_approval_attestation(organization_id,attestation_version,approval_key,active) VALUES($1,1,$2,true)',[a,approvalAttestationKey]);
  await admin.query('INSERT INTO v106_test.fixture_recovery_emergency_stops(organization_id,incident_id,issuance_blocked) VALUES($1,$2,false)',[a,incident]);
  await admin.query('INSERT INTO v106_test.fixture_external_security_keys(organization_id,event_key) VALUES($1,$2)',[a,securityEventKey]);
+ await admin.query('INSERT INTO v106_test.fixture_closeout_review_keys(organization_id,reviewer_role,review_key) VALUES($1,$2,$3),($1,$4,$5)',[a,'SECURITY_REVIEW',closeoutSecurityKey,'AUDIT_REVIEW',closeoutAuditKey]);
  await admin.query('INSERT INTO v106_test.fixture_cross_module_holds(organization_id,incident_id,module_name) SELECT $1,$2,unnest($3::text[])',[a,incident,['SALES','FINANCE','ACADEMIC']]);
  const m={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),status:'FIXTURE_EXPORT'};
  const md=hash(m);
@@ -97,7 +102,7 @@ test.before(async()=>{
  ledger=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:proofAuthority});
  service=createIsolatedRevocationNoticeService({ledger,clock:()=>100});
 });
-test.after(async()=>{await securityEventWriter.end();await issuerWriter.end();await auditReader.end();await receiptWriter.end();await writer.end();await admin.end();});
+test.after(async()=>{await closeoutWriter.end();await securityEventWriter.end();await issuerWriter.end();await auditReader.end();await receiptWriter.end();await writer.end();await admin.end();});
 test('SQL source binding and durable enqueue + replay',async()=>{
  const first=await service.enqueue(input);
  assert.equal(first.notice_accepted,true,JSON.stringify(first));
@@ -920,4 +925,34 @@ test('independently authenticated security event atomically blocks issuance and 
  const holds=await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident]);
  assert.deepEqual(holds.rows.map(r=>[r.module_name,r.hold_active,r.release_eligible]),[
   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+});
+
+test('dual-role closeout review proves evidence only and cannot clear security or domain HOLD',async()=>{
+ const event='00000000-0000-4000-8000-0000000000e9';
+ const review='00000000-0000-4000-8000-0000000000c9';
+ const digest=(await admin.query('SELECT event_digest FROM v106_test.fixture_external_security_events WHERE organization_id=$1 AND event_id=$2',[a,event])).rows[0].event_digest;
+ const evidence=createHash('sha256').update('fixture-independent-investigation-evidence').digest('hex');
+ const securityReviewer='00000000-0000-4000-8000-0000000000d1';
+ const auditReviewer='00000000-0000-4000-8000-0000000000e2';
+ const basic=[a,incident,event,review,digest,evidence,securityReviewer,auditReviewer,150];
+ const message=['v121-closeout-review-v1',...basic].join('|');
+ const securityMac=createHmac('sha256',closeoutSecurityKey).update('SECURITY_REVIEW|'+message).digest('hex');
+ const auditMac=createHmac('sha256',closeoutAuditKey).update('AUDIT_REVIEW|'+message).digest('hex');
+ const sql='SELECT v106_test.fixture_append_closeout_review($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::uuid,$8::uuid,$9::bigint,$10::text,$11::text)';
+ await assert.rejects(closeoutWriter.query(sql,[...basic,securityMac,'0'.repeat(64)]),/V121_CLOSEOUT_TWO_ROLE_SIGNATURE_REJECTED/);
+ await assert.rejects(closeoutWriter.query(sql,[...basic.slice(0,5),'f'.repeat(64),...basic.slice(6),securityMac,auditMac]),/V121_CLOSEOUT_TWO_ROLE_SIGNATURE_REJECTED/);
+ await assert.rejects(closeoutWriter.query(sql,[...basic.slice(0,7),securityReviewer,150,securityMac,auditMac]),/V121_CLOSEOUT_ENVELOPE_INVALID/);
+ await assert.rejects(closeoutWriter.query(sql,[...basic.slice(0,4),'f'.repeat(64),...basic.slice(5),securityMac,auditMac]),/V121_CLOSEOUT_ALERT_UNVERIFIED/);
+ await assert.rejects(issuerWriter.query(sql,[...basic,securityMac,auditMac]),/permission denied/);
+ await closeoutWriter.query(sql,[...basic,securityMac,auditMac]);
+ const row=await admin.query('SELECT review_status,hold_active,release_eligible FROM v106_test.fixture_closeout_reviews WHERE organization_id=$1 AND review_id=$2',[a,review]);
+ assert.deepEqual([row.rows[0].review_status,row.rows[0].hold_active,row.rows[0].release_eligible],['REVIEWED_STILL_HOLD',true,false]);
+ await assert.rejects(closeoutWriter.query(sql,[...basic,securityMac,auditMac]),/duplicate key/);
+ await assert.rejects(closeoutWriter.query('SELECT review_key FROM v106_test.fixture_closeout_review_keys'),/permission denied/);
+ await assert.rejects(closeoutWriter.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false'),/permission denied/);
+ await assert.rejects(admin.query('DELETE FROM v106_test.fixture_closeout_reviews WHERE review_id=$1',[review]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+ await assert.rejects(admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),/V121_SECURITY_ALERT_UNRESOLVED/);
+ const holds=await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident]);
+ assert.deepEqual(holds.rows.map(r=>[r.module_name,r.hold_active,r.release_eligible]),[['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=9')).rows[0].n,0);
 });
