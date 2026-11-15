@@ -214,6 +214,7 @@ export async function verifyFixtureExt001SourceVersion({
   // Reads await untrusted fixture providers. Detect key revocation or key
   // material replacement during either round, before attester admission.
   fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs:currentTime()});
+  checkManifest(sourceProof.manifest,envelope,fingerprint,currentTime());
   checkWitness(p,SOURCE_DOMAIN,'primary',envelope,sourceProof.manifest,sourceKeys);
   checkWitness(a,AUDIT_DOMAIN,'audit',envelope,sourceProof.manifest,sourceKeys);
   checkKeySeparation(envelope,trustedKeys,sourceKeys,p,a);
