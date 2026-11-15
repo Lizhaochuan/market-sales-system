@@ -2372,7 +2372,7 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   // or user data are modified. Existing immutable trigger is restored.
   await audit.query('ALTER TABLE v121_anchor.fixture_iam_evidence_receipts DISABLE TRIGGER fixture_iam_receipts_immutable');
   try{
-   await audit.query("UPDATE v121_anchor.fixture_iam_evidence_receipts SET recorded_at=clock_timestamp()-interval '3 hours', expires_at=clock_timestamp()-interval '2 hours' WHERE organization_id=$1 AND gap_id='EXT-001' AND revision_no=3",[a]);
+   await audit.query("UPDATE v121_anchor.fixture_iam_evidence_receipts SET recorded_at=clock_timestamp()-interval '3 hours', expires_at=date_trunc('milliseconds',clock_timestamp()-interval '2 hours') WHERE organization_id=$1 AND gap_id='EXT-001' AND revision_no=3",[a]);
   }finally{
    await audit.query('ALTER TABLE v121_anchor.fixture_iam_evidence_receipts ENABLE TRIGGER fixture_iam_receipts_immutable');
   }
