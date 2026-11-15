@@ -146,8 +146,29 @@ test('INTAKE-07 two competing SQL writers cannot both create the same initial se
  try{
   const l1=createIsolatedPostgresEvidenceIntakeLedger({pool:p1});
   const l2=createIsolatedPostgresEvidenceIntakeLedger({pool:p2});
-  const a=createIsolatedEvidenceIntakeQuarantine({ledger:l1,getFixtureNow:()=>1000000});
-  const b=createIsolatedEvidenceIntakeQuarantine({ledger:l2,getFixtureNow:()=>1000000});
+  // Barrier forces both independent instances to read the same old SQL head,
+  // so the test probes a real conflicting first INSERT, not scheduler timing.
+  let release,arrived=0;
+  const barrier=new Promise(resolve=>{release=resolve;});
+  const synchronized=ledger=>{
+   let first=true;
+   return {
+    head:async s=>{
+     const value=await ledger.head(s);
+     if(first){
+      first=false;
+      if(++arrived===2)release();
+      await barrier;
+     }
+     return value;
+    },
+    event:ledger.event,append:ledger.append
+   };
+  };
+  const a=createIsolatedEvidenceIntakeQuarantine({
+   ledger:synchronized(l1),getFixtureNow:()=>1000000});
+  const b=createIsolatedEvidenceIntakeQuarantine({
+   ledger:synchronized(l2),getFixtureNow:()=>1000000});
   const [ra,rb]=await Promise.all([
    a.receive(claim(n)),
    b.receive(claim(n,'finance_owner',{
