@@ -745,7 +745,7 @@ test('issuer direct SQL gateway call without valid independent approval attestat
  const requestDigest=createHash('sha256').update(encodeFixtureRecoveryRequest(request)).digest('hex');
  const auditId=approvals.find(x=>x.role==='AUDIT_REVIEW').approver_id;
  const securityId=approvals.find(x=>x.role==='SECURITY_REVIEW').approver_id;
- const sql='SELECT v106_test.fixture_issue_recovery_key($1::uuid,$2::uuid,$3::uuid,$4::char(64),$5::integer,$6::char(64),$7::uuid,$8::uuid,$9::bytea,$10::text)';
+ const sql='SELECT v106_test.fixture_issue_recovery_key($1::uuid,$2::uuid,$3::uuid,$4::char(64),$5::integer,$6::char(64),$7::uuid,$8::uuid,$9::bytea,$10::text,$11::integer,$12::bigint,$13::bigint)';
  const key=randomBytes(32);
  const params=[a,incident,request.request_id,requestDigest,7,request.audit_digest,auditId,securityId,key,'0'.repeat(64),1,100,200];
  await assert.rejects(issuerWriter.query(sql,params),/V121_RECOVERY_APPROVAL_ATTESTATION_REJECTED/);
