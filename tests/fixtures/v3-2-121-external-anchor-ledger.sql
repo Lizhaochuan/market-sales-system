@@ -2,7 +2,7 @@
 -- This is NOT independent WORM storage; postgres superuser controls both DBs.
 CREATE SCHEMA v121_anchor;
 REVOKE ALL ON SCHEMA v121_anchor FROM PUBLIC;
-GRANT USAGE ON SCHEMA v121_anchor TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security,v121_anchor_investigator,v121_anchor_security_reviewer,v121_anchor_audit_reviewer;
+GRANT USAGE ON SCHEMA v121_anchor TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security,v121_anchor_investigator,v121_anchor_security_reviewer,v121_anchor_audit_reviewer,v121_anchor_evidence_checker;
 
 CREATE FUNCTION v121_anchor.no_change() RETURNS trigger
 LANGUAGE plpgsql SET search_path=pg_catalog AS $$
@@ -288,6 +288,182 @@ LEFT JOIN LATERAL(
 WHERE e.organization_id='11111111-1111-4111-8111-111111111111'::uuid;
 REVOKE ALL ON v121_anchor.quarantine_review_diagnostics FROM PUBLIC;
 GRANT SELECT ON v121_anchor.quarantine_review_diagnostics TO v121_anchor_reader;
+
+
+-- CI-only evidence chain. This attestation links the original quarantine
+-- incident, its latest investigation, and two distinct matching reviews.
+-- A valid chain is only a diagnostic: it never changes quarantine state.
+CREATE TABLE v121_anchor.quarantine_evidence_chains (
+ organization_id uuid NOT NULL,
+ event_id uuid NOT NULL,
+ assessment_id uuid NOT NULL,
+ chain_digest char(64) NOT NULL CHECK(chain_digest ~ '^[a-f0-9]{64}$'),
+ checker_id uuid NOT NULL,
+ recorded_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ hold_active boolean NOT NULL DEFAULT true CHECK(hold_active IS TRUE),
+ release_eligible boolean NOT NULL DEFAULT false CHECK(release_eligible IS FALSE),
+ PRIMARY KEY(organization_id,assessment_id),
+ FOREIGN KEY(organization_id,event_id)
+  REFERENCES v121_anchor.attester_quarantine_events(organization_id,event_id),
+ FOREIGN KEY(organization_id,assessment_id)
+  REFERENCES v121_anchor.quarantine_assessments(organization_id,assessment_id)
+);
+CREATE TRIGGER evidence_chain_immutable BEFORE UPDATE OR DELETE ON v121_anchor.quarantine_evidence_chains
+ FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.quarantine_evidence_chains FROM PUBLIC;
+GRANT SELECT ON v121_anchor.quarantine_evidence_chains TO v121_anchor_reader;
+ALTER TABLE v121_anchor.quarantine_evidence_chains ENABLE ROW LEVEL SECURITY;
+CREATE POLICY evidence_chain_tenant_select ON v121_anchor.quarantine_evidence_chains
+ FOR SELECT TO v121_anchor_reader
+ USING (organization_id='11111111-1111-4111-8111-111111111111'::uuid);
+
+-- Produce the same canonical hash for verification and initial attestation.
+-- A missing source event, absent/wrong-domain review or conflicting identities
+-- returns NULL, and no one can attest NULL as a complete chain.
+CREATE FUNCTION v121_anchor.quarantine_expected_chain(
+ p_org uuid,p_event uuid,p_assessment uuid)
+RETURNS text LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $expected_chain$
+DECLARE event_record record;
+DECLARE assessment_record record;
+DECLARE security_review record;
+DECLARE audit_review record;
+DECLARE canonical text;
+BEGIN
+ IF session_user NOT IN ('v121_anchor_reader','v121_anchor_evidence_checker','postgres') OR
+   p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_CHAIN_SCOPE_DENIED';
+ END IF;
+ SELECT * INTO event_record FROM v121_anchor.attester_quarantine_events
+ WHERE organization_id=p_org AND event_id=p_event;
+ SELECT * INTO assessment_record FROM v121_anchor.quarantine_assessments
+ WHERE organization_id=p_org AND event_id=p_event AND assessment_id=p_assessment;
+ SELECT * INTO security_review FROM v121_anchor.quarantine_assessment_reviews
+ WHERE organization_id=p_org AND assessment_id=p_assessment AND review_domain='SECURITY';
+ SELECT * INTO audit_review FROM v121_anchor.quarantine_assessment_reviews
+ WHERE organization_id=p_org AND assessment_id=p_assessment AND review_domain='AUDIT';
+ IF event_record.event_id IS NULL OR assessment_record.assessment_id IS NULL OR
+   security_review.assessment_id IS NULL OR audit_review.assessment_id IS NULL OR
+   security_review.decision<>'AGREED' OR audit_review.decision<>'AGREED' OR
+   security_review.reviewed_digest<>assessment_record.evidence_digest OR
+   audit_review.reviewed_digest<>assessment_record.evidence_digest OR
+   security_review.reviewer_id=audit_review.reviewer_id OR
+   security_review.reviewer_id=assessment_record.investigator_id OR
+   audit_review.reviewer_id=assessment_record.investigator_id THEN
+  RETURN NULL;
+ END IF;
+ canonical:='v121-quarantine-evidence-v1|'||
+  p_org::text||'|'||p_event::text||'|'||event_record.event_kind||'|'||
+  COALESCE(event_record.affected_failure_id::text,'ORG_WIDE')||'|'||
+  trim(event_record.evidence_digest)||'|'||
+  assessment_record.assessment_id::text||'|'||
+  assessment_record.assessment_version::text||'|'||
+  assessment_record.investigator_id::text||'|'||
+  assessment_record.finding||'|'||trim(assessment_record.evidence_digest)||'|'||
+  security_review.review_domain||'|'||security_review.reviewer_id::text||'|'||
+  security_review.decision||'|'||trim(security_review.reviewed_digest)||'|'||
+  audit_review.review_domain||'|'||audit_review.reviewer_id::text||'|'||
+  audit_review.decision||'|'||trim(audit_review.reviewed_digest);
+ RETURN encode(sha256(convert_to(canonical,'UTF8')),'hex');
+END;
+$expected_chain$;
+REVOKE ALL ON FUNCTION v121_anchor.quarantine_expected_chain(uuid,uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.quarantine_expected_chain(uuid,uuid,uuid)
+ TO v121_anchor_reader,v121_anchor_evidence_checker;
+
+CREATE FUNCTION v121_anchor.attest_quarantine_evidence(
+ p_org uuid,p_event uuid,p_assessment uuid,p_checker uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $attest_chain$
+DECLARE latest uuid;
+DECLARE expected text;
+BEGIN
+ IF session_user<>'v121_anchor_evidence_checker' OR
+   p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_CHAIN_CHECKER_DENIED';
+ END IF;
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ IF p_checker IS NULL OR p_assessment IS NULL OR p_event IS NULL THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_CHAIN_INPUT_INVALID';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-quarantine-review|'||p_org::text||'|'||p_event::text,0));
+ SELECT q.assessment_id INTO latest FROM v121_anchor.quarantine_assessments q
+ WHERE q.organization_id=p_org AND q.event_id=p_event
+ ORDER BY q.assessment_version DESC LIMIT 1;
+ IF latest IS DISTINCT FROM p_assessment THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_CHAIN_SUPERSEDED';
+ END IF;
+ expected:=v121_anchor.quarantine_expected_chain(p_org,p_event,p_assessment);
+ IF expected IS NULL THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_CHAIN_INCOMPLETE';
+ END IF;
+ INSERT INTO v121_anchor.quarantine_evidence_chains(
+  organization_id,event_id,assessment_id,chain_digest,checker_id)
+ VALUES(p_org,p_event,p_assessment,expected,p_checker);
+END;
+$attest_chain$;
+REVOKE ALL ON FUNCTION v121_anchor.attest_quarantine_evidence(
+ uuid,uuid,uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.attest_quarantine_evidence(
+ uuid,uuid,uuid,uuid) TO v121_anchor_evidence_checker;
+
+-- Recompute from source on each read; stale, tampered or absent chains remain HOLD.
+CREATE FUNCTION v121_anchor.quarantine_chain_diagnostics(p_org uuid,p_event uuid)
+RETURNS TABLE(
+ latest_assessment uuid,latest_version integer,linked_reviews integer,
+ chain_expected text,chain_recorded text,chain_status text,
+ quarantine_active boolean,hold_active boolean,release_eligible boolean
+) LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $chain_diag$
+DECLARE latest record;
+DECLARE stored record;
+BEGIN
+ IF session_user NOT IN ('v121_anchor_reader','postgres') OR
+   p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_CHAIN_SCOPE_DENIED';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM v121_anchor.attester_quarantine_events e
+   WHERE e.organization_id=p_org AND e.event_id=p_event) THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_CHAIN_EVENT_UNKNOWN';
+ END IF;
+ SELECT * INTO latest FROM v121_anchor.quarantine_assessments q
+ WHERE q.organization_id=p_org AND q.event_id=p_event
+ ORDER BY q.assessment_version DESC LIMIT 1;
+ latest_assessment:=latest.assessment_id;
+ latest_version:=latest.assessment_version;
+ SELECT count(*)::integer INTO linked_reviews
+ FROM v121_anchor.quarantine_assessment_reviews r
+ WHERE r.organization_id=p_org AND r.assessment_id=latest_assessment;
+ IF latest_assessment IS NULL THEN
+  chain_status:='INVESTIGATION_MISSING';
+ ELSE
+  chain_expected:=v121_anchor.quarantine_expected_chain(p_org,p_event,latest_assessment);
+  SELECT * INTO stored FROM v121_anchor.quarantine_evidence_chains c
+  WHERE c.organization_id=p_org AND c.assessment_id=latest_assessment
+    AND c.event_id=p_event;
+  chain_recorded:=trim(stored.chain_digest);
+  IF chain_expected IS NULL THEN
+   chain_status:='EVIDENCE_INCOMPLETE_OR_CONFLICTING';
+  ELSIF stored.assessment_id IS NULL THEN
+   chain_status:='EVIDENCE_ATTESTATION_MISSING';
+  ELSIF chain_recorded<>chain_expected THEN
+   chain_status:='EVIDENCE_CHAIN_MISMATCH';
+  ELSE
+   chain_status:='EVIDENCE_LINKED_STILL_HOLD';
+  END IF;
+ END IF;
+ quarantine_active:=true;
+ hold_active:=true;
+ release_eligible:=false;
+ RETURN NEXT;
+END;
+$chain_diag$;
+REVOKE ALL ON FUNCTION v121_anchor.quarantine_chain_diagnostics(uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.quarantine_chain_diagnostics(uuid,uuid)
+ TO v121_anchor_reader;
 
 CREATE TABLE v121_anchor.verified_admissions (
  admission_id uuid NOT NULL,
