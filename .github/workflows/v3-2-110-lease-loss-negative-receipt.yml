@@ -1,0 +1,68 @@
+name: V3.2-110 lease-loss notice and negative-only receipt contract
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-lease-loss-negative-receipt.mjs'
+      - 'tests/fixtures/v3-2-110-m02-loss-notice-sql.sql'
+      - 'tests/helpers/v3-2-110-m02-postgres-loss-notices.mjs'
+      - 'tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs'
+      - 'scripts/v3-2-110-setup-loss-notice-sql.mjs'
+      - 'spec/v3-2-110-m02-lease-loss-negative-receipt.json'
+      - 'docs/V3.2-110_M02_LEASE_LOSS_NEGATIVE_RECEIPT.md'
+      - '.github/workflows/v3-2-110-lease-loss-negative-receipt.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-negative-receipt-contract:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install temporary runner dependencies
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Parse lease notice and database test modules
+        run: |
+          node --check src/cross-module-lease-loss-negative-receipt.mjs
+          node --check tests/helpers/v3-2-110-m02-postgres-loss-notices.mjs
+          node --check tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+          node --check scripts/v3-2-110-setup-loss-notice-sql.mjs
+      - name: Prepare disposable V106 checkpoint V109 lease and V110 loss-ledger tables
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+      - name: Exercise V110 signed loss, SQL atomic revocation, negative receipt and replay
+        run: node --test tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+      - name: Regress V109 signed lease and SQL fence
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs
+      - name: Regress V108 source/commit race and V107 signed checkpoint
+        run: node --test tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs
+      - name: Regress V106 PostgreSQL DB-01 through DB-08
+        run: node --test tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Confirm all business privileges and formal integration remain blocked
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const x=JSON.parse(readFileSync('spec/v3-2-110-m02-lease-loss-negative-receipt.json'));if(x.parent_pr!==116||x.cases.length!==14||x.contract.no_positive_receipt_implemented!==true||x.contract.allowed_receipt_dispositions.includes('accepted')||x.business_commit_receipt_implemented!==false||x.real_atomic_handoff_verified!==false||x.production_migration_039_added!==false||x.finance_authorized!==false||x.academic_authorized!==false||x.handoff_allowed!==false||x.compensation_write_allowed!==false||x.release_eligible!==false||x.hold_active!==true||x.merge_authorized!==false||x.deploy_authorized!==false||x.external_contract_status!=='proposed-unimplemented')process.exit(1)"
+      - name: Verify V105 unresolved admission evidence
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress 18 isolated V82-V99 security tests
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
