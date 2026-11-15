@@ -1,0 +1,33 @@
+name: V3.2-103 isolated source trust boundary drill
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-signed-source-contract.mjs'
+      - 'tests/security/v3-2-103-m02-trust-boundary-fault-drill.test.mjs'
+      - 'docs/V3.2-103_M02_TRUST_BOUNDARY_FAULT_DRILL.md'
+      - 'spec/v3-2-103-m02-trust-boundary-fault-drill.json'
+      - '.github/workflows/v3-2-103-trust-boundary-fault-drill.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-source-trust-drill:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify updated source and fault suite syntax
+        run: |
+          node --check src/cross-module-signed-source-contract.mjs
+          node --check tests/security/v3-2-103-m02-trust-boundary-fault-drill.test.mjs
+      - name: Run source trust-root and failure drills with existing adapters
+        run: node --test tests/security/v3-2-103-m02-trust-boundary-fault-drill.test.mjs tests/security/v3-2-102-m02-signed-source-contract.test.mjs tests/security/v3-2-101-m02-readonly-verification-facade.test.mjs
+      - name: Confirm real permissions and deployment remain unavailable
+        run: |
+          node --input-type=module -e "import {readFileSync} from 'node:fs';const m=JSON.parse(readFileSync('spec/v3-2-103-m02-trust-boundary-fault-drill.json'));if(m.parent_pr!==109||m.observed_or_expected_fault_scenarios.length!==9||m.production_trust_anchor_implemented!==false||m.restart_durable_watermark_implemented!==false||m.real_external_origin_verified!==false||m.handoff_allowed!==false||m.finance_authorized!==false||m.academic_authorized!==false||m.release_eligible!==false||m.hold_active!==true||m.merge_authorized!==false||m.deploy_authorized!==false||m.external_contract_status!=='proposed-unimplemented')process.exit(1)"
+      - name: Re-run eighteen original M02 isolated security suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
+      - name: Revalidate original stage inventory
+        run: node --test tests/security/v3-2-100-m02-integration-review.test.mjs
