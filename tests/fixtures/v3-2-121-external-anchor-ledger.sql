@@ -70,6 +70,57 @@ GRANT SELECT ON v121_anchor.key_events TO v121_anchor_reader;
 
 -- The independent fixture verifier signs a scoped one-use database admission
 -- after Ed25519 verification; a writer role cannot issue this admission.
+-- A separate CI-only security principal records one-way attester quarantine.
+-- No role can lift quarantine; historical admissions and checkpoints are kept.
+CREATE TABLE v121_anchor.attester_quarantine_events (
+ organization_id uuid NOT NULL,
+ event_id uuid NOT NULL,
+ affected_failure_id uuid,
+ event_kind text NOT NULL CHECK(event_kind IN (
+  'ATTESTER_SIGNATURE_INVALID','UNEXPECTED_ATTESTATION','ATTESTER_CREDENTIAL_COMPROMISED'
+ )),
+ evidence_digest char(64) NOT NULL CHECK(evidence_digest ~ '^[a-f0-9]{64}$'),
+ recorded_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(organization_id,event_id)
+);
+CREATE TRIGGER attester_quarantine_immutable BEFORE UPDATE OR DELETE
+ ON v121_anchor.attester_quarantine_events FOR EACH ROW
+ EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.attester_quarantine_events FROM PUBLIC;
+GRANT SELECT ON v121_anchor.attester_quarantine_events TO v121_anchor_reader;
+
+CREATE FUNCTION v121_anchor.report_attester_quarantine(
+ p_org uuid,p_event uuid,p_failure uuid,p_kind text,p_evidence char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $security_report$
+BEGIN
+ IF session_user<>'v121_anchor_security' OR
+    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ANCHOR_SECURITY_ROLE_DENIED';
+ END IF;
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ IF p_event IS NULL OR p_kind NOT IN (
+  'ATTESTER_SIGNATURE_INVALID','UNEXPECTED_ATTESTATION',
+  'ATTESTER_CREDENTIAL_COMPROMISED') OR
+  p_evidence IS NULL OR p_evidence !~ '^[a-f0-9]{64}$' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_SECURITY_EVENT_INVALID';
+ END IF;
+ -- Shared first lock with admission and checkpoint paths. A report linearizes
+ -- after already-committing writes or prevents later ones from proceeding.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-attester-safety|'||p_org::text,0));
+ INSERT INTO v121_anchor.attester_quarantine_events(
+  organization_id,event_id,affected_failure_id,event_kind,evidence_digest)
+ VALUES(p_org,p_event,p_failure,p_kind,p_evidence);
+END;
+$security_report$;
+REVOKE ALL ON FUNCTION v121_anchor.report_attester_quarantine(
+ uuid,uuid,uuid,text,char(64)) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.report_attester_quarantine(
+ uuid,uuid,uuid,text,char(64)) TO v121_anchor_security;
+
 CREATE TABLE v121_anchor.verified_admissions (
  admission_id uuid NOT NULL,
  organization_id uuid NOT NULL,
@@ -113,6 +164,13 @@ BEGIN
     p_signature IS NULL OR p_signature !~ '^[A-Za-z0-9+/]{86}==$' OR
     p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}$' THEN
   RAISE EXCEPTION 'V121_ANCHOR_ADMISSION_INVALID';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-attester-safety|'||p_org::text,0));
+ IF EXISTS(SELECT 1 FROM v121_anchor.attester_quarantine_events e
+  WHERE e.organization_id=p_org AND
+   (e.affected_failure_id IS NULL OR e.affected_failure_id=p_failure)) THEN
+  RAISE EXCEPTION 'V121_ATTESTER_QUARANTINED';
  END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(
   'v121-checkpoint|'||p_org::text||'|'||p_failure::text,0));
@@ -189,6 +247,13 @@ BEGIN
  -- Global order: checkpoint scope, then signing-key scope; key lifecycle
  -- changes acquire only the signing-key scope. This prevents a write from
  -- passing an earlier key-status read after a concurrent retirement/revocation.
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-attester-safety|'||NEW.organization_id::text,0));
+ IF EXISTS(SELECT 1 FROM v121_anchor.attester_quarantine_events e
+  WHERE e.organization_id=NEW.organization_id AND
+   (e.affected_failure_id IS NULL OR e.affected_failure_id=NEW.failure_id)) THEN
+  RAISE EXCEPTION 'V121_ATTESTER_QUARANTINED';
+ END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(
   'v121-checkpoint|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
  PERFORM pg_advisory_xact_lock(hashtextextended(
