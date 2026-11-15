@@ -5,7 +5,7 @@ BEGIN
  IF current_database() <> 'v106_isolated' THEN
   RAISE EXCEPTION 'Refusing V106 fixture outside v106_isolated';
  END IF;
-END
+END;
 $guard$;
 
 CREATE ROLE v106_writer_a LOGIN PASSWORD 'ephemeral-v106-A-only';
