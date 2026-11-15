@@ -132,7 +132,7 @@ test('MAN-02 current scan for one student never hides another unscanned HOLD stu
    ['UNSCANNED_HOLD_STUDENT','CURRENT_TEST_SCAN']);
  });
 });
-test('MAN-03 source message after V118 scan marks that student's scan stale',async()=>{
+test('MAN-03 source message after V118 scan marks student scan stale',async()=>{
  await using(11903,[11,12],async f=>{
   await f.scan(11);await f.scan(12);
   await f.message(11);
