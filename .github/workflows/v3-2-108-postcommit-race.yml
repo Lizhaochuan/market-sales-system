@@ -1,0 +1,58 @@
+name: V3.2-108 signed source and SQL postcommit race drills
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-postcommit-causal-recheck.mjs'
+      - 'tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs'
+      - 'spec/v3-2-108-m02-postcommit-race.json'
+      - 'docs/V3.2-108_M02_POSTCOMMIT_CAUSAL_RACE.md'
+      - '.github/workflows/v3-2-108-postcommit-race.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-postcommit-race:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated runtime dependencies without altering repository lock files
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Verify race guard and integration tests parse
+        run: |
+          node --check src/cross-module-postcommit-causal-recheck.mjs
+          node --check tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs
+      - name: Initialize disposable PostgreSQL and scoped test-only roles
+        run: node scripts/v3-2-106-setup-isolated-pg.mjs
+      - name: Run V108 source and database commit race tests
+        run: node --test tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs
+      - name: Regress V107 signed source to SQL end-to-end scenarios
+        run: node --test tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs
+      - name: Regress V106 real PostgreSQL transaction and role isolation
+        run: node --test tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Confirm all operational authority remains explicitly unavailable
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-108-m02-postcommit-race.json'));if(s.parent_pr!==114||s.scenarios.length!==10||s.observations.guaranteed_causal_barrier!==false||s.observations.closes_after_final_observation_window!==false||s.production_migration_039_added!==false||s.finance_authorized!==false||s.academic_authorized!==false||s.handoff_allowed!==false||s.compensation_write_allowed!==false||s.release_eligible!==false||s.hold_active!==true||s.merge_authorized!==false||s.deploy_authorized!==false||s.external_contract_status!=='proposed-unimplemented')process.exit(1)"
+      - name: Repeat V105 admission blocker and V104 trust fence regressions
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs tests/security/v3-2-104-m02-source-trust-fence.test.mjs
+      - name: Regress V82 through V99 isolated security suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
