@@ -141,6 +141,80 @@ CREATE TRIGGER fixture_iam_source_keys_immutable
  FOR EACH ROW EXECUTE FUNCTION v121_anchor.fixture_iam_source_key_rotation_guard();
 REVOKE ALL ON FUNCTION v121_anchor.fixture_iam_source_key_rotation_guard() FROM PUBLIC;
 
+-- Dedicated append-only lifecycle journal for CI source-key versions.
+-- No key material, production authorization, or external storage is exposed.
+CREATE TABLE v121_anchor.fixture_iam_source_key_events(
+ organization_id uuid NOT NULL,
+ event_index integer NOT NULL CHECK(event_index>0),
+ key_version integer NOT NULL CHECK(key_version>0),
+ event_type text NOT NULL CHECK(event_type IN ('ACTIVATED','REVOKED')),
+ key_digest char(64) NOT NULL CHECK(key_digest ~ '^[a-f0-9]{64}$'),
+ previous_event_digest char(64) NOT NULL
+  CHECK(previous_event_digest ~ '^[a-f0-9]{64}$'),
+ event_digest char(64) NOT NULL CHECK(event_digest ~ '^[a-f0-9]{64}$'),
+ recorded_at timestamptz NOT NULL,
+ PRIMARY KEY(organization_id,event_index),
+ UNIQUE(organization_id,key_version,event_type),
+ FOREIGN KEY(organization_id,key_version)
+ REFERENCES v121_anchor.fixture_iam_source_auth_keys(organization_id,key_version)
+);
+CREATE TRIGGER fixture_iam_source_key_events_immutable
+ BEFORE UPDATE OR DELETE ON v121_anchor.fixture_iam_source_key_events
+ FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.fixture_iam_source_key_events FROM PUBLIC;
+
+-- Record activation and retirement in the SAME transaction as key mutation.
+-- A per-organization advisory lock provides a deterministic hash chain across
+-- concurrent key changes. This is DB-local tamper evidence, not external WORM.
+CREATE FUNCTION v121_anchor.fixture_iam_source_key_event_append()
+RETURNS trigger LANGUAGE plpgsql
+SET search_path=pg_catalog,v121_anchor AS $source_event$
+DECLARE event_kind text;
+DECLARE prev_index integer;
+DECLARE prev_digest text;
+DECLARE new_index integer;
+DECLARE fingerprint text;
+DECLARE happened_at timestamptz;
+DECLARE event_hash text;
+BEGIN
+ IF TG_OP='INSERT' THEN
+  IF NEW.active IS NOT TRUE THEN
+   RAISE EXCEPTION 'V121_IAM_SOURCE_KEY_MUST_START_ACTIVE';
+  END IF;
+  event_kind:='ACTIVATED';
+ ELSIF TG_OP='UPDATE' AND OLD.active=true AND NEW.active=false THEN
+  event_kind:='REVOKED';
+ ELSE
+  RETURN NEW;
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-iam-source-key-events|'||NEW.organization_id::text,0));
+ SELECT event_index,trim(event_digest) INTO prev_index,prev_digest
+ FROM v121_anchor.fixture_iam_source_key_events
+ WHERE organization_id=NEW.organization_id
+ ORDER BY event_index DESC LIMIT 1;
+ new_index:=COALESCE(prev_index,0)+1;
+ prev_digest:=COALESCE(prev_digest,repeat('0',64));
+ fingerprint:=encode(public.digest(NEW.auth_key,'sha256'),'hex');
+ happened_at:=date_trunc('milliseconds',clock_timestamp());
+ event_hash:=encode(public.digest(convert_to(concat_ws('|',
+  'v121-ext001-source-key-event-v1',NEW.organization_id::text,
+  new_index::text,NEW.key_version::text,event_kind,fingerprint,
+  prev_digest,(round(extract(epoch FROM happened_at)*1000)::bigint)::text
+ ),'UTF8'),'sha256'),'hex');
+ INSERT INTO v121_anchor.fixture_iam_source_key_events(
+  organization_id,event_index,key_version,event_type,key_digest,
+  previous_event_digest,event_digest,recorded_at)
+ VALUES(NEW.organization_id,new_index,NEW.key_version,event_kind,
+  fingerprint,prev_digest,event_hash,happened_at);
+ RETURN NEW;
+END;
+$source_event$;
+CREATE TRIGGER fixture_iam_source_key_events_record
+ AFTER INSERT OR UPDATE OF active ON v121_anchor.fixture_iam_source_auth_keys
+ FOR EACH ROW EXECUTE FUNCTION v121_anchor.fixture_iam_source_key_event_append();
+REVOKE ALL ON FUNCTION v121_anchor.fixture_iam_source_key_event_append() FROM PUBLIC;
+
 -- CI-only binding of exact signed source witness and object-version proof.
 -- Content and signatures are hashed; no evidence bytes or secrets stored.
 CREATE TABLE v121_anchor.fixture_iam_source_bindings(
