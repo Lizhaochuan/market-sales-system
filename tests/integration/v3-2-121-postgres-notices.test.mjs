@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {createHash,createHmac,randomBytes,generateKeyPairSync,sign,createPublicKey} from 'node:crypto';
+import {createHash,createHmac,randomBytes,randomUUID,generateKeyPairSync,sign,createPublicKey} from 'node:crypto';
 import {encodeFixtureReceiptProof} from '../../src/cross-module-fixture-receipt-proof.mjs';
 import {createFixtureLeaseGate,encodeFixtureLease} from '../../src/cross-module-fixture-authority-lease.mjs';
 import {createFixtureRecoveryGate,encodeFixtureRecoveryRequest,encodeFixtureRecoveryApproval} from '../../src/cross-module-fixture-dual-approval-anchor.mjs';
 import {createFixtureRecoveryIssuance} from '../helpers/v3-2-121-fixture-recovery-issuance.mjs';
-import {signFixtureAuditAnchor,verifyFixtureAuditAnchor,verifyFixtureActiveAuditAnchor,inspectFixtureArchivedAuditAnchor} from '../helpers/v3-2-121-fixture-external-audit-anchor.mjs';
+import {signFixtureAuditAnchor,verifyFixtureAuditAnchor,verifyFixtureActiveAuditAnchor,inspectFixtureArchivedAuditAnchor,issueFixtureVerifiedAnchorTicket} from '../helpers/v3-2-121-fixture-external-audit-anchor.mjs';
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
@@ -1487,17 +1487,20 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
  let state=new Map();
  await admin.query("CREATE ROLE v121_anchor_reader LOGIN PASSWORD 'test_only_anchor_reader'");
  await admin.query("CREATE ROLE v121_anchor_writer LOGIN PASSWORD 'test_only_anchor_writer'");
+ await admin.query("CREATE ROLE v121_anchor_attester LOGIN PASSWORD 'test_only_anchor_attester'");
  await admin.query('CREATE DATABASE v121_anchor_isolated');
  await admin.query('REVOKE CONNECT ON DATABASE v121_anchor_isolated FROM PUBLIC');
- await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer');
+ await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester');
  const ledgerAdmin=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
  let anchorReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
  const anchorWriter=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
+ const anchorAttester=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_attester',password:'test_only_anchor_attester'});
  const stateReader=new pg.Client({host,database:'v106_isolated',user:'v106_state_reader',password:'test_only_state_reader'});
  try{
   await ledgerAdmin.query(await readFile(new URL('../fixtures/v3-2-121-external-anchor-ledger.sql',import.meta.url),'utf8'));
   await anchorReader.connect();
   await anchorWriter.connect();
+  await anchorAttester.connect();
   await stateReader.connect();
   const readLocal=async()=>{
    await stateReader.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
@@ -1545,13 +1548,16 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
    return row&&{statement:row.signed_statement,signature_b64:row.signature_b64};
   };
   const persist=async(anchor,current,minimumSequence)=>{
-   // JS verifies actual Ed25519 proof and trusted key lifecycle before the isolated
-   // writer submits to PostgreSQL. SQL does not perform Ed25519 verification.
-   verifyFixtureActiveAuditAnchor({anchor,publicKeys:keys,keyStates:state,current,nowMs:150,minimumSequence});
+   // This separately credentialed attester proves the Ed25519 verification
+   // decision to the database; the writer alone cannot forge the ticket.
+   const ticket=await issueFixtureVerifiedAnchorTicket({
+    anchor,publicKeys:keys,keyStates:state,current,nowMs:150,minimumSequence,
+    attester:anchorAttester
+   });
    await anchorWriter.query(
-    'SELECT v121_anchor.append_checkpoint($1::uuid,$2::uuid,$3::integer,$4::uuid,$5::jsonb,$6::text,$7::char(64))',
+    'SELECT v121_anchor.append_checkpoint($1::uuid,$2::uuid,$3::integer,$4::uuid,$5::jsonb,$6::text,$7::char(64),$8::uuid)',
     [a,failure,anchor.statement.snapshot_sequence,anchor.statement.signer_id,
-     anchor.statement,anchor.signature_b64,anchor.statement.observed_digest]);
+     anchor.statement,anchor.signature_b64,anchor.statement.observed_digest,ticket]);
   };
   await register(signer1,1,keys1);
   await loadPersistentTrust();
@@ -1561,6 +1567,14 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
   const proof1=createProof(first,signer1,keys1);
   await assert.rejects(anchorWriter.query('INSERT INTO v121_anchor.checkpoints(organization_id) VALUES($1)',[a]),/permission denied/);
   await assert.rejects(anchorWriter.query('SELECT * FROM v121_anchor.signers'),/permission denied/);
+  await assert.rejects(anchorWriter.query(
+   'SELECT v121_anchor.append_checkpoint($1::uuid,$2::uuid,$3::integer,$4::uuid,$5::jsonb,$6::text,$7::char(64),$8::uuid)',
+   [a,failure,4,signer1,proof1.statement,proof1.signature_b64,proof1.statement.observed_digest,randomUUID()]
+  ),/V121_ANCHOR_ADMISSION_MISSING/);
+  await assert.rejects(anchorWriter.query(
+   'SELECT v121_anchor.attest_verified_checkpoint($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::uuid,$6::jsonb,$7::text,$8::char(64))',
+   [randomUUID(),a,failure,4,signer1,proof1.statement,proof1.signature_b64,proof1.statement.observed_digest]
+  ),/permission denied/);
   const altered={...proof1,statement:{...proof1.statement,observed_digest:'e'.repeat(64)}};
   await assert.rejects(persist(altered,first,4),{code:'V121_ANCHOR_SIGNATURE_INVALID'});
   await persist(proof1,first,4);
@@ -1655,6 +1669,7 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
   assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
    ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
  }finally{
+  await anchorAttester.end().catch(()=>{});
   await anchorWriter.end().catch(()=>{});
   await anchorReader.end().catch(()=>{});
   await stateReader.end().catch(()=>{});
