@@ -220,7 +220,7 @@ export function verifyFixtureExt001BytesAndFingerprint(envelope,{trustedKeys,now
 // bytes, re-verify the two signatures, and enforce the signed revision number
 // immediately before requesting the separate PostgreSQL attestation.
 export async function issueFixtureExt001VerifiedProvenance({
- envelope,artifactBytes,trustedKeys,nowMs,revisionNo,receiptId,attester
+ envelope,artifactBytes,trustedKeys,nowMs,revisionNo,receiptId,attester,sourceBindingDigest
 }={}){
  if(!Number.isSafeInteger(revisionNo) || revisionNo<1 ||
     !isUuid(receiptId)) fail('V121_IAM_PROVENANCE_INPUT_INVALID');
@@ -231,20 +231,31 @@ export async function issueFixtureExt001VerifiedProvenance({
   fail('V121_IAM_PROVENANCE_SIGNED_REVISION_MISMATCH');
  if(!attester || typeof attester.query!=='function')
   fail('V121_IAM_PROVENANCE_ATTESTER_UNAVAILABLE');
- const q='SELECT v121_anchor.fixture_attest_iam_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz) AS verdict';
+ const sourceBound=sourceBindingDigest!==undefined;
+ if(sourceBound && (typeof sourceBindingDigest!=='string'||
+    !/^[a-f0-9]{64}$/.test(sourceBindingDigest)))
+  fail('V121_IAM_SOURCE_BINDING_INVALID');
+ const q=sourceBound
+  ?'SELECT v121_anchor.fixture_attest_iam_source_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz,$13::char(64)) AS verdict'
+  :'SELECT v121_anchor.fixture_attest_iam_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz) AS verdict';
  const args=[proof.organization_id,revisionNo,proof.revision_id,receiptId,
   proof.evidence_digest,proof.evidence_e1_digest,proof.evidence_e2_digest,
   proof.issuer_id,proof.reviewer_id,proof.issuer_signature_digest,
   proof.reviewer_signature_digest,new Date(proof.valid_until_ms)];
+ if(sourceBound) args.push(sourceBindingDigest);
  const result=await attester.query(q,args);
- if(!['ATTESTED_SYNTHETIC_STILL_HOLD','EXACT_PROVENANCE_RETRY_STILL_HOLD']
-  .includes(result?.rows?.[0]?.verdict))
+ const permitted=sourceBound
+  ?['ATTESTED_SOURCE_PROVENANCE_STILL_HOLD','EXACT_SOURCE_PROVENANCE_RETRY_STILL_HOLD']
+  :['ATTESTED_SYNTHETIC_STILL_HOLD','EXACT_PROVENANCE_RETRY_STILL_HOLD'];
+ if(!permitted.includes(result?.rows?.[0]?.verdict))
   fail('V121_IAM_PROVENANCE_ATTESTATION_INDETERMINATE');
  return Object.freeze({
   verdict:result.rows[0].verdict,
   receipt_id:receiptId,revision_no:revisionNo,
   envelope_digest:proof.evidence_digest,
   file_bytes_verified_in_fixture:true,
+  source_version_bound_in_fixture:sourceBound,
+  source_binding_digest:sourceBound?sourceBindingDigest:null,
   production_evidence_collected:false,
   release_authorized:false,hold_active:true,release_eligible:false
  });
