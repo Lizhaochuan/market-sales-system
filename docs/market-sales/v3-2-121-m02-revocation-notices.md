@@ -61,3 +61,10 @@
 - 故障测试分别模拟 INSERT 后、COMMIT 前撤权，验证 SQL 整体 ROLLBACK；COMMIT 后撤权，验证历史不删除但 readback fail closed；以及提交前身份来源中断。
 - **限制**：钩子只在 CI disposable SQL 中工作；即使提交前和提交后都检查，最后一次外部状态读取后的竞态窗口并未关闭。这不是可信真实 IAM 水位租约、分布式两阶段事务或现实中的跨系统原子撤销。
 - 真实组织授权、实际接收人与签署身份、正式 UAT 仍未完成。所有业务输出继续 HOLD，PR 保持 Draft，不合并不部署。
+
+## V121 bounded fixture authority lease (standalone contract only)
+- 新增 `src/cross-module-fixture-authority-lease.mjs`：只接受固定字段、机构/异常/签署者/通知版本精确绑定的 Ed25519 模拟租约，最长 30 秒，受模拟时钟控制。
+- 验证器要求模拟实时 authority 的 active、epoch、水位、lease sequence 与租约一致。进程内保存单调观察水位，拒绝回退；可检测后退模拟、过期、签名篡改、跨范围使用及身份服务故障。
+- 新增 7 项 Node 合约测试及 CI。**此验证器目前是独立组件，尚未绑定 SQL 回执事务；不能标记为完整协调协议，也不能关闭分布式最后读竞态。**
+- 租约有效不代表真实身份系统已授权、真实撤权水位已冻结、真实接收人已收到通知。进程内水位不会替代持久共享防回滚状态；后续需设计持久水位、SQL 绑定及失败恢复。
+- 所有标志继续 HOLD；`release_eligible=false`、`merge_authorized=false`、`deploy_authorized=false`。六方外部责任人及正式 UAT 仍未验收。
