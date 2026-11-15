@@ -1,0 +1,22 @@
+name: V3.2-95 isolated recovery conclusion validity
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-recovery-conclusion-validity.mjs'
+      - 'tests/security/v3-2-95-m02-recovery-conclusion-validity.test.mjs'
+      - '.github/workflows/v3-2-95-recovery-conclusion-validity.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-conclusion-validity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate conclusion state model syntax
+        run: node --check src/cross-module-recovery-conclusion-validity.mjs
+      - name: Run conclusion validity and upstream recovery tests
+        run: node --test tests/security/v3-2-95-m02-recovery-conclusion-validity.test.mjs tests/security/v3-2-94-m02-manual-lineage-recovery.test.mjs
