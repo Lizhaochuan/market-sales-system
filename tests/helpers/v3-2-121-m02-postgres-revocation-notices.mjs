@@ -251,7 +251,7 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptPool,receip
      notice_id:input.notice_id,receipt_sequence:input.receipt_sequence,
      receipt_state:input.receipt_state,previous_digest:previous,proof:input.proof,lease:input.lease};
     const digest=sha(payload);
-    await c.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+    await c.query('SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text)',
      [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,JSON.stringify(payload)]);
     await beforeReceiptCommit({notice_id:input.notice_id,duplicate:false});
     await checkProof(input);
