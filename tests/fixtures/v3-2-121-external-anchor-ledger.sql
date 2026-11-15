@@ -2,7 +2,7 @@
 -- This is NOT independent WORM storage; postgres superuser controls both DBs.
 CREATE SCHEMA v121_anchor;
 REVOKE ALL ON SCHEMA v121_anchor FROM PUBLIC;
-GRANT USAGE ON SCHEMA v121_anchor TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security;
+GRANT USAGE ON SCHEMA v121_anchor TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security,v121_anchor_investigator,v121_anchor_security_reviewer,v121_anchor_audit_reviewer;
 
 CREATE FUNCTION v121_anchor.no_change() RETURNS trigger
 LANGUAGE plpgsql SET search_path=pg_catalog AS $$
@@ -120,6 +120,161 @@ REVOKE ALL ON FUNCTION v121_anchor.report_attester_quarantine(
  uuid,uuid,uuid,text,char(64)) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v121_anchor.report_attester_quarantine(
  uuid,uuid,uuid,text,char(64)) TO v121_anchor_security;
+
+
+-- A quarantine investigation is evidence, not permission to lift the stop.
+-- Case versions and independent reviews are append-only and always fail closed.
+CREATE TABLE v121_anchor.quarantine_assessments (
+ organization_id uuid NOT NULL,
+ event_id uuid NOT NULL,
+ assessment_id uuid NOT NULL,
+ assessment_version integer NOT NULL CHECK(assessment_version>0),
+ investigator_id uuid NOT NULL,
+ finding text NOT NULL CHECK(finding IN ('FALSE_POSITIVE_CANDIDATE','CONFIRMED_COMPROMISE','INCONCLUSIVE')),
+ evidence_digest char(64) NOT NULL CHECK(evidence_digest ~ '^[a-f0-9]{64}$'),
+ PRIMARY KEY(organization_id,assessment_id),
+ UNIQUE(organization_id,event_id,assessment_version),
+ FOREIGN KEY(organization_id,event_id)
+ REFERENCES v121_anchor.attester_quarantine_events(organization_id,event_id)
+);
+CREATE TRIGGER assessments_immutable BEFORE UPDATE OR DELETE ON v121_anchor.quarantine_assessments
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.quarantine_assessments FROM PUBLIC;
+GRANT SELECT ON v121_anchor.quarantine_assessments TO v121_anchor_reader;
+
+CREATE FUNCTION v121_anchor.record_quarantine_assessment(
+ p_org uuid,p_event uuid,p_assessment uuid,p_version integer,
+ p_investigator uuid,p_finding text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $assessment$
+DECLARE previous_version integer;
+BEGIN
+ IF session_user<>'v121_anchor_investigator' OR
+   p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_INVESTIGATOR_DENIED';
+ END IF;
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ IF p_event IS NULL OR p_assessment IS NULL OR p_investigator IS NULL OR
+    p_version IS NULL OR p_version<1 OR
+    p_finding IS NULL OR p_finding NOT IN (
+       'FALSE_POSITIVE_CANDIDATE','CONFIRMED_COMPROMISE','INCONCLUSIVE') OR
+    p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}$' THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_ASSESSMENT_INVALID';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-quarantine-review|'||p_org::text||'|'||p_event::text,0));
+ IF NOT EXISTS(SELECT 1 FROM v121_anchor.attester_quarantine_events e
+  WHERE e.organization_id=p_org AND e.event_id=p_event) THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_EVENT_UNKNOWN';
+ END IF;
+ SELECT COALESCE(MAX(assessment_version),0) INTO previous_version
+ FROM v121_anchor.quarantine_assessments
+ WHERE organization_id=p_org AND event_id=p_event;
+ IF p_version<>previous_version+1 THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_VERSION_NOT_NEXT';
+ END IF;
+ INSERT INTO v121_anchor.quarantine_assessments(
+  organization_id,event_id,assessment_id,assessment_version,
+  investigator_id,finding,evidence_digest)
+ VALUES(p_org,p_event,p_assessment,p_version,p_investigator,p_finding,p_digest);
+END;
+$assessment$;
+REVOKE ALL ON FUNCTION v121_anchor.record_quarantine_assessment(
+ uuid,uuid,uuid,integer,uuid,text,char(64)) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.record_quarantine_assessment(
+ uuid,uuid,uuid,integer,uuid,text,char(64)) TO v121_anchor_investigator;
+
+CREATE TABLE v121_anchor.quarantine_assessment_reviews (
+ organization_id uuid NOT NULL,
+ assessment_id uuid NOT NULL,
+ review_domain text NOT NULL CHECK(review_domain IN ('SECURITY','AUDIT')),
+ reviewer_id uuid NOT NULL,
+ decision text NOT NULL CHECK(decision IN ('AGREED','DISAGREED')),
+ reviewed_digest char(64) NOT NULL CHECK(reviewed_digest ~ '^[a-f0-9]{64}$'),
+ hold_active boolean NOT NULL DEFAULT true CHECK(hold_active IS TRUE),
+ release_eligible boolean NOT NULL DEFAULT false CHECK(release_eligible IS FALSE),
+ PRIMARY KEY(organization_id,assessment_id,review_domain),
+ FOREIGN KEY(organization_id,assessment_id)
+ REFERENCES v121_anchor.quarantine_assessments(organization_id,assessment_id)
+);
+CREATE TRIGGER assessment_reviews_immutable BEFORE UPDATE OR DELETE ON v121_anchor.quarantine_assessment_reviews
+FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
+REVOKE ALL ON v121_anchor.quarantine_assessment_reviews FROM PUBLIC;
+GRANT SELECT ON v121_anchor.quarantine_assessment_reviews TO v121_anchor_reader;
+
+CREATE FUNCTION v121_anchor.record_quarantine_review(
+ p_org uuid,p_assessment uuid,p_reviewer uuid,p_domain text,p_decision text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v121_anchor AS $review$
+DECLARE target record;
+DECLARE previous_actor uuid;
+BEGIN
+ IF p_org<>'11111111-1111-4111-8111-111111111111'::uuid OR
+    (session_user='v121_anchor_security_reviewer' AND p_domain IS DISTINCT FROM 'SECURITY') OR
+    (session_user='v121_anchor_audit_reviewer' AND p_domain IS DISTINCT FROM 'AUDIT') OR
+    session_user NOT IN ('v121_anchor_security_reviewer','v121_anchor_audit_reviewer') THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_REVIEW_ROLE_DENIED';
+ END IF;
+ IF current_setting('transaction_isolation')<>'read committed' THEN
+  RAISE EXCEPTION 'V121_ANCHOR_ISOLATION_UNSAFE';
+ END IF;
+ IF p_assessment IS NULL OR p_reviewer IS NULL OR
+    p_decision IS NULL OR p_decision NOT IN ('AGREED','DISAGREED') OR
+    p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}$' THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_REVIEW_INVALID';
+ END IF;
+ SELECT q.event_id INTO target FROM v121_anchor.quarantine_assessments q
+ WHERE q.organization_id=p_org AND q.assessment_id=p_assessment;
+ IF target.event_id IS NULL THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_ASSESSMENT_UNKNOWN';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-quarantine-review|'||p_org::text||'|'||target.event_id::text,0));
+ SELECT * INTO target FROM v121_anchor.quarantine_assessments q
+ WHERE q.organization_id=p_org AND q.assessment_id=p_assessment;
+ IF target.assessment_version IS DISTINCT FROM (
+  SELECT MAX(q.assessment_version) FROM v121_anchor.quarantine_assessments q
+  WHERE q.organization_id=p_org AND q.event_id=target.event_id) THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_ASSESSMENT_SUPERSEDED';
+ END IF;
+ IF target.evidence_digest<>p_digest THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_REVIEW_EVIDENCE_MISMATCH';
+ END IF;
+ IF p_reviewer=target.investigator_id OR EXISTS(
+  SELECT 1 FROM v121_anchor.quarantine_assessment_reviews r
+  WHERE r.organization_id=p_org AND r.assessment_id=p_assessment AND r.reviewer_id=p_reviewer) THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_REVIEW_NOT_INDEPENDENT';
+ END IF;
+ INSERT INTO v121_anchor.quarantine_assessment_reviews(
+  organization_id,assessment_id,review_domain,reviewer_id,decision,reviewed_digest)
+ VALUES(p_org,p_assessment,p_domain,p_reviewer,p_decision,p_digest);
+END;
+$review$;
+REVOKE ALL ON FUNCTION v121_anchor.record_quarantine_review(
+ uuid,uuid,uuid,text,text,char(64)) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v121_anchor.record_quarantine_review(
+ uuid,uuid,uuid,text,text,char(64)) TO v121_anchor_security_reviewer,v121_anchor_audit_reviewer;
+
+CREATE VIEW v121_anchor.quarantine_review_diagnostics AS
+SELECT e.organization_id,e.event_id,e.affected_failure_id,e.event_kind,
+ latest.assessment_id AS latest_assessment_id,
+ latest.assessment_version AS latest_version,latest.finding AS latest_finding,
+ (SELECT count(*)::integer FROM v121_anchor.quarantine_assessment_reviews rv
+  WHERE rv.organization_id=e.organization_id AND rv.assessment_id=latest.assessment_id
+    AND rv.decision='AGREED') AS latest_agreed_reviews,
+ true::boolean AS quarantine_active,true::boolean AS hold_active,
+ false::boolean AS release_eligible,'QUARANTINE_RETAINED'::text AS status
+FROM v121_anchor.attester_quarantine_events e
+LEFT JOIN LATERAL(
+ SELECT q.assessment_id,q.assessment_version,q.finding
+ FROM v121_anchor.quarantine_assessments q
+ WHERE q.organization_id=e.organization_id AND q.event_id=e.event_id
+ ORDER BY q.assessment_version DESC LIMIT 1
+) latest ON TRUE;
+REVOKE ALL ON v121_anchor.quarantine_review_diagnostics FROM PUBLIC;
+GRANT SELECT ON v121_anchor.quarantine_review_diagnostics TO v121_anchor_reader;
 
 CREATE TABLE v121_anchor.verified_admissions (
  admission_id uuid NOT NULL,
