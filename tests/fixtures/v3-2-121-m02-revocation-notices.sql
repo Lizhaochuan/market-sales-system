@@ -64,7 +64,9 @@ CREATE TABLE v106_test.fixture_revocation_negative_receipts (
   REFERENCES v106_test.fixture_revocation_notices(organization_id,incident_id,notice_id)
 );
 REVOKE ALL ON v106_test.fixture_revocation_negative_receipts FROM PUBLIC;
-GRANT SELECT,INSERT ON v106_test.fixture_revocation_negative_receipts TO v106_writer_a,v106_writer_b;
+-- Ordinary writer roles cannot directly append receipts. Only isolated dedicated receipt role may INSERT.
+GRANT SELECT ON v106_test.fixture_revocation_negative_receipts TO v106_writer_a,v106_writer_b;
+GRANT INSERT ON v106_test.fixture_revocation_negative_receipts TO v106_receipt_writer_a;
 ALTER TABLE v106_test.fixture_revocation_negative_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE v106_test.fixture_revocation_negative_receipts FORCE ROW LEVEL SECURITY;
 CREATE POLICY v121_rcpt_a ON v106_test.fixture_revocation_negative_receipts
