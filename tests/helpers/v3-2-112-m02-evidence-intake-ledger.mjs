@@ -1,6 +1,6 @@
 // V3.2-112 disposable PostgreSQL evidence intake ledger; tests only.
 import {createHash} from 'node:crypto';
-const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const SHA=/^[a-f0-9]{64}$/;
 const ID=/^[a-z0-9][a-z0-9._:-]{5,127}$/;
 const RECORD=['schema_version','scope','sequence','previous_event_digest',
