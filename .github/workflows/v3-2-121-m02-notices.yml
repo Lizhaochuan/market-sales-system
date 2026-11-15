@@ -19,7 +19,7 @@ on:
       - 'tests/contracts/v3-2-121-external-audit-anchor.test.mjs'
       - 'tests/contracts/v3-2-121-release-readiness.test.mjs'
       - 'tests/contracts/v3-2-121-production-handover.test.mjs'
-      - 'tests/contracts/v3-2-121-iam-evidence.test.mjs tests/contracts/v3-2-121-iam-source-version.test.mjs'
+      - 'tests/contracts/v3-2-121-iam-evidence.test.mjs'
       - 'tests/contracts/v3-2-121-iam-source-version.test.mjs'
       - 'src/cross-module-v121-iam-source-version.mjs'
       - 'src/cross-module-v121-iam-evidence.mjs'
@@ -63,5 +63,5 @@ jobs:
         with:
           node-version: '24'
       - run: npm install --no-package-lock --ignore-scripts
-      - run: node --test tests/contracts/v3-2-121-revocation-notices.test.mjs tests/contracts/v3-2-121-signed-receipt-proof.test.mjs tests/contracts/v3-2-121-authority-lease.test.mjs tests/contracts/v3-2-121-dual-approval-anchor.test.mjs tests/contracts/v3-2-121-external-audit-anchor.test.mjs tests/contracts/v3-2-121-release-readiness.test.mjs tests/contracts/v3-2-121-production-handover.test.mjs tests/contracts/v3-2-121-iam-evidence.test.mjs
+      - run: node --test tests/contracts/v3-2-121-revocation-notices.test.mjs tests/contracts/v3-2-121-signed-receipt-proof.test.mjs tests/contracts/v3-2-121-authority-lease.test.mjs tests/contracts/v3-2-121-dual-approval-anchor.test.mjs tests/contracts/v3-2-121-external-audit-anchor.test.mjs tests/contracts/v3-2-121-release-readiness.test.mjs tests/contracts/v3-2-121-production-handover.test.mjs tests/contracts/v3-2-121-iam-evidence.test.mjs tests/contracts/v3-2-121-iam-source-version.test.mjs
       - run: node --test tests/integration/v3-2-121-postgres-notices.test.mjs
