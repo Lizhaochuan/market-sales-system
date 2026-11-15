@@ -108,13 +108,18 @@ export function createIsolatedHoldOutboxProtocol({
    !Number.isSafeInteger(head.sequence)||head.sequence<seq||head.sequence>64||
    !SHA.test(head.event_digest))
    fault('V116_HOLD_SOURCE_MISSING_OR_UNVERIFIED');
-  const event=await holdLedger.event(scope,seq);
-  if(!plain(event)||event.schema_version!=='v3.2-115-ci-invalidation-hold-v1'||
-   !scopeOk(event.scope)||SCOPE.some(k=>event.scope[k]!==scope[k])||
-   event.sequence!==seq||event.status!=='HOLD_PENDING_EXTERNAL_AUTHORITY')
-   fault('V116_HOLD_EVENT_INVALID');
-  const eventDigest=sha(event);
-  if(seq===head.sequence&&eventDigest!==head.event_digest)
+  let previous='0'.repeat(64),eventDigest=null;
+  for(let i=1;i<=head.sequence;i++){
+   const event=await holdLedger.event(scope,i);
+   if(!plain(event)||event.schema_version!=='v3.2-115-ci-invalidation-hold-v1'||
+    !scopeOk(event.scope)||SCOPE.some(k=>event.scope[k]!==scope[k])||
+    event.sequence!==i||event.status!=='HOLD_PENDING_EXTERNAL_AUTHORITY'||
+    event.previous_event_digest!==previous)
+    fault('V116_HOLD_EVENT_CHAIN_UNVERIFIED');
+   previous=sha(event);
+   if(i===seq)eventDigest=previous;
+  }
+  if(previous!==head.event_digest)
    fault('V116_HOLD_HEAD_DIGEST_MISMATCH');
   return {head_digest:head.event_digest,hold_event_digest:eventDigest};
  }
