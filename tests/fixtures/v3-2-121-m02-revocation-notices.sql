@@ -849,6 +849,7 @@ DECLARE owner_id uuid;
 DECLARE original_reviewer uuid;
 DECLARE other_reviewer uuid;
 DECLARE i uuid;
+DECLARE failure_for_lock uuid;
 BEGIN
  IF session_user<>'v106_closeout_writer' OR
    p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
@@ -860,6 +861,16 @@ BEGIN
    p_reviewer IS NULL THEN
   RAISE EXCEPTION 'V121_UAT_REVIEW_INVALID';
  END IF;
+ -- Serialize a review with any competing new remediation for the same failure.
+ -- Pre-read only resolves the lock scope; repeat authoritative checks after acquiring it.
+ SELECT failure_id INTO failure_for_lock
+ FROM v106_test.fixture_uat_remediations
+ WHERE organization_id=p_org AND remediation_id=p_remediation;
+ IF failure_for_lock IS NULL THEN
+  RAISE EXCEPTION 'V121_UAT_REMEDIATION_NOT_FOUND';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  p_org::text||'|'||failure_for_lock::text,0));
  SELECT r.remediated_by,f.failed_by,f.incident_id
  INTO owner_id,original_reviewer,i
  FROM v106_test.fixture_uat_remediations r
