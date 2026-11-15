@@ -593,3 +593,113 @@ REVOKE ALL ON FUNCTION v106_test.fixture_accept_external_security_event(
  uuid,uuid,uuid,text,text,bigint,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v106_test.fixture_accept_external_security_event(
  uuid,uuid,uuid,text,text,bigint,text) TO v106_security_event_writer;
+
+-- Fixture-only two-role incident closeout review. Acceptance is NOT incident resolution.
+CREATE TABLE v106_test.fixture_closeout_review_keys (
+ organization_id uuid NOT NULL,
+ reviewer_role text NOT NULL CHECK(reviewer_role IN ('SECURITY_REVIEW','AUDIT_REVIEW')),
+ review_key bytea NOT NULL CHECK(octet_length(review_key)=32),
+ PRIMARY KEY(organization_id,reviewer_role)
+);
+REVOKE ALL ON v106_test.fixture_closeout_review_keys FROM PUBLIC;
+CREATE TABLE v106_test.fixture_closeout_reviews (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ event_id uuid NOT NULL,
+ review_id uuid NOT NULL,
+ event_digest char(64) NOT NULL,
+ evidence_digest char(64) NOT NULL,
+ security_reviewer uuid NOT NULL,
+ audit_reviewer uuid NOT NULL,
+ reviewed_at_ms bigint NOT NULL,
+ review_status text NOT NULL DEFAULT 'REVIEWED_STILL_HOLD'
+  CHECK(review_status='REVIEWED_STILL_HOLD'),
+ hold_active boolean NOT NULL DEFAULT true CHECK(hold_active IS TRUE),
+ release_eligible boolean NOT NULL DEFAULT false CHECK(release_eligible IS FALSE),
+ PRIMARY KEY(organization_id,review_id),
+ UNIQUE(organization_id,event_id),
+ CHECK(security_reviewer<>audit_reviewer),
+ FOREIGN KEY(organization_id,event_id)
+  REFERENCES v106_test.fixture_external_security_events(organization_id,event_id)
+);
+REVOKE ALL ON v106_test.fixture_closeout_reviews FROM PUBLIC;
+CREATE TRIGGER fixture_closeout_review_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_closeout_reviews FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+CREATE FUNCTION v106_test.fixture_append_closeout_review(
+ p_org uuid,p_incident uuid,p_event uuid,p_review uuid,
+ p_event_digest char(64),p_evidence_digest char(64),
+ p_security_reviewer uuid,p_audit_reviewer uuid,p_reviewed_ms bigint,
+ p_security_mac text,p_audit_mac text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $closeout_gate$
+DECLARE actual_digest char(64);
+DECLARE security_key bytea;
+DECLARE audit_key bytea;
+DECLARE envelope text;
+DECLARE fixture_now_ms bigint;
+BEGIN
+ IF session_user <> 'v106_closeout_writer' OR
+   p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_CLOSEOUT_ROLE_SCOPE';
+ END IF;
+ IF p_event IS NULL OR p_review IS NULL OR
+    p_security_reviewer IS NULL OR p_audit_reviewer IS NULL OR
+    p_security_reviewer=p_audit_reviewer OR
+    p_event_digest IS NULL OR p_event_digest !~ '^[a-f0-9]{64}$' OR
+    p_evidence_digest IS NULL OR p_evidence_digest !~ '^[a-f0-9]{64}$' OR
+    p_evidence_digest=repeat('0',64) THEN
+  RAISE EXCEPTION 'V121_CLOSEOUT_ENVELOPE_INVALID';
+ END IF;
+ SELECT ev.event_digest INTO actual_digest
+ FROM v106_test.fixture_external_security_events ev
+ WHERE ev.organization_id=p_org AND ev.incident_id=p_incident
+  AND ev.event_id=p_event;
+ IF actual_digest IS NULL OR actual_digest<>p_event_digest THEN
+  RAISE EXCEPTION 'V121_CLOSEOUT_ALERT_UNVERIFIED';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM v106_test.fixture_recovery_emergency_stops st
+   WHERE st.organization_id=p_org AND st.incident_id=p_incident
+    AND st.issuance_blocked IS TRUE) THEN
+  RAISE EXCEPTION 'V121_CLOSEOUT_HOLD_REQUIRED';
+ END IF;
+ IF (SELECT count(*) FROM v106_test.fixture_cross_module_holds h
+   WHERE h.organization_id=p_org AND h.incident_id=p_incident
+    AND h.module_name IN ('SALES','FINANCE','ACADEMIC')
+    AND h.hold_active IS TRUE AND h.release_eligible IS FALSE)<>3 THEN
+  RAISE EXCEPTION 'V121_CLOSEOUT_CROSS_MODULE_INCOMPLETE';
+ END IF;
+ SELECT c.now_ms INTO fixture_now_ms FROM v106_test.fixture_recovery_clock c
+ WHERE c.singleton=true;
+ IF fixture_now_ms IS NULL OR p_reviewed_ms IS NULL OR
+    p_reviewed_ms>fixture_now_ms+1000 OR p_reviewed_ms<fixture_now_ms-30000 THEN
+  RAISE EXCEPTION 'V121_CLOSEOUT_TIME_INVALID';
+ END IF;
+ SELECT review_key INTO security_key FROM v106_test.fixture_closeout_review_keys
+ WHERE organization_id=p_org AND reviewer_role='SECURITY_REVIEW';
+ SELECT review_key INTO audit_key FROM v106_test.fixture_closeout_review_keys
+ WHERE organization_id=p_org AND reviewer_role='AUDIT_REVIEW';
+ envelope:='v121-closeout-review-v1|'||p_org::text||'|'||p_incident::text||
+   '|'||p_event::text||'|'||p_review::text||'|'||trim(p_event_digest)||
+   '|'||trim(p_evidence_digest)||'|'||p_security_reviewer::text||
+   '|'||p_audit_reviewer::text||'|'||p_reviewed_ms::text;
+ IF security_key IS NULL OR audit_key IS NULL OR
+    p_security_mac IS NULL OR p_audit_mac IS NULL OR
+    p_security_mac !~ '^[a-f0-9]{64}$' OR p_audit_mac !~ '^[a-f0-9]{64}$' OR
+    p_security_mac<>encode(public.hmac(convert_to('SECURITY_REVIEW|'||envelope,'UTF8'),security_key,'sha256'),'hex') OR
+    p_audit_mac<>encode(public.hmac(convert_to('AUDIT_REVIEW|'||envelope,'UTF8'),audit_key,'sha256'),'hex') THEN
+  RAISE EXCEPTION 'V121_CLOSEOUT_TWO_ROLE_SIGNATURE_REJECTED';
+ END IF;
+ INSERT INTO v106_test.fixture_closeout_reviews
+ (organization_id,incident_id,event_id,review_id,event_digest,evidence_digest,
+  security_reviewer,audit_reviewer,reviewed_at_ms)
+ VALUES(p_org,p_incident,p_event,p_review,p_event_digest,p_evidence_digest,
+        p_security_reviewer,p_audit_reviewer,p_reviewed_ms);
+ -- Intentionally NO mutation to emergency stops or domain HOLDs.
+END;
+$closeout_gate$;
+REVOKE ALL ON FUNCTION v106_test.fixture_append_closeout_review(
+ uuid,uuid,uuid,uuid,char(64),char(64),uuid,uuid,bigint,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_append_closeout_review(
+ uuid,uuid,uuid,uuid,char(64),char(64),uuid,uuid,bigint,text,text)
+ TO v106_closeout_writer;
