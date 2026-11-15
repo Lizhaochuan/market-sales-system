@@ -413,3 +413,25 @@ REVOKE ALL ON FUNCTION v106_test.fixture_issue_recovery_key(
  uuid,uuid,uuid,char(64),integer,char(64),uuid,uuid,bytea,text,integer,bigint,bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v106_test.fixture_issue_recovery_key(
  uuid,uuid,uuid,char(64),integer,char(64),uuid,uuid,bytea,text,integer,bigint,bigint) TO v106_key_issuer;
+
+-- Explicit three-domain HOLD projection in disposable CI, not the real business modules.
+-- No issuance/receipt gateway has a release path. DML guard prevents accidental releases.
+CREATE TABLE v106_test.fixture_cross_module_holds (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ module_name text NOT NULL CHECK(module_name IN ('SALES','FINANCE','ACADEMIC')),
+ hold_active boolean NOT NULL DEFAULT true CHECK(hold_active IS TRUE),
+ release_eligible boolean NOT NULL DEFAULT false CHECK(release_eligible IS FALSE),
+ release_reason text NOT NULL DEFAULT 'V121_UNVERIFIED_RECOVERY',
+ PRIMARY KEY(organization_id,incident_id,module_name)
+);
+REVOKE ALL ON v106_test.fixture_cross_module_holds FROM PUBLIC;
+CREATE FUNCTION v106_test.fixture_hold_no_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $cross_module_hold_guard$
+BEGIN
+ RAISE EXCEPTION 'V121_CROSS_MODULE_HOLD_IMMUTABLE';
+END;
+$cross_module_hold_guard$;
+CREATE TRIGGER fixture_hold_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_cross_module_holds FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_hold_no_mutation();
