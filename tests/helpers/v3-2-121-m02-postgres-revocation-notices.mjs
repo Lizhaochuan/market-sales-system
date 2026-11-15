@@ -6,8 +6,10 @@ import {verifyFixtureNegativeReceiptProof} from '../../src/cross-module-fixture-
 const sha=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const fail=c=>{const e=new Error(c);e.code=c;throw e;};
 const scopeParams=x=>[x.organization_id,x.incident_id];
-export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthority,receiptPublicKey,receiptClock,
+export function createIsolatedPostgresRevocationNotices({pool,receiptPool,receiptProofAuthority,receiptPublicKey,receiptClock,
  beforeReceiptCommit=async()=>{},afterReceiptCommit=async()=>{},leaseGate}={}){
+ if(!receiptPool||typeof receiptPool.connect!=='function')
+  throw TypeError('NOTICE_RECEIPT_WRITER_REQUIRED');
  if(!leaseGate||typeof leaseGate.verifyLease!=='function')
   throw TypeError('NOTICE_LEASE_GATE_REQUIRED');
  if(typeof beforeReceiptCommit!=='function'||typeof afterReceiptCommit!=='function')
@@ -39,11 +41,12 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
    l.revocation_watermark!==st.revocation_watermark)fail('NOTICE_LEASE_PROOF_MISMATCH');
   return leaseGate.verifyLease({...input.lease,scope});
  }
- async function connect(){
-  const c=await pool.connect();
+ async function connect(receipt=false){
+  const c=await (receipt?receiptPool:pool).connect();
   try{
    const r=await c.query('SELECT current_database() AS db,current_user AS actor');
-   if(r.rows[0]?.db!=='v106_isolated'||!['v106_writer_a','v106_writer_b'].includes(r.rows[0]?.actor))
+   if(r.rows[0]?.db!=='v106_isolated'||
+    !(receipt?['v106_receipt_writer_a']:['v106_writer_a','v106_writer_b']).includes(r.rows[0]?.actor))
     fail('NOTICE_SQL_CONTEXT_UNTRUSTED');
    return c;
   }catch(e){c.release();throw e;}
@@ -203,7 +206,7 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
   await checkProof(input);
   await checkLease(input);
   for(let attempt=0;attempt<4;attempt++){
-   const c=await connect();let started=false;
+   const c=await connect(true);let started=false;
    try{
     await c.query('BEGIN ISOLATION LEVEL SERIALIZABLE');started=true;
     await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))',
