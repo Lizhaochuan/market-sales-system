@@ -5,6 +5,8 @@ on:
       - chatgpt/v3-2-121-m02-revocation-notices
   pull_request:
     paths:
+      - 'src/cross-module-fixture-receipt-proof.mjs'
+      - 'tests/contracts/v3-2-121-signed-receipt-proof.test.mjs'
       - 'src/cross-module-revocation-notice-contract.mjs'
       - 'tests/contracts/v3-2-121-revocation-notices.test.mjs'
       - 'tests/integration/v3-2-121-postgres-notices.test.mjs'
@@ -39,5 +41,5 @@ jobs:
         with:
           node-version: '24'
       - run: npm install --no-package-lock --ignore-scripts
-      - run: node --test tests/contracts/v3-2-121-revocation-notices.test.mjs
+      - run: node --test tests/contracts/v3-2-121-revocation-notices.test.mjs tests/contracts/v3-2-121-signed-receipt-proof.test.mjs
       - run: node --test tests/integration/v3-2-121-postgres-notices.test.mjs
