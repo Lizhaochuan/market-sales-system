@@ -2131,6 +2131,16 @@ test('independent false-positive assessment remains quarantined, latest-version 
    ['UNEXPECTED_ATTESTATION',a,event]),/V121_ANCHOR_LEDGER_IMMUTABLE/);
   const preserved=(await reader.query('SELECT event_kind,evidence_digest FROM v121_anchor.attester_quarantine_events WHERE organization_id=$1 AND event_id=$2',[a,event])).rows[0];
   assert.deepEqual(preserved,original);
+  const foreignEvent='00000000-0000-4000-8000-0000000000de';
+  await ledgerAdmin.query(
+   'INSERT INTO v121_anchor.attester_quarantine_events(organization_id,event_id,affected_failure_id,event_kind,evidence_digest) VALUES($1,$2,NULL,$3,$4)',
+   [b,foreignEvent,'UNEXPECTED_ATTESTATION',digest2]
+  );
+  assert.equal((await reader.query('SELECT count(*)::int AS n FROM v121_anchor.attester_quarantine_events WHERE organization_id=$1',[b])).rows[0].n,0);
+  assert.equal((await reader.query('SELECT count(*)::int AS n FROM v121_anchor.quarantine_review_diagnostics WHERE organization_id=$1',[b])).rows[0].n,0);
+  assert.equal((await reader.query('SELECT count(*)::int AS n FROM v121_anchor.quarantine_assessments WHERE organization_id=$1',[b])).rows[0].n,0);
+  assert.equal((await reader.query('SELECT count(*)::int AS n FROM v121_anchor.quarantine_assessment_reviews WHERE organization_id=$1',[b])).rows[0].n,0);
+
   assert.equal((await reader.query('SELECT count(*)::int AS n FROM v121_anchor.quarantine_assessment_reviews WHERE organization_id=$1 AND assessment_id IN ($2,$3)',[a,assessment1,assessment2])).rows[0].n,4);
   assert.equal((await reader.query('SELECT count(*)::int AS n FROM v121_anchor.quarantine_assessments WHERE organization_id=$1 AND event_id=$2',[a,event])).rows[0].n,2);
   const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
