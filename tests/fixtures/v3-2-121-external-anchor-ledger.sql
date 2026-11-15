@@ -88,6 +88,10 @@ CREATE TRIGGER attester_quarantine_immutable BEFORE UPDATE OR DELETE
  EXECUTE FUNCTION v121_anchor.no_change();
 REVOKE ALL ON v121_anchor.attester_quarantine_events FROM PUBLIC;
 GRANT SELECT ON v121_anchor.attester_quarantine_events TO v121_anchor_reader;
+ALTER TABLE v121_anchor.attester_quarantine_events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY quarantine_tenant_select ON v121_anchor.attester_quarantine_events
+ FOR SELECT TO v121_anchor_reader
+ USING (organization_id='11111111-1111-4111-8111-111111111111'::uuid);
 
 CREATE FUNCTION v121_anchor.report_attester_quarantine(
  p_org uuid,p_event uuid,p_failure uuid,p_kind text,p_evidence char(64))
@@ -141,6 +145,10 @@ CREATE TRIGGER assessments_immutable BEFORE UPDATE OR DELETE ON v121_anchor.quar
 FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
 REVOKE ALL ON v121_anchor.quarantine_assessments FROM PUBLIC;
 GRANT SELECT ON v121_anchor.quarantine_assessments TO v121_anchor_reader;
+ALTER TABLE v121_anchor.quarantine_assessments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY assessment_tenant_select ON v121_anchor.quarantine_assessments
+ FOR SELECT TO v121_anchor_reader
+ USING (organization_id='11111111-1111-4111-8111-111111111111'::uuid);
 
 CREATE FUNCTION v121_anchor.record_quarantine_assessment(
  p_org uuid,p_event uuid,p_assessment uuid,p_version integer,
@@ -203,6 +211,10 @@ CREATE TRIGGER assessment_reviews_immutable BEFORE UPDATE OR DELETE ON v121_anch
 FOR EACH ROW EXECUTE FUNCTION v121_anchor.no_change();
 REVOKE ALL ON v121_anchor.quarantine_assessment_reviews FROM PUBLIC;
 GRANT SELECT ON v121_anchor.quarantine_assessment_reviews TO v121_anchor_reader;
+ALTER TABLE v121_anchor.quarantine_assessment_reviews ENABLE ROW LEVEL SECURITY;
+CREATE POLICY review_tenant_select ON v121_anchor.quarantine_assessment_reviews
+ FOR SELECT TO v121_anchor_reader
+ USING (organization_id='11111111-1111-4111-8111-111111111111'::uuid);
 
 CREATE FUNCTION v121_anchor.record_quarantine_review(
  p_org uuid,p_assessment uuid,p_reviewer uuid,p_domain text,p_decision text,p_digest char(64))
@@ -272,7 +284,8 @@ LEFT JOIN LATERAL(
  FROM v121_anchor.quarantine_assessments q
  WHERE q.organization_id=e.organization_id AND q.event_id=e.event_id
  ORDER BY q.assessment_version DESC LIMIT 1
-) latest ON TRUE;
+) latest ON TRUE
+WHERE e.organization_id='11111111-1111-4111-8111-111111111111'::uuid;
 REVOKE ALL ON v121_anchor.quarantine_review_diagnostics FROM PUBLIC;
 GRANT SELECT ON v121_anchor.quarantine_review_diagnostics TO v121_anchor_reader;
 
