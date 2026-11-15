@@ -51,7 +51,8 @@ export function createFixtureRecoveryIssuance({issuerPool,recoveryGate,approvalA
     'V121_ISSUER_ROLE_SCOPE_DENIED','V121_ISSUANCE_ENVELOPE_INVALID',
     'V121_RECOVERY_APPROVAL_ATTESTATION_REJECTED',
     'V121_RECOVERY_ATTESTATION_EXPIRED','V121_APPROVAL_VERSION_INVALID',
-    'V121_ISSUANCE_EMERGENCY_STOP'
+    'V121_ISSUANCE_EMERGENCY_STOP',
+    'V121_CROSS_MODULE_HOLD_INCOMPLETE'
    ].includes(e.message)) e.code=e.message;
    throw e;
   }finally{c.release();}
