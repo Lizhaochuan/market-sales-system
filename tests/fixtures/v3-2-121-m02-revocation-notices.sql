@@ -140,6 +140,53 @@ $rotate_gate$;
 CREATE TRIGGER fixture_attestation_immutable BEFORE UPDATE ON v106_test.fixture_receipt_attestation_secrets
 FOR EACH ROW EXECUTE FUNCTION v106_test.fixture_attestation_no_reactivation();
 
+
+-- Fixture-only metadata audit. Does not store keys, MACs, or full receipts.
+CREATE TABLE v106_test.fixture_receipt_key_audit (
+ event_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ organization_id uuid NOT NULL,
+ key_version integer NOT NULL,
+ event_kind text NOT NULL CHECK(event_kind IN ('KEY_ISSUED','KEY_REVOKED')),
+ actor text NOT NULL,
+ event_digest char(64) NOT NULL,
+ recorded_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ UNIQUE(organization_id,key_version,event_kind)
+);
+REVOKE ALL ON v106_test.fixture_receipt_key_audit FROM PUBLIC;
+CREATE FUNCTION v106_test.fixture_audit_key_transition() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $audit_transition$
+DECLARE kind text;
+DECLARE metadata text;
+BEGIN
+ IF TG_OP='INSERT' THEN
+  kind:='KEY_ISSUED';
+ ELSIF TG_OP='UPDATE' AND OLD.active IS TRUE AND NEW.active IS FALSE THEN
+  kind:='KEY_REVOKED';
+ ELSE
+  RETURN NEW;
+ END IF;
+ metadata:=NEW.organization_id::text||'|'||NEW.key_version::text||'|'||kind||'|'||session_user;
+ INSERT INTO v106_test.fixture_receipt_key_audit
+ (organization_id,key_version,event_kind,actor,event_digest)
+ VALUES(NEW.organization_id,NEW.key_version,kind,session_user,
+        encode(sha256(convert_to(metadata,'UTF8')),'hex'));
+ RETURN NEW;
+END;
+$audit_transition$;
+CREATE TRIGGER fixture_key_audit_events AFTER INSERT OR UPDATE
+ ON v106_test.fixture_receipt_attestation_secrets FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_audit_key_transition();
+CREATE FUNCTION v106_test.fixture_key_audit_no_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $audit_immutable$
+BEGIN
+ RAISE EXCEPTION 'V121_KEY_AUDIT_APPEND_ONLY';
+END;
+$audit_immutable$;
+CREATE TRIGGER fixture_key_audit_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_receipt_key_audit FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_key_audit_no_mutation();
+
 CREATE FUNCTION v106_test.fixture_append_negative_receipt(
  p_organization uuid,p_incident uuid,p_notice char(64),p_sequence integer,
  p_state text,p_previous char(64),p_digest char(64),p_payload text,p_attestation text,p_key_version integer)
