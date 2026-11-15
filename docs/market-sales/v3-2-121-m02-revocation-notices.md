@@ -323,3 +323,9 @@
 - 由独立 `v121_iam_revoker` 模拟账号追加撤回证据，不能删除原始提交；证据有效期不超过 1 小时，过期/撤回版本不允许恢复，同版本和不同提交人的并发操作通过统一事务锁串行化。独立 reader 只读返回 `VALID_SYNTHETIC_STILL_HOLD`、`RECEIPT_REVOKED_STILL_HOLD`、`RECEIPT_SUPERSEDED_STILL_HOLD` 或 `RECEIPT_EXPIRED_STILL_HOLD`，不产生业务解除隔离权利。
 - 新增 `fingerprintFixtureExt001ForIntake` 用已验证的 SECURITY/AUDIT 合成双签名材料产生域分隔 SHA-256 摘要；数据库本身仅保存该模拟摘要，并**不自行复验 Ed25519 也不连接生产 IAM**。测试覆盖缺失/重复、版本冲突、越权撤回、过期时效、跨连接持久性、并发冲突和管理员试图覆盖历史，保持原始业务库安全 HOLD。
 - 当前 EXT-001 仍是 `UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`，10 项生产缺口与 6 项独立签署均未改变。详细规范见 `docs/market-sales/v3-2-121-ext001-iam-evidence-intake.md`。继续 Draft PR #129 / CI-only / 不合并 / 不部署。
+
+## V121 / EXT-001 原始字节、签名版本与独立复核防替换（CI-only）
+- IAM 合成证据正文中的 `revision_no` 与 `revision_id` 均由 SECURITY 签名覆盖，AUDIT 对该完整正文的摘要另行签名。E1/E2 文件不只比较请求里声称的 SHA-256：`verifyFixtureExt001BytesAndFingerprint` 对调用者提供的两个原始 Buffer 逐一计算哈希，拒绝任一文件丢失、被替换、E1/E2 互换、空字节、超测试上限、跨版本或旧审核签名重放。
+- 新增独立 `v121_iam_provenance_attester` 模拟身份与只能追加的 `fixture_iam_provenance_proofs` 记录。证明绑定机构、收据 UUID、递增版本、签名版本 UUID、E1/E2 哈希、完整双签名包摘要、两份签名的各自摘要、SECURITY 和 AUDIT 双方主体以及有效期。收据 writer 无权生成证明，且必须在统一事务锁内找到与收据每一项输入均完全匹配的证明，否则返回 `V121_IAM_PROVENANCE_MISSING_OR_MISMATCH`；原收据写入入口不再接受没有独立来源证明的记录。
+- `issueFixtureExt001VerifiedProvenance` 在申请证明前**再次核对双签名、签发者信任状态、签名声明中的版本和原始 E1/E2 字节**，任何异常都不会调用 SQL attester。CI 合同/集成测试覆盖文件替换后沿用旧签名、旧审核跨版本借用、伪造摘要、writer 无凭据登记、非 attester 冒用与两份不同证明竞争同一版本。保留既有过期、撤回和历史不可覆盖验收。
+- **不可超出的安全结论**：此处只能证明 CI 提供的两个合成 Buffer 和已签声明一致，无法独立证明这些字节来自真实 IAM，也无法检测此后没有重新读取的远程文件被替换。数据库本身不原生验 Ed25519，依然信任隔离 attester 身份；其凭据遭攻破仍可能造假。生产实现必须由受信文件版本/内容寻址存储、外部取证和真正独立 IAM 审核补齐，不能把此 CI 检查称为生产证据完整性已验收。`EXT-001=UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`，Draft PR #129 / HOLD 不变。
