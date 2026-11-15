@@ -1,0 +1,72 @@
+name: V3.2-115 reviewer invalidation permanent HOLD audit
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-reviewer-invalidation-hold.mjs'
+      - 'tests/integration/v3-2-115-m02-review-invalidation-hold.test.mjs'
+      - 'tests/helpers/v3-2-115-m02-postgres-review-hold.mjs'
+      - 'tests/fixtures/v3-2-115-m02-review-hold.sql'
+      - 'scripts/v3-2-115-setup-review-hold.mjs'
+      - 'spec/v3-2-115-m02-review-invalidation-hold.json'
+      - 'docs/V3.2-115_M02_REVIEW_INVALIDATION_HOLD.md'
+      - '.github/workflows/v3-2-115-review-invalidation-hold.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-invalidation-hold:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install disposable CI dependencies without changing lock files
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Validate source SQL helper and test syntax
+        run: |
+          node --check src/cross-module-reviewer-invalidation-hold.mjs
+          node --check tests/integration/v3-2-115-m02-review-invalidation-hold.test.mjs
+          node --check tests/helpers/v3-2-115-m02-postgres-review-hold.mjs
+          node --check scripts/v3-2-115-setup-review-hold.mjs
+      - name: Prepare disposable V106 V109 V110 V112 V113 V114 and V115 audit tables
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+          node scripts/v3-2-112-setup-evidence-intake-sql.mjs
+          node scripts/v3-2-113-setup-reviewer-assignments.mjs
+          node scripts/v3-2-114-setup-reviewer-lifecycle.mjs
+          node scripts/v3-2-115-setup-review-hold.mjs
+      - name: Run V115 durable invalidation and no-release PostgreSQL scenarios
+        run: node --test tests/integration/v3-2-115-m02-review-invalidation-hold.test.mjs
+      - name: Regress V114 reviewer lifecycle V113 assignment and V112 intake
+        run: node --test tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs
+      - name: Regress V111 independent signed evidence and V110 negative-only receipt
+        run: node --test tests/security/v3-2-111-m02-independent-evidence-review.test.mjs tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+      - name: Regress V109 V108 V107 and V106 isolated PostgreSQL integration suites
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Assert no SQL HOLD release external approval or production integration
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-115-m02-review-invalidation-hold.json'));const d=s.hard_denials;if(s.parent_pr!==121||s.cases.length!==17||s.hold_contract.no_release_operation_implemented!==true||s.hold_contract.hold_active_on_every_response!==true||s.database.test_role_hold_flag_update_granted!==false||s.database.production_migration_created!==false||s.real_external_approvals.production_release_protocol_implemented!==false||s.external_contract_status!=='proposed-unimplemented'||Object.entries(d).some(([k,v])=>k==='hold_active'?v!==true:v!==false))process.exit(1)"
+      - name: Recheck V105 unresolved external contract acceptance requirements
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress eighteen V82 through V99 isolated M02 security suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
