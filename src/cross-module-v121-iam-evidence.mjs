@@ -214,3 +214,38 @@ export function verifyFixtureExt001BytesAndFingerprint(envelope,{trustedKeys,now
   release_eligible:false,hold_active:true
  });
 }
+
+
+// This is the sole supported CI attester entrypoint: re-read submitted raw
+// bytes, re-verify the two signatures, and enforce the signed revision number
+// immediately before requesting the separate PostgreSQL attestation.
+export async function issueFixtureExt001VerifiedProvenance({
+ envelope,artifactBytes,trustedKeys,nowMs,revisionNo,receiptId,attester
+}={}){
+ if(!Number.isSafeInteger(revisionNo) || revisionNo<1 ||
+    !isUuid(receiptId)) fail('V121_IAM_PROVENANCE_INPUT_INVALID');
+ const proof=verifyFixtureExt001BytesAndFingerprint(envelope,{
+  artifactBytes,trustedKeys,nowMs
+ });
+ if(proof.revision_no!==revisionNo)
+  fail('V121_IAM_PROVENANCE_SIGNED_REVISION_MISMATCH');
+ if(!attester || typeof attester.query!=='function')
+  fail('V121_IAM_PROVENANCE_ATTESTER_UNAVAILABLE');
+ const q='SELECT v121_anchor.fixture_attest_iam_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz) AS verdict';
+ const args=[proof.organization_id,revisionNo,proof.revision_id,receiptId,
+  proof.evidence_digest,proof.evidence_e1_digest,proof.evidence_e2_digest,
+  proof.issuer_id,proof.reviewer_id,proof.issuer_signature_digest,
+  proof.reviewer_signature_digest,new Date(proof.valid_until_ms)];
+ const result=await attester.query(q,args);
+ if(!['ATTESTED_SYNTHETIC_STILL_HOLD','EXACT_PROVENANCE_RETRY_STILL_HOLD']
+  .includes(result?.rows?.[0]?.verdict))
+  fail('V121_IAM_PROVENANCE_ATTESTATION_INDETERMINATE');
+ return Object.freeze({
+  verdict:result.rows[0].verdict,
+  receipt_id:receiptId,revision_no:revisionNo,
+  envelope_digest:proof.evidence_digest,
+  file_bytes_verified_in_fixture:true,
+  production_evidence_collected:false,
+  release_authorized:false,hold_active:true,release_eligible:false
+ });
+}
