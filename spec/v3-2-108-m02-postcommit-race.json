@@ -1,0 +1,118 @@
+{
+  "schema_version": "v3.2-108-m02-postcommit-causal-race-v1",
+  "module": "M02",
+  "scope": "CI_ONLY_NON_ATOMIC_POSTCOMMIT_SOURCE_RECHECK",
+  "parent_pr": 114,
+  "parent_head_sha": "dbde3e4fb26f2c88c87af03e9957071d19041842",
+  "parent_ci": {
+    "run_id": 43662203065,
+    "status": "completed",
+    "conclusion": "success"
+  },
+  "source": "src/cross-module-postcommit-causal-recheck.mjs",
+  "test": "tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs",
+  "signed_source": "src/cross-module-source-trust-fence.mjs",
+  "disposable_sql_store": "tests/helpers/v3-2-106-m02-postgres-checkpoint.mjs",
+  "integrated_test_postgresql": {
+    "image": "postgres:16",
+    "database": "v106_isolated",
+    "schema": "v106_test",
+    "test_roles": [
+      "v106_writer_a",
+      "v106_writer_b"
+    ],
+    "guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "real_sql_transactions": true,
+    "production_connected": false,
+    "enterprise_database_uat": false
+  },
+  "observations": {
+    "count": 3,
+    "each_observation": "V3.2-104 signed source double-read, actual PostgreSQL checkpoint advance and persisted record readback",
+    "race_detection": "Reject when consecutive signed source watermark or persisted checkpoint digests differ",
+    "lifecycle_status": "fixture_postcommit_stable means only simulated observation consistency, not external authority",
+    "audit_checkpoint_write_side_effect": true,
+    "crossing_external_transaction_boundary": false,
+    "closes_after_final_observation_window": false,
+    "guaranteed_causal_barrier": false
+  },
+  "scenarios": [
+    {
+      "id": "RACE-01",
+      "expect": "Stable signed+SQL evidence remains business blocked"
+    },
+    {
+      "id": "RACE-02",
+      "expect": "Source changes after initial signed read but before SQL COMMIT fail closed"
+    },
+    {
+      "id": "RACE-03",
+      "expect": "Revocation after first SQL COMMIT invalidates prior observation"
+    },
+    {
+      "id": "RACE-04",
+      "expect": "Revision after second commit is caught by final observation"
+    },
+    {
+      "id": "RACE-05",
+      "expect": "Invalid signature, outage, governance swap after commit deny"
+    },
+    {
+      "id": "RACE-06",
+      "expect": "SQL failure before COMMIT rolls back and returns blocked"
+    },
+    {
+      "id": "RACE-07",
+      "expect": "PostgreSQL RLS prevents other tenant's signed source acceptance"
+    },
+    {
+      "id": "RACE-08",
+      "expect": "Same-version signed evidence change cannot rewrite persisted proof"
+    },
+    {
+      "id": "RACE-09",
+      "expect": "After-final-read source mutation remains an admitted unresolved race; no business allowance"
+    },
+    {
+      "id": "RACE-10",
+      "expect": "Reject malformed scope and caller-controlled approval flags"
+    }
+  ],
+  "formal_atomic_causality_contract_requirements": [
+    "Independent signed source version vector bound to sales, finance, academic and organization/incident",
+    "Trusted source-side validation or lease/commit token valid across SQL commit and final disposition",
+    "Expiry, revocation and staffing authorizations invalidated atomically with the business acceptance decision",
+    "Committed checkpoint and external source barrier compared under defined cross-system transactional semantics",
+    "All lost lock, uncertain commit, timeout, forged receipt, or after-commit event routes fail closed",
+    "Durable audit with non-repudiable organizational authority and immutable historic source attribution",
+    "Signed third-party acceptance evidence from finance, academic and sales independent approvers",
+    "Cross-service race tests with fault injection and a formal rollback/compensation plan"
+  ],
+  "blocking_gaps": [
+    "No real source-side barrier or lease; no atomic guarantee after final read",
+    "Fixture Ed25519 keys do not authenticate real source truth or approval",
+    "PostgreSQL CI service does not provide true enterprise production UAT or database crash recovery",
+    "No six external authority proofs, 16-check external approval or R01..R10 completed",
+    "No Chromium or final real-world contractual acceptance"
+  ],
+  "external_contract_status": "proposed-unimplemented",
+  "sixteen_external_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "external_authority_verified": false,
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "production_integration_allowed": false,
+  "student_primary": true,
+  "family_optional": true,
+  "original_orders_payments_saleevent_lessons_compensation_preserved": true,
+  "historic_migration_range_per_prior_specs": "001-038",
+  "production_migration_039_added": false,
+  "edu_management_system_touched": false,
+  "next_stage": "V3.2-109: independently authenticated source barrier/lease contract and negative testing, no production authority"
+}
