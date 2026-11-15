@@ -1777,7 +1777,8 @@ test('concurrent checkpoint signer competition and key revocation serialize with
   const v11=await advance(11,8,'00000000-0000-4000-8000-0000000000bd');
   const forbidden=signAnchor(v11,signer3,pair3);
   await assert.rejects(writerA.query(append,proofParams(forbidden)),/V121_ANCHOR_KEY_NOT_ACTIVE/);
-  assert.throws(()=>verifyFixtureActiveAuditAnchor({...await trust(),anchor:forbidden,current:v11,
+  const revokedTrust=await trust();
+  assert.throws(()=>verifyFixtureActiveAuditAnchor({...revokedTrust,anchor:forbidden,current:v11,
    nowMs:150,minimumSequence:8}),{code:'V121_ANCHOR_KEY_REVOKED'});
   // Isolation other than READ COMMITTED is rejected rather than using stale
   // snapshots after blocking on key event locks.
