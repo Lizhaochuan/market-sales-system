@@ -258,7 +258,10 @@ export async function issueFixtureExt001FromTwoSources(args){
   nowMs:clock(),
   revisionNo:verified.revision_no,
   receiptId:args.receiptId,
-  attester:args.attester
+  attester:args.attester,
+  // The signed manifest plus both witness signatures are bound into the
+  // isolated SQL provenance row, not merely displayed in JS output.
+  sourceBindingDigest:sha(encode('v121-ext001-source-binding-v1',args.sourceProof))
  });
  // A database attestation may finish after a source has been revoked,
  // replaced, or expired. A failed post-check cannot undo a committed SQL
