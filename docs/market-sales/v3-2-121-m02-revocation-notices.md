@@ -226,3 +226,9 @@
 - `fixture_record_uat_remediation_review` 在原有最新版本检查、证据绑定和事故 HOLD 验证之后，支持同一复核职责、同一人员、相同意见及证据的**严格幂等重试**。复核职责相同而内容改变则拒绝 `V121_UAT_REVIEW_IDEMPOTENCY_CONFLICT`；不同身份跨审核职责仍要求独立。记录始终只追加，不覆盖历史。
 - PostgreSQL CI 测试以 `BEGIN`→写入→`ROLLBACK` 模拟异常回滚，并用 `pg_terminate_backend` 在事务已执行、但未 COMMIT 时主动终止模拟客户端连接；两者均不得保留半提交的整改。随后两个同参数请求同时重试，应只生成一条记录；审核的事务回滚、双请求重试和冲突重试同样受检。最终三个模块均保持 HOLD，安全告警未解决，仍禁止恢复密钥发行。
 - 限制：这是同一 PostgreSQL 事务内的精确重试验证，不能替代跨服务的可靠投递、断网分区及多数据库分布式事务演练。真实 IAM、外部密钥托管、独立不可改审计和生产 UAT 仍未完成。继续 Draft / CI-only / 不合并 / 不部署。
+
+## V121 冷启动状态重建与历史一致性检测（CI-only）
+- 新增受限、只读的 `fixture_rebuild_uat_state(organization_id, failure_id)`。只有独立测试账号 `v106_state_reader` 可调用，SQL 函数从 PostgreSQL 已提交持久记录重新计算整改版本总数、最新版本/整改 ID、最新版本通过复核的职责数量、原始告警来源、复核记录和整改证据的一致性、三模块 HOLD 完整性及事故紧急停止状态。不使用服务进程缓存、不写入业务或审批状态。
+- 检测规则包括：版本必须从 1 连续到当前最大值、每版证据摘要不得重复；审核证据必须对应其整改版本，审核人不得与整改人/原失败审核者重叠或跨双职责冒用；事故对应的 SALES / FINANCE / ACADEMIC HOLD 必须齐全，已认证外部告警和紧急停止必须存在。明确返回 `HISTORY_INCOMPLETE`、`REVIEW_INTEGRITY_INVALID`、`CROSS_MODULE_HOLD_INCOMPLETE`、`ALERT_PROVENANCE_MISSING` 或 `EMERGENCY_STOP_MISSING`，正常历史也只返回 `REBUILT_STILL_HOLD`。
+- 隔离 PostgreSQL 测试使用新数据库客户端模拟状态读取服务重建、客户端关闭再连接，并断言两次读取完全一致。测试超级管理员临时模拟版本跳号、审核摘要被破坏和教务 HOLD 行丢失；新连接必须检测异常，恢复测试数据后状态重新一致。测试角色不能直接读取或修改基础记录，不能跨租户重建。
+- 所有重建结果恒定 `hold_active=true`、`release_eligible=false`，**并不是恢复批准或生产数据修复**。本轮只覆盖单个隔离 PostgreSQL 实例的已提交可见状态；外部历史真实完整性、跨服务日志比对、进程崩溃后的真实部署恢复、可信备份和正式 UAT 仍待独立验收。继续 Draft、CI-only、不合并、不部署。
