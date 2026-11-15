@@ -1,0 +1,65 @@
+name: V3.2-109 isolated signed causal lease and PostgreSQL fence
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-causal-lease-fence.mjs'
+      - 'tests/helpers/v3-2-109-m02-postgres-lease-ledger.mjs'
+      - 'tests/fixtures/v3-2-109-m02-lease-ledger.sql'
+      - 'tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs'
+      - 'scripts/v3-2-109-setup-lease-sql.mjs'
+      - 'docs/V3.2-109_M02_CAUSAL_LEASE_FENCE.md'
+      - 'spec/v3-2-109-m02-causal-lease-fence.json'
+      - '.github/workflows/v3-2-109-causal-lease-fence.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-signed-lease-transaction:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned test runtime without updating lock files
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Validate causal lease code syntax
+        run: |
+          node --check src/cross-module-causal-lease-fence.mjs
+          node --check tests/helpers/v3-2-109-m02-postgres-lease-ledger.mjs
+          node --check tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs
+          node --check scripts/v3-2-109-setup-lease-sql.mjs
+      - name: Create disposable V106 checkpoint and V109 tenant lease schema
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+      - name: Run V109 signed causal lease SQL and failure scenarios
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs
+      - name: Regress V108 source/commit race and V107 signed SQL integrations
+        run: node --test tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs
+      - name: Regress V106 PostgreSQL DB-01 through DB-08
+        run: node --test tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Enforce CI-only external authority, no migration and no deployment
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const x=JSON.parse(readFileSync('spec/v3-2-109-m02-causal-lease-fence.json'));if(x.parent_pr!==115||x.cases.length!==11||x.fixture_lease_contract.false_positive_window.indexOf('Still exists')!==0||x.production_causal_barrier_implemented!==false||x.test_database.production_migration_created!==false||x.finance_authorized!==false||x.academic_authorized!==false||x.handoff_allowed!==false||x.compensation_write_allowed!==false||x.release_eligible!==false||x.hold_active!==true||x.merge_authorized!==false||x.deploy_authorized!==false||x.external_contract_status!=='proposed-unimplemented')process.exit(1)"
+      - name: Check V105 unfulfilled admission requirements
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress eighteen V82-V99 isolated security tests
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
