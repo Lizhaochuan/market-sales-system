@@ -1027,7 +1027,8 @@ test('UAT failed evidence persists across remediation and two independent re-rev
  await closeoutWriter.query(sql,[a,remediation,securityReviewer,'SECURITY','ACCEPTED_FOR_REVIEW',remediationDigest]);
  await assert.rejects(closeoutWriter.query(sql,[a,remediation,securityReviewer,'AUDIT','ACCEPTED_FOR_REVIEW',remediationDigest]),/V121_UAT_REVIEWER_NOT_INDEPENDENT/);
  await closeoutWriter.query(sql,[a,remediation,auditReviewer,'AUDIT','ACCEPTED_FOR_REVIEW',remediationDigest]);
- await assert.rejects(closeoutWriter.query(sql,[a,remediation,auditReviewer,'AUDIT','ACCEPTED_FOR_REVIEW',remediationDigest]),/V121_UAT_REVIEWER_NOT_INDEPENDENT|duplicate key/);
+ await closeoutWriter.query(sql,[a,remediation,auditReviewer,'AUDIT','ACCEPTED_FOR_REVIEW',remediationDigest]); // Exact retry is idempotent.
+ await assert.rejects(closeoutWriter.query(sql,[a,remediation,auditReviewer,'AUDIT','REJECTED',remediationDigest]),/V121_UAT_REVIEW_IDEMPOTENCY_CONFLICT/);
  const diagnostics=(await admin.query('SELECT attempts,accepted_review_roles,original_failure_retained,hold_active,release_eligible FROM v106_test.fixture_uat_remediation_diagnostics WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0];
  assert.deepEqual([diagnostics.attempts,diagnostics.accepted_review_roles,
   diagnostics.original_failure_retained,diagnostics.hold_active,diagnostics.release_eligible],[1,2,true,true,false]);
@@ -1133,4 +1134,70 @@ test('concurrent remediation candidates serialize to one next version and keep o
  assert.deepEqual(historical.map(x=>x.remediation_version),[1,2,3,4,5]);
  const stop=(await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0];
  assert.equal(stop.issuance_blocked,true);
+});
+
+test('transaction rollback, lost connection and concurrent exact retries cannot half-commit remediation or review',async()=>{
+ const event='00000000-0000-4000-8000-0000000000e9';
+ const failure='00000000-0000-4000-8000-0000000000c1';
+ const remediation='00000000-0000-4000-8000-0000000000c2';
+ const originalReviewer='00000000-0000-4000-8000-0000000000c3';
+ const remediator='00000000-0000-4000-8000-0000000000c4';
+ const securityReviewer='00000000-0000-4000-8000-0000000000c5';
+ const auditReviewer='00000000-0000-4000-8000-0000000000c6';
+ const evidence=createHash('sha256').update('recovery-transport-interruption-evidence').digest('hex');
+ const note=createHash('sha256').update('recovery-transport-interruption-note').digest('hex');
+ const altered=createHash('sha256').update('conflicting-retry-payload').digest('hex');
+ await admin.query('INSERT INTO v106_test.fixture_uat_failures(organization_id,incident_id,event_id,failure_id,evidence_kind,failed_evidence_digest,failed_by,failure_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+  [a,incident,event,failure,'FINANCIAL_IMPACT_RECONCILED',evidence,originalReviewer,'REVIEW_REJECTED']);
+ const submit='SELECT v106_test.fixture_submit_uat_remediation($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::char(64),$6::uuid,$7::char(64)) AS status';
+ const args=[a,failure,remediation,1,evidence,remediator,note];
+ await assert.rejects(issuerWriter.query(submit,args),/permission denied/);
+ // Successful statement inside a failed transaction must leave no durable row.
+ const tx=await closeoutWriter.connect();
+ try{
+  await tx.query('BEGIN');
+  assert.equal((await tx.query(submit,args)).rows[0].status,'RECORDED');
+  await tx.query('ROLLBACK');
+ }finally{tx.release();}
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_uat_remediations WHERE organization_id=$1 AND remediation_id=$2',[a,remediation])).rows[0].n,0);
+ // Simulate a process/network disconnect after the statement, before COMMIT.
+ const killed=new pg.Client({host,database:'v106_isolated',user:'v106_closeout_writer',password:'test_only_closeout'});
+ killed.on('error',()=>{}); // Connection termination is intentional in this fixture.
+ await killed.connect();
+ try{
+  await killed.query('BEGIN');
+  assert.equal((await killed.query(submit,args)).rows[0].status,'RECORDED');
+  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_uat_remediations WHERE organization_id=$1 AND remediation_id=$2',[a,remediation])).rows[0].n,0);
+  const terminated=await admin.query('SELECT pg_terminate_backend($1::integer) AS stopped',[killed.processID]);
+  assert.equal(terminated.rows[0].stopped,true);
+ }finally{await killed.end().catch(()=>{});}
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_uat_remediations WHERE organization_id=$1 AND remediation_id=$2',[a,remediation])).rows[0].n,0);
+ // A retry with the same id and payload can safely race with another retry.
+ const results=await Promise.all([closeoutWriter.query(submit,args),closeoutWriter.query(submit,args)]);
+ assert.deepEqual(results.map(x=>x.rows[0].status).sort(),['ALREADY_RECORDED','RECORDED']);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_uat_remediations WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0].n,1);
+ await assert.rejects(closeoutWriter.query(submit,[...args.slice(0,4),altered,remediator,note]),/V121_REMEDIATION_IDEMPOTENCY_CONFLICT/);
+ assert.equal((await closeoutWriter.query(submit,args)).rows[0].status,'ALREADY_RECORDED');
+ const review='SELECT v106_test.fixture_record_uat_remediation_review($1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::char(64))';
+ const security=[a,remediation,securityReviewer,'SECURITY','ACCEPTED_FOR_REVIEW',evidence];
+ const audit=[a,remediation,auditReviewer,'AUDIT','ACCEPTED_FOR_REVIEW',evidence];
+ const reviewTx=await closeoutWriter.connect();
+ try{
+  await reviewTx.query('BEGIN');
+  await reviewTx.query(review,security);
+  await reviewTx.query('ROLLBACK');
+ }finally{reviewTx.release();}
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_uat_remediation_reviews WHERE organization_id=$1 AND remediation_id=$2',[a,remediation])).rows[0].n,0);
+ const reviewers=await Promise.all([closeoutWriter.query(review,security),closeoutWriter.query(review,security)]);
+ assert.equal(reviewers.length,2);
+ await closeoutWriter.query(review,audit);
+ await closeoutWriter.query(review,audit);
+ await assert.rejects(closeoutWriter.query(review,[...security.slice(0,4),'REJECTED',evidence]),/V121_UAT_REVIEW_IDEMPOTENCY_CONFLICT/);
+ const rows=(await admin.query('SELECT reviewer_domain,decision,hold_active,release_eligible FROM v106_test.fixture_uat_remediation_reviews WHERE organization_id=$1 AND remediation_id=$2 ORDER BY reviewer_domain',[a,remediation])).rows;
+ assert.deepEqual(rows.map(x=>[x.reviewer_domain,x.decision,x.hold_active,x.release_eligible]),[
+  ['AUDIT','ACCEPTED_FOR_REVIEW',true,false],['SECURITY','ACCEPTED_FOR_REVIEW',true,false]]);
+ await assert.rejects(admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),/V121_SECURITY_ALERT_UNRESOLVED/);
+ const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
+ assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
+  ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
 });
