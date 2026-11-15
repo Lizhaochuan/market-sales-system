@@ -72,7 +72,7 @@ function fixture(){
   const payload={
    schema_version:'v3.2-104-ci-trust-roster-v1',
    organization_id:badScope?'22222222-2222-4222-8222-222222222222':org,
-   revision:trustRevision,issued_at_ms:time-1000,
+   revision:trustRevision,issued_at_ms:time-500,
    expires_at_ms:expired?time-1:time+60000,
    keys:domains.flatMap(d=>keys[d].map(k=>({
     domain:d,key_id:k.key_id,public_key_pem:PEM(k.pair),
