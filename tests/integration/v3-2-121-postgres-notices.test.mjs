@@ -117,3 +117,44 @@ test('concurrent identical notice uses one persisted event',async()=>{
  const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_notices WHERE organization_id=$1 AND incident_id=$2 AND epoch=7',[a,incident]);
  assert.equal(count.rows[0].n,1);
 });
+
+test('negative-only receipts persist in order and never release',async()=>{
+ const queued=await service.enqueue({...input,epoch:20});
+ assert.equal(queued.notice_accepted,true);
+ const base={organization_id:a,incident_id:incident,notice_id:queued.notice_id};
+ const first=await ledger.appendNegativeReceipt({...base,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'});
+ assert.equal(first.duplicate,false);
+ assert.equal(first.hold_active,true);
+ const again=await ledger.appendNegativeReceipt({...base,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'});
+ assert.equal(again.duplicate,true);
+ const second=await ledger.appendNegativeReceipt({...base,receipt_sequence:2,receipt_state:'COPY_NOT_RETRACTABLE'});
+ assert.equal(second.hold_active,true);
+ const report=await service.report(Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest'].map(k=>[k,input[k]])));
+ assert.equal(report.hold_active,true);
+ assert.equal(report.release_eligible,false);
+ assert.equal(report.recipients.find(x=>x.recipient_id===recipient).state,'COPY_NOT_RETRACTABLE');
+});
+test('receipt cannot skip sequence, use positive ack or rewrite history',async()=>{
+ const q=await service.enqueue({...input,epoch:21});
+ const base={organization_id:a,incident_id:incident,notice_id:q.notice_id};
+ await assert.rejects(ledger.appendNegativeReceipt({...base,receipt_sequence:2,receipt_state:'NEGATIVE_RECEIPT'}),{code:'NOTICE_RECEIPT_OUT_OF_ORDER'});
+ await assert.rejects(ledger.appendNegativeReceipt({...base,receipt_sequence:1,receipt_state:'FIXTURE_ACKNOWLEDGED'}),{code:'NOTICE_RECEIPT_INPUT_INVALID'});
+ await ledger.appendNegativeReceipt({...base,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'});
+ await assert.rejects(ledger.appendNegativeReceipt({...base,receipt_sequence:1,receipt_state:'COPY_NOT_RETRACTABLE'}),{code:'NOTICE_RECEIPT_REPLAY_CONFLICT'});
+ await assert.rejects(writer.query("UPDATE v106_test.fixture_revocation_negative_receipts SET receipt_state='COPY_NOT_RETRACTABLE'"),/permission denied/);
+ await assert.rejects(writer.query('DELETE FROM v106_test.fixture_revocation_negative_receipts'),/permission denied/);
+});
+test('receipt cross-tenant write and unknown notice fail closed',async()=>{
+ const q=await service.enqueue({...input,epoch:22});
+ await assert.rejects(ledger.appendNegativeReceipt({organization_id:b,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'}),{code:'NOTICE_RECEIPT_TARGET_ABSENT'});
+ await assert.rejects(writer.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[b,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']),/row-level security/);
+});
+test('receipt integrity failure prevents coverage report',async()=>{
+ const q=await service.enqueue({...input,epoch:23});
+ const base={organization_id:a,incident_id:incident,notice_id:q.notice_id};
+ await ledger.appendNegativeReceipt({...base,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'});
+ await admin.query('UPDATE v106_test.fixture_revocation_negative_receipts SET receipt_payload=$4 WHERE organization_id=$1 AND incident_id=$2 AND notice_id=$3',[a,incident,q.notice_id,'{}']);
+ const report=await service.report(Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest'].map(k=>[k,input[k]])));
+ assert.equal(report.reason_code,'NOTICE_DEPENDENCY_UNAVAILABLE');
+ assert.equal(report.hold_active,true);
+});
