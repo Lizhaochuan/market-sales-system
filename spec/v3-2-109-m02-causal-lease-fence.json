@@ -1,0 +1,139 @@
+{
+  "schema_version": "v3.2-109-m02-causal-lease-fence-v1",
+  "module": "M02",
+  "scope": "CI_ONLY_SIGNED_CAUSAL_LEASE_AND_SQL_FENCE",
+  "parent_pr": 115,
+  "parent_head_sha": "e5196e7798fbec49cfb8ecb6536ef85aa7edffa0",
+  "parent_ci_runs": [
+    43662562811,
+    43662562502
+  ],
+  "source_code": "src/cross-module-causal-lease-fence.mjs",
+  "integration_test": "tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs",
+  "lease_sql_fixture": "tests/fixtures/v3-2-109-m02-lease-ledger.sql",
+  "lease_sql_helper": "tests/helpers/v3-2-109-m02-postgres-lease-ledger.mjs",
+  "existing_source_fence": "src/cross-module-source-trust-fence.mjs",
+  "existing_checkpoint_store": "tests/helpers/v3-2-106-m02-postgres-checkpoint.mjs",
+  "test_database": {
+    "postgresql_version": 16,
+    "database": "v106_isolated",
+    "schema": "v106_test",
+    "environment_guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "row_level_security": true,
+    "ephemeral_only": true,
+    "real_business_data_access": false,
+    "production_migration_created": false
+  },
+  "fixture_lease_contract": {
+    "issuer_signature": "Pinned independent fixture Ed25519 key",
+    "version": "v3.2-109-ci-lease-claim-v1",
+    "status_version": "v3.2-109-ci-lease-status-v1",
+    "source_binding": "SHA-256 of signed V3.2-104 test watermark after actual V3.2-106 SQL advance",
+    "scope": [
+      "organization_id",
+      "incident_id"
+    ],
+    "claim_fields": [
+      "schema_version",
+      "organization_id",
+      "incident_id",
+      "lease_id",
+      "holder_id",
+      "barrier_epoch",
+      "source_watermark_digest",
+      "revocation_sequence",
+      "revocation_digest",
+      "issued_at_ms",
+      "expires_at_ms",
+      "fixture_only",
+      "signature"
+    ],
+    "renewal_and_rotation": "Not automatically implemented; new epochs require independent proof",
+    "max_fixture_lease_lifetime_ms": 30000,
+    "database_rule": "Serializable monotone per-scope lease bound; conflicting same epoch denied",
+    "domain_source_revocation_must_remain_current": true,
+    "post_bind_checks": "Two signed authority status reads plus two source/checkpoint rechecks",
+    "false_positive_window": "Still exists after final observation; not cross-system atomic"
+  },
+  "cases": [
+    {
+      "id": "LEASE-01",
+      "expected": "Signed test lease with SQL fence is always business blocked"
+    },
+    {
+      "id": "LEASE-02",
+      "expected": "Expired or forged lease issuer signature rejected before SQL bind"
+    },
+    {
+      "id": "LEASE-03",
+      "expected": "Issuer revocation after binding invalidates lease"
+    },
+    {
+      "id": "LEASE-04",
+      "expected": "Lost SQL lease fence overrides issuer-active status"
+    },
+    {
+      "id": "LEASE-05",
+      "expected": "Changed source revision or revocation invalidates lease"
+    },
+    {
+      "id": "LEASE-06",
+      "expected": "Expiry, forged status, fencing epoch mismatch reject"
+    },
+    {
+      "id": "LEASE-07",
+      "expected": "Concurrent same-epoch claims cannot both bind"
+    },
+    {
+      "id": "LEASE-08",
+      "expected": "Invalid source signature cannot write lease"
+    },
+    {
+      "id": "LEASE-09",
+      "expected": "Wrong tenant DB role cannot issue/commit lease"
+    },
+    {
+      "id": "LEASE-10",
+      "expected": "Caller-provided business approval or fake receipt rejected"
+    },
+    {
+      "id": "LEASE-11",
+      "expected": "After-final-read revocation remains unresolved; all business rights false"
+    }
+  ],
+  "known_blocks": [
+    "Fixture issuer and governance keys are not independently approved production authority",
+    "PostgreSQL is ephemeral and not enterprise-approved production transaction environment",
+    "Independent lease status queries and SQL bind are not a single atomic source-side commit",
+    "After-final-observation source revocation remains possible",
+    "Checkpoint and lease record are in separate serializable transactions, not one real business atomic transaction",
+    "No verified real finance and academic signatures or independent order/payment/lesson reconciliation",
+    "No trusted cross-domain causal acceptance receipt, 16 admission checks or R01-R10",
+    "No production API wiring, Chromium, official contract or full business UAT"
+  ],
+  "external_contract_status": "proposed-unimplemented",
+  "real_source_authority_verified": false,
+  "real_finance_academic_signatures_verified": false,
+  "real_atomic_handoff_verified": false,
+  "production_causal_barrier_implemented": false,
+  "postgresql_enterprise_uat_verified": false,
+  "chromium_uat_verified": false,
+  "sixteen_external_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "production_integration_allowed": false,
+  "student_primary": true,
+  "family_optional": true,
+  "original_order_payment_saleevent_lesson_compensation_preserved": true,
+  "historical_production_migration_range": "001-038",
+  "new_production_migration_039": false,
+  "edu_management_system_modified": false,
+  "next_stage": "V3.2-110: strict source-side lease loss notification and atomic-commit barrier design; no production authority"
+}
