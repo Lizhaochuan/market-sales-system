@@ -298,7 +298,7 @@ test('MAN-17 tampered V118 student scan event blocks incident-level proof',async
  await using(11917,[11,12],async f=>{
   await f.scan(11);
   await f.pool.query(
-   'UPDATE v106_test.fixture_hold_gap_scan_heads SET event_digest=$1 WHERE organization_id=$2 AND incident_id=$3 AND student_id=$4',
+   'UPDATE v106_test.fixture_hold_gap_scan_heads SET sequence=sequence+1,event_digest=$1 WHERE organization_id=$2 AND incident_id=$3 AND student_id=$4',
    ['f'.repeat(64),ORG,f.scope.incident_id,student(11)]);
   const r=await f.gate().aggregate(f.scope);safe(r);
   assert.equal(r.reason_code,'INCIDENT_MANIFEST_STUDENT_AUDIT_UNVERIFIED');
