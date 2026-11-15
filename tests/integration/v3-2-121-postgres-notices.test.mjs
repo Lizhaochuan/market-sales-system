@@ -10,7 +10,7 @@ import {signFixtureAuditAnchor,verifyFixtureAuditAnchor,verifyFixtureActiveAudit
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
-import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake,verifyFixtureExt001BytesAndFingerprint,issueFixtureExt001VerifiedProvenance} from '../../src/cross-module-v121-iam-evidence.mjs';
+import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake,verifyFixtureExt001BytesAndFingerprint,issueFixtureExt001VerifiedProvenance,encodeFixtureExt001SourceAuthorization} from '../../src/cross-module-v121-iam-evidence.mjs';
 import {signFixtureExt001SourceManifest,issueFixtureExt001FromTwoSources} from '../../src/cross-module-v121-iam-source-version.mjs';
 const hash=o=>createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const a='11111111-1111-4111-8111-111111111111';
@@ -2333,6 +2333,8 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
  const status=async revision=>(await readOnly.query(statusSql,[a,revision])).rows[0];
  try{
   await audit.query(await readFile(new URL('../fixtures/v3-2-121-ext001-iam-evidence-ledger.sql',import.meta.url),'utf8'));
+  const sourceAuthKey=randomBytes(32);
+  await audit.query('INSERT INTO v121_anchor.fixture_iam_source_auth_keys(organization_id,key_version,auth_key,active) VALUES($1,1,$2,true)',[a,sourceAuthKey]);
   await Promise.all([writerA.connect(),writerB.connect(),readOnly.connect(),revoker.connect(),attester.connect()]);
   assert.deepEqual([ (await status(1)).receipt_status,(await status(1)).history_count ],
    ['RECEIPT_NOT_FOUND',0]);
@@ -2492,7 +2494,9 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    envelope:p6.envelope,trustedKeys,sourceKeys,sourceProof,
    primaryReader:reader('FIXTURE_PRIMARY_STORE'),
    auditReader:reader('FIXTURE_AUDIT_MIRROR'),
-   nowMs:now,clock:()=>Date.now(),receiptId:p6.receiptId,attester
+   nowMs:now,clock:()=>Date.now(),receiptId:p6.receiptId,attester,
+   sourceKeyVersion:1,
+   sourceAuthSigner:async payload=>createHmac('sha256',sourceAuthKey).update(payload).digest('hex')
   });
   assert.equal(sourceResult.verdict,'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD');
   assert.equal(sourceResult.source_version_bound_in_fixture,true);
@@ -2502,10 +2506,22 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    'SELECT source_binding_digest FROM v121_anchor.fixture_iam_source_bindings WHERE organization_id=$1 AND revision_no=6',[a]);
   assert.equal(stored.rows.length,1);
   assert.equal(stored.rows[0].source_binding_digest.trim(),sourceResult.source_binding_digest);
-  const sourceSql='SELECT v121_anchor.fixture_attest_iam_source_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz,$13::char(64)) AS verdict';
-  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),'f'.repeat(64)]),
+  const sourceSql='SELECT v121_anchor.fixture_attest_iam_source_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz,$13::char(64),$14::integer,$15::char(64)) AS verdict';
+  const forged='f'.repeat(64);
+  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),forged,1,'0'.repeat(64)]),
+   /V121_IAM_SOURCE_AUTH_DENIED/);
+  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,2,'0'.repeat(64)]),
+   /V121_IAM_SOURCE_AUTH_DENIED/);
+  const forgedMaterial=encodeFixtureExt001SourceAuthorization(
+   {...p6.fingerprint,receipt_id:p6.receiptId},forged,1);
+  const forgedMac=createHmac('sha256',sourceAuthKey).update(forgedMaterial).digest('hex');
+  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),forged,1,forgedMac]),
    /V121_IAM_SOURCE_BINDING_CONFLICT/);
-  await assert.rejects(writerA.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest]),
+  await assert.rejects(attester.query('SELECT auth_key FROM v121_anchor.fixture_iam_source_auth_keys'),
+   /permission denied/);
+  await assert.rejects(attester.query('UPDATE v121_anchor.fixture_iam_source_auth_keys SET active=false'),
+   /permission denied/);
+  await assert.rejects(writerA.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,1,forgedMac]),
    /permission denied/);
   await assert.rejects(writerA.query('SELECT * FROM v121_anchor.fixture_iam_source_bindings'),
    /permission denied/);
