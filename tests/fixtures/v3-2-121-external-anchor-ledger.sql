@@ -258,7 +258,7 @@ GRANT SELECT ON v121_anchor.checkpoints TO v121_anchor_reader;
 -- Writer has no direct table DML, no access to registry or event controls.
 CREATE FUNCTION v121_anchor.append_checkpoint(
  p_org uuid,p_failure uuid,p_seq integer,p_signer uuid,
- p_statement jsonb,p_signature text,p_digest char(64))
+ p_statement jsonb,p_signature text,p_digest char(64),p_admission uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,v121_anchor AS $$
 BEGIN
@@ -268,8 +268,8 @@ BEGIN
  END IF;
  INSERT INTO v121_anchor.checkpoints
   (organization_id,failure_id,snapshot_sequence,signer_id,
-   signed_statement,signature_b64,observed_digest)
- VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest);
+   signed_statement,signature_b64,observed_digest,admission_id)
+ VALUES(p_org,p_failure,p_seq,p_signer,p_statement,p_signature,p_digest,p_admission);
 END;
 $$;
 REVOKE ALL ON FUNCTION v121_anchor.append_checkpoint(
