@@ -75,3 +75,37 @@ CREATE POLICY v121_rcpt_b ON v106_test.fixture_revocation_negative_receipts
  FOR ALL TO v106_writer_b
  USING(organization_id='22222222-2222-4222-8222-222222222222'::uuid)
  WITH CHECK(organization_id='22222222-2222-4222-8222-222222222222'::uuid);
+
+-- Disposable persistent monotone signer observations. Not production IAM.
+CREATE TABLE v106_test.fixture_signer_watermarks (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ signer_id uuid NOT NULL,
+ authority_epoch integer NOT NULL CHECK(authority_epoch>0),
+ revocation_watermark integer NOT NULL CHECK(revocation_watermark>=0),
+ PRIMARY KEY(organization_id,incident_id,signer_id)
+);
+CREATE FUNCTION v106_test.fixture_watermark_monotone() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.organization_id<>OLD.organization_id OR
+    NEW.incident_id<>OLD.incident_id OR NEW.signer_id<>OLD.signer_id OR
+    NEW.authority_epoch<OLD.authority_epoch OR
+    NEW.revocation_watermark<OLD.revocation_watermark THEN
+  RAISE EXCEPTION 'V121_WATERMARK_REGRESSION';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER fixture_watermark_no_regression BEFORE UPDATE ON v106_test.fixture_signer_watermarks
+FOR EACH ROW EXECUTE FUNCTION v106_test.fixture_watermark_monotone();
+REVOKE ALL ON v106_test.fixture_signer_watermarks FROM PUBLIC;
+GRANT SELECT,INSERT,UPDATE(authority_epoch,revocation_watermark)
+ ON v106_test.fixture_signer_watermarks TO v106_writer_a,v106_writer_b;
+ALTER TABLE v106_test.fixture_signer_watermarks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE v106_test.fixture_signer_watermarks FORCE ROW LEVEL SECURITY;
+CREATE POLICY v121_wm_a ON v106_test.fixture_signer_watermarks FOR ALL TO v106_writer_a
+ USING(organization_id='11111111-1111-4111-8111-111111111111'::uuid)
+ WITH CHECK(organization_id='11111111-1111-4111-8111-111111111111'::uuid);
+CREATE POLICY v121_wm_b ON v106_test.fixture_signer_watermarks FOR ALL TO v106_writer_b
+ USING(organization_id='22222222-2222-4222-8222-222222222222'::uuid)
+ WITH CHECK(organization_id='22222222-2222-4222-8222-222222222222'::uuid);
