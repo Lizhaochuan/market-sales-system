@@ -6,6 +6,7 @@ import {encodeFixtureReceiptProof} from '../../src/cross-module-fixture-receipt-
 import {createFixtureLeaseGate,encodeFixtureLease} from '../../src/cross-module-fixture-authority-lease.mjs';
 import {createFixtureRecoveryGate,encodeFixtureRecoveryRequest,encodeFixtureRecoveryApproval} from '../../src/cross-module-fixture-dual-approval-anchor.mjs';
 import {createFixtureRecoveryIssuance} from '../helpers/v3-2-121-fixture-recovery-issuance.mjs';
+import {signFixtureAuditAnchor,verifyFixtureAuditAnchor} from '../helpers/v3-2-121-fixture-external-audit-anchor.mjs';
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
@@ -1351,6 +1352,124 @@ test('snapshot verification compares restart rebuild to immutable baselines and 
   assert.equal(final.release_eligible,false);
   assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_uat_state_snapshots WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0].n,3);
   await assert.rejects(admin.query('DELETE FROM v106_test.fixture_uat_state_snapshots WHERE organization_id=$1 AND failure_id=$2',[a,failure]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+  await assert.rejects(admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),/V121_SECURITY_ALERT_UNRESOLVED/);
+  const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
+  assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
+   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+ }finally{await reader.end();}
+});
+
+
+test('independently signed audit anchor detects forged proofs, expiry and coordinated history-snapshot rollback',async()=>{
+ const failure='00000000-0000-4000-8000-0000000000b1';
+ const signedKeyPair=generateKeyPairSync('ed25519');
+ const signer='00000000-0000-4000-8000-0000000000a8';
+ const publicKeys=new Map([[signer,signedKeyPair.publicKey]]);
+ // This is an in-memory stand-in for an independently stored highest checkpoint,
+ // not a real WORM system, HSM, or production audit service.
+ const trustedExternalCheckpoint={minimumSequence:3};
+ const newRemediation='00000000-0000-4000-8000-0000000000b9';
+ const newEvidence=createHash('sha256').update('fixture-external-anchor-v7').digest('hex');
+ const originalNote=createHash('sha256').update('fixture-external-anchor-note').digest('hex');
+ const snapshotSql='INSERT INTO v106_test.fixture_uat_state_snapshots(organization_id,failure_id,snapshot_sequence,remediation_version,accepted_review_roles,observed_digest) VALUES($1,$2,$3,$4,$5,$6)';
+ const submit='SELECT v106_test.fixture_submit_uat_remediation($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::char(64),$6::uuid,$7::char(64))';
+ const reader=new pg.Client({host,database:'v106_isolated',user:'v106_state_reader',password:'test_only_state_reader'});
+ await reader.connect();
+ const observe=async()=>(await reader.query('SELECT * FROM v106_test.fixture_observe_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+ const readCurrent=async()=>{
+  await reader.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+  try{
+   const rebuild=(await reader.query('SELECT * FROM v106_test.fixture_rebuild_uat_state($1::uuid,$2::uuid)',[a,failure])).rows[0];
+   const observed=await observe();
+   const verification=(await reader.query('SELECT * FROM v106_test.fixture_verify_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+   await reader.query('COMMIT');
+   return {
+    organization_id:a,failure_id:failure,incident_id:rebuild.incident_scope,event_id:rebuild.event_scope,
+    snapshot_sequence:verification.snapshot_sequence,
+    remediation_version:observed.remediation_version,
+    accepted_review_roles:observed.accepted_review_roles,
+    observed_digest:observed.observed_digest,
+    rebuild_status:observed.rebuild_status,
+    verdict:verification.verdict,snapshot_matches:verification.snapshot_matches,
+    hold_active:verification.hold_active,release_eligible:verification.release_eligible
+   };
+  }catch(error){await reader.query('ROLLBACK');throw error;}
+ };
+ const makeSigned=(current)=>signFixtureAuditAnchor({
+  organization_id:current.organization_id,failure_id:current.failure_id,
+  incident_id:current.incident_id,event_id:current.event_id,
+  snapshot_sequence:current.snapshot_sequence,remediation_version:current.remediation_version,
+  accepted_review_roles:current.accepted_review_roles,observed_digest:current.observed_digest,
+  signer_id:signer,issued_at_ms:100,expires_at_ms:200
+ },signedKeyPair.privateKey);
+ const verifyProof=(anchor,current,nowMs=150)=>verifyFixtureAuditAnchor({
+  anchor,publicKeys,current,nowMs,minimumSequence:trustedExternalCheckpoint.minimumSequence
+ });
+ try{
+  const original=await readCurrent();
+  assert.equal(original.snapshot_sequence,3);
+  assert.equal(original.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+  const oldAnchor=makeSigned(original);
+  assert.deepEqual([verifyProof(oldAnchor,original).status,verifyProof(oldAnchor,original).release_eligible],
+   ['ANCHOR_MATCH_STILL_HOLD',false]);
+  const forged={...oldAnchor,statement:{...oldAnchor.statement,observed_digest:'f'.repeat(64)}};
+  assert.throws(()=>verifyProof(forged,original),{code:'V121_ANCHOR_SIGNATURE_INVALID'});
+  const corruptedSignature={...oldAnchor,signature_b64:'A'+oldAnchor.signature_b64.slice(1)};
+  assert.throws(()=>verifyProof(corruptedSignature,original),{code:'V121_ANCHOR_SIGNATURE_INVALID'});
+  assert.throws(()=>verifyProof(oldAnchor,original,200),{code:'V121_ANCHOR_EXPIRED'});
+  // Advance the durable DB snapshot, then independently sign its new state.
+  await closeoutWriter.query(submit,[a,failure,newRemediation,7,newEvidence,'00000000-0000-4000-8000-000000000016',originalNote]);
+  const nextObservation=await observe();
+  assert.equal(nextObservation.remediation_version,7);
+  await admin.query(snapshotSql,[a,failure,4,7,nextObservation.accepted_review_roles,nextObservation.observed_digest]);
+  const latest=await readCurrent();
+  assert.equal(latest.snapshot_sequence,4);
+  assert.equal(latest.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+  const latestAnchor=makeSigned(latest);
+  trustedExternalCheckpoint.minimumSequence=4;
+  assert.equal(verifyProof(latestAnchor,latest).status,'ANCHOR_MATCH_STILL_HOLD');
+  assert.throws(()=>verifyProof(oldAnchor,original),{code:'V121_ANCHOR_ROLLBACK_DETECTED'});
+  assert.throws(()=>verifyProof(oldAnchor,latest),{code:'V121_ANCHOR_ROLLBACK_DETECTED'});
+  // Privileged attacker changes history AND rewrites the matching local snapshot.
+  // Local DB verification still says MATCH but separately signed anchor disagrees.
+  await admin.query('ALTER TABLE v106_test.fixture_uat_remediations DISABLE TRIGGER fixture_uat_remediations_immutable');
+  await admin.query('ALTER TABLE v106_test.fixture_uat_state_snapshots DISABLE TRIGGER fixture_snapshot_immutable');
+  try{
+   await admin.query('UPDATE v106_test.fixture_uat_remediations SET remediation_note_digest=$3 WHERE organization_id=$1 AND remediation_id=$2',[a,newRemediation,'e'.repeat(64)]);
+   const changedObservation=await observe();
+   await admin.query('UPDATE v106_test.fixture_uat_state_snapshots SET observed_digest=$4 WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=$3',[a,failure,4,changedObservation.observed_digest]);
+   const tampered=await readCurrent();
+   assert.equal(tampered.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+   assert.throws(()=>verifyProof(latestAnchor,tampered),{code:'V121_ANCHOR_CONTENT_MISMATCH'});
+  }finally{
+   await admin.query('UPDATE v106_test.fixture_uat_remediations SET remediation_note_digest=$3 WHERE organization_id=$1 AND remediation_id=$2',[a,newRemediation,originalNote]);
+   await admin.query('UPDATE v106_test.fixture_uat_state_snapshots SET observed_digest=$4 WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=$3',[a,failure,4,latest.observed_digest]);
+   await admin.query('ALTER TABLE v106_test.fixture_uat_state_snapshots ENABLE TRIGGER fixture_snapshot_immutable');
+   await admin.query('ALTER TABLE v106_test.fixture_uat_remediations ENABLE TRIGGER fixture_uat_remediations_immutable');
+  }
+  assert.equal(verifyProof(latestAnchor,await readCurrent()).status,'ANCHOR_MATCH_STILL_HOLD');
+  // Simulated coordinated rollback: drop v7 and snapshot #4, leaving old
+  // history and snapshot #3 internally consistent, but below external high-water.
+  await admin.query('ALTER TABLE v106_test.fixture_uat_remediations DISABLE TRIGGER fixture_uat_remediations_immutable');
+  await admin.query('ALTER TABLE v106_test.fixture_uat_state_snapshots DISABLE TRIGGER fixture_snapshot_immutable');
+  try{
+   await admin.query('DELETE FROM v106_test.fixture_uat_state_snapshots WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=4',[a,failure]);
+   await admin.query('DELETE FROM v106_test.fixture_uat_remediations WHERE organization_id=$1 AND remediation_id=$2',[a,newRemediation]);
+   const rolled=await readCurrent();
+   assert.equal(rolled.snapshot_sequence,3);
+   assert.equal(rolled.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+   assert.throws(()=>verifyProof(oldAnchor,rolled),{code:'V121_ANCHOR_ROLLBACK_DETECTED'});
+   assert.throws(()=>verifyProof(latestAnchor,rolled),{code:'V121_ANCHOR_ROLLBACK_DETECTED'});
+  }finally{
+   await admin.query('INSERT INTO v106_test.fixture_uat_remediations(organization_id,failure_id,remediation_id,remediation_version,new_evidence_digest,remediated_by,remediation_note_digest) VALUES($1,$2,$3,$4,$5,$6,$7)',
+    [a,failure,newRemediation,7,newEvidence,'00000000-0000-4000-8000-000000000016',originalNote]);
+   await admin.query(snapshotSql,[a,failure,4,7,latest.accepted_review_roles,latest.observed_digest]);
+   await admin.query('ALTER TABLE v106_test.fixture_uat_state_snapshots ENABLE TRIGGER fixture_snapshot_immutable');
+   await admin.query('ALTER TABLE v106_test.fixture_uat_remediations ENABLE TRIGGER fixture_uat_remediations_immutable');
+  }
+  const final=await readCurrent();
+  assert.equal(verifyProof(latestAnchor,final).status,'ANCHOR_MATCH_STILL_HOLD');
+  assert.equal(final.release_eligible,false);
   await assert.rejects(admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),/V121_SECURITY_ALERT_UNRESOLVED/);
   const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
   assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
