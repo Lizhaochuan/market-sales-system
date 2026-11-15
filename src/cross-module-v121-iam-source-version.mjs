@@ -21,6 +21,15 @@ const fail=code=>{throw Object.assign(new Error(code),{code});};
 const sha=buf=>createHash('sha256').update(buf).digest('hex');
 const isUuid=v=>typeof v==='string'&&UUID.test(v);
 const isTime=v=>Number.isSafeInteger(v)&&v>0;
+// The issuance path must re-read a monotonic injected clock after awaited I/O.
+// This CI clock is not a trusted production time service.
+function tickClock(clock,previous){
+ let current;
+ try{current=clock();}catch{fail('V121_IAM_SOURCE_CLOCK_UNAVAILABLE');}
+ if(!isTime(current)||current<previous)
+  fail('V121_IAM_SOURCE_CLOCK_ROLLBACK_OR_INVALID');
+ return current;
+}
 const encode=(domain,value)=>Buffer.from(domain+'|'+JSON.stringify(value),'utf8');
 const isSignature=value=>typeof value==='string'&&/^[A-Za-z0-9+/]{86}==$/.test(value)&&
  Buffer.from(value,'base64').length===64 &&
@@ -156,12 +165,22 @@ const get=(reader,reference)=>Promise.resolve().then(()=>reader(reference));
 // Two fetch rounds protect against substitution during the evaluation window.
 // In production both readers MUST use independently authenticated providers.
 export async function verifyFixtureExt001SourceVersion({
- envelope,trustedKeys,sourceKeys,sourceProof,primaryReader,auditReader,nowMs
+ envelope,trustedKeys,sourceKeys,sourceProof,primaryReader,auditReader,nowMs,clock
 }={}){
- const fingerprint=fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs});
+ let lastTime=nowMs;
+ const currentTime=()=>{
+  if(clock===undefined) return nowMs; // direct, non-issuing fixture verifier
+  if(typeof clock!=='function')
+   fail('V121_IAM_SOURCE_CLOCK_ROLLBACK_OR_INVALID');
+  lastTime=tickClock(clock,lastTime);
+  return lastTime;
+ };
+ const fingerprint=fingerprintFixtureExt001ForIntake(envelope,{
+  trustedKeys,nowMs:currentTime()
+ });
  if(!sourceProof||!required(sourceProof,['manifest','primary_witness','audit_witness']))
   fail('V121_IAM_SOURCE_MANIFEST_INVALID');
- checkManifest(sourceProof.manifest,envelope,fingerprint,nowMs);
+ checkManifest(sourceProof.manifest,envelope,fingerprint,currentTime());
  if(!(sourceKeys instanceof Map)) fail('V121_IAM_SOURCE_TRUST_INVALID');
  const p=sourceProof.primary_witness,a=sourceProof.audit_witness;
  if(p?.key_id===a?.key_id||p?.principal_id===a?.principal_id)
@@ -182,8 +201,8 @@ export async function verifyFixtureExt001SourceVersion({
    }catch{
     fail('V121_IAM_SOURCE_UNAVAILABLE');
    }
-   checkRead(primary,record,SOURCE_DOMAIN,nowMs);
-   checkRead(audited,record,AUDIT_DOMAIN,nowMs);
+   checkRead(primary,record,SOURCE_DOMAIN,currentTime());
+   checkRead(audited,record,AUDIT_DOMAIN,currentTime());
    if(!primary.bytes.equals(audited.bytes))
     fail('V121_IAM_SOURCE_CROSS_CHECK_MISMATCH');
    if(round===0){
@@ -194,7 +213,7 @@ export async function verifyFixtureExt001SourceVersion({
   }
   // Reads await untrusted fixture providers. Detect key revocation or key
   // material replacement during either round, before attester admission.
-  fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs});
+  fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs:currentTime()});
   checkWitness(p,SOURCE_DOMAIN,'primary',envelope,sourceProof.manifest,sourceKeys);
   checkWitness(a,AUDIT_DOMAIN,'audit',envelope,sourceProof.manifest,sourceKeys);
   checkKeySeparation(envelope,trustedKeys,sourceKeys,p,a);
@@ -217,21 +236,35 @@ export async function verifyFixtureExt001SourceVersion({
 }
 
 export async function issueFixtureExt001FromTwoSources(args){
- const verified=await verifyFixtureExt001SourceVersion(args);
+ if(typeof args?.clock!=='function')
+  fail('V121_IAM_SOURCE_CLOCK_REQUIRED');
+ let lastTime=0;
+ const clock=()=>{
+  lastTime=tickClock(args.clock,lastTime);
+  return lastTime;
+ };
+ const verified=await verifyFixtureExt001SourceVersion({
+  ...args,nowMs:clock(),clock
+ });
  const result=await issueFixtureExt001VerifiedProvenance({
   envelope:args.envelope,
   artifactBytes:verified.artifactBytes,
   trustedKeys:args.trustedKeys,
-  nowMs:args.nowMs,
+  nowMs:clock(),
   revisionNo:verified.revision_no,
   receiptId:args.receiptId,
   attester:args.attester
  });
- // A database attestation may finish after a source has been revoked or
- // replaced. Re-check both fixture stores before reporting the result.
- // A failed post-check cannot roll back a committed SQL append-only row;
- // it must instead fail closed and preserve that row for investigation.
- const post=await verifyFixtureExt001SourceVersion(args);
+ // A database attestation may finish after a source has been revoked,
+ // replaced, or expired. A failed post-check cannot undo a committed SQL
+ // append-only row; it must fail closed and preserve forensic history.
+ const post=await verifyFixtureExt001SourceVersion({
+  ...args,nowMs:clock(),clock
+ });
+ const completedAt=clock();
+ if(completedAt>=args.sourceProof.manifest.expires_at_ms ||
+    completedAt>=args.envelope.body.valid_until_ms)
+  fail('V121_IAM_SOURCE_EXPIRED_AFTER_RECHECK');
  if(post.envelope_digest!==verified.envelope_digest||
     post.revision_id!==verified.revision_id||
     !['EXT-001-E1','EXT-001-E2'].every(id=>
