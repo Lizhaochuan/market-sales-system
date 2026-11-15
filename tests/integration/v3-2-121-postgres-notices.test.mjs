@@ -350,3 +350,73 @@ test('leased SQL receipt commits durable sequence and blocks replay after adapte
  const total=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q4.notice_id]);
  assert.equal(total.rows[0].n,0);
 });
+
+function issuedFixtureReceipt(notice_id,signer_id,sequence,issued_at_ms=100,expires_at_ms=200){
+ const statement={organization_id:a,incident_id:incident,notice_id,receipt_sequence:1,
+  receipt_state:'NEGATIVE_RECEIPT',signer_id,authority_epoch:4,revocation_watermark:2,
+  issued_at_ms:100,expires_at_ms:500};
+ const proof={statement,signature_b64:sign(null,encodeFixtureReceiptProof(statement),keyPair.privateKey).toString('base64')};
+ const lease={organization_id:a,incident_id:incident,signer_id,notice_id,
+  authority_epoch:4,revocation_watermark:2,lease_sequence:sequence,issued_at_ms,expires_at_ms};
+ return {organization_id:a,incident_id:incident,notice_id,receipt_sequence:1,
+  receipt_state:'NEGATIVE_RECEIPT',proof,
+  lease:{lease,signature_b64:sign(null,encodeFixtureLease(lease),fixtureLeaseKeys.privateKey).toString('base64')}};
+}
+function isolatedLeaseWriter(sequence,now=150,options={}){
+ return createIsolatedPostgresRevocationNotices({pool:writer,receiptPublicKey:keyPair.publicKey,
+  receiptClock:()=>now,receiptProofAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2}),
+  leaseGate:createFixtureLeaseGate({publicKey:fixtureLeaseKeys.publicKey,clock:()=>now,
+   loadAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2,lease_sequence:sequence})}),
+  ...options});
+}
+test('concurrent independent adapters fence competing lease sequences on shared SQL row',async()=>{
+ const signer='00000000-0000-4000-8000-000000000083';
+ const qLow=await service.enqueue({...input,epoch:71});
+ const qHigh=await service.enqueue({...input,epoch:72});
+ const low=issuedFixtureReceipt(qLow.notice_id,signer,4);
+ const high=issuedFixtureReceipt(qHigh.notice_id,signer,5);
+ const settled=await Promise.allSettled([
+  isolatedLeaseWriter(4).appendNegativeReceipt(low),
+  isolatedLeaseWriter(5).appendNegativeReceipt(high)
+ ]);
+ assert.equal(settled[1].status,'fulfilled',JSON.stringify(settled.map(x=>x.reason?.code)));
+ if(settled[0].status==='rejected'){
+  assert.ok(['NOTICE_SIGNER_WATERMARK_REGRESSION','40001','40P01'].includes(settled[0].reason?.code),
+   String(settled[0].reason?.code));
+ }else assert.equal(settled[0].value.hold_active,true);
+ const marker=await writer.query('SELECT lease_sequence FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',[a,incident,signer]);
+ assert.equal(marker.rows[0].lease_sequence,5);
+ const old=await service.enqueue({...input,epoch:73});
+ await assert.rejects(isolatedLeaseWriter(4).appendNegativeReceipt(issuedFixtureReceipt(old.notice_id,signer,4)),
+  {code:'NOTICE_SIGNER_WATERMARK_REGRESSION'});
+ const counts=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[old.notice_id]);
+ assert.equal(counts.rows[0].n,0);
+});
+test('expired lease cannot be revived; fresh higher sequence restores isolated writes',async()=>{
+ const signer='00000000-0000-4000-8000-000000000084';
+ const expiredNotice=await service.enqueue({...input,epoch:74});
+ const expired=issuedFixtureReceipt(expiredNotice.notice_id,signer,6);
+ await assert.rejects(isolatedLeaseWriter(6,200).appendNegativeReceipt(expired),{code:'LEASE_EXPIRED'});
+ const freshNotice=await service.enqueue({...input,epoch:75});
+ const fresh=issuedFixtureReceipt(freshNotice.notice_id,signer,7,201,240);
+ const result=await isolatedLeaseWriter(7,210).appendNegativeReceipt(fresh);
+ assert.equal(result.hold_active,true);
+ const row=await writer.query('SELECT lease_sequence FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',[a,incident,signer]);
+ assert.equal(row.rows[0].lease_sequence,7);
+ await assert.rejects(isolatedLeaseWriter(6,210).appendNegativeReceipt(expired),{code:'LEASE_EXPIRED'});
+ const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[expiredNotice.notice_id]);
+ assert.equal(count.rows[0].n,0);
+});
+test('pre-commit fault rolls back both receipt and signer lease sequence',async()=>{
+ const signer='00000000-0000-4000-8000-000000000085';
+ const notice=await service.enqueue({...input,epoch:76});
+ const value=issuedFixtureReceipt(notice.notice_id,signer,8);
+ const faulty=isolatedLeaseWriter(8,150,{beforeReceiptCommit:async()=>{throw Error('fixture commit outage');}});
+ await assert.rejects(faulty.appendNegativeReceipt(value),/fixture commit outage/);
+ const marker=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',[a,incident,signer]);
+ assert.equal(marker.rows[0].n,0);
+ const receipts=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[notice.notice_id]);
+ assert.equal(receipts.rows[0].n,0);
+ const result=await isolatedLeaseWriter(8).appendNegativeReceipt(value);
+ assert.equal(result.hold_active,true);
+});
