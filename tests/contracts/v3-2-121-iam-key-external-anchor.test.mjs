@@ -125,3 +125,28 @@ test('lifecycle validates active version and blocks tampered sequence even befor
  fail(()=>rebuildFixtureIamKeyEvents(otherRows,org),
   'V121_KEY_ANCHOR_HISTORY_INVALID');
 });
+
+test('a replacement hash chain cannot extend a previously pinned checkpoint',()=>{
+ const valid=history();
+ const first=full(valid.slice(0,4)).anchor;
+ const rewritten=structuredClone(valid);
+ rewritten[0].recorded_at=new Date(rewritten[0].recorded_at.getTime()+50);
+ let previous=ZERO;
+ for(const e of rewritten){
+  e.previous_event_digest=previous;
+  e.event_digest=sha([
+   'v121-ext001-source-key-event-v1',org,e.event_index,e.key_version,
+   e.event_type,e.key_digest,previous,e.recorded_at.getTime()
+  ].join('|'));
+  previous=e.event_digest;
+ }
+ assert.equal(rebuildFixtureIamKeyEvents(rewritten,org).event_count,6);
+ fail(()=>signFixtureIamKeyExternalAnchor({
+  rows:rewritten,organizationId:org,signerId:signer,
+  privateKey:signing.privateKey,issuedAtMs:1700000021000,previousAnchor:first
+ }),'V121_KEY_ANCHOR_PREVIOUS_MISMATCH');
+ const validNext=full(valid,first,1700000021000);
+ fail(()=>verifyFixtureIamKeyExternalAnchor({
+  ...validNext.args,rows:rewritten
+ }),'V121_KEY_ANCHOR_PREVIOUS_MISMATCH');
+});
