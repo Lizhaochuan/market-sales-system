@@ -84,7 +84,8 @@ BEGIN
  SELECT MAX(snapshot_sequence) INTO seq FROM v121_anchor.checkpoints
  WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
  -- First anchor can refer to an existing business snapshot with sequence > 1.
- IF NEW.snapshot_sequence<=COALESCE(seq,0) THEN
+ IF (seq IS NOT NULL AND NEW.snapshot_sequence<>seq+1) OR
+    (seq IS NULL AND NEW.snapshot_sequence<1) THEN
   RAISE EXCEPTION 'V121_ANCHOR_CHECKPOINT_ROLLBACK';
  END IF;
  SELECT event_kind INTO latest_state FROM v121_anchor.key_events
