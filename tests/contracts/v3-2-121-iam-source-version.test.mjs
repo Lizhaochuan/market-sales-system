@@ -1,0 +1,226 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {generateKeyPairSync,createHash} from 'node:crypto';
+import {
+ REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,
+ fingerprintFixtureExt001ForIntake
+} from '../../src/cross-module-v121-iam-evidence.mjs';
+import {
+ signFixtureExt001SourceManifest,verifyFixtureExt001SourceVersion,
+ issueFixtureExt001FromTwoSources
+} from '../../src/cross-module-v121-iam-source-version.mjs';
+
+const org='11111111-1111-4111-8111-111111111111';
+const id={
+ issuer:'00000000-0000-4000-8000-0000000000c2',
+ reviewer:'00000000-0000-4000-8000-0000000000c4',
+ primary:'00000000-0000-4000-8000-0000000000e1',
+ audit:'00000000-0000-4000-8000-0000000000e2',
+ issuerActor:'00000000-0000-4000-8000-0000000000c1',
+ reviewerActor:'00000000-0000-4000-8000-0000000000c3',
+ primaryActor:'00000000-0000-4000-8000-0000000000e3',
+ auditActor:'00000000-0000-4000-8000-0000000000e4'
+};
+const k=Object.fromEntries(
+ ['issuer','reviewer','primary','audit'].map(role=>[role,generateKeyPairSync('ed25519')])
+);
+const hashed=v=>createHash('sha256').update(v).digest('hex');
+const raw={
+ 'EXT-001-E1':Buffer.from('versioned immutable synthetic IAM inventory'),
+ 'EXT-001-E2':Buffer.from('versioned immutable synthetic denial results')
+};
+function setup(revision=1){
+ const body={
+  schema_version:'v3.2-121-ext001-evidence-v1',
+  scope:'CI_FIXTURE_ONLY',gap_id:'EXT-001',organization_id:org,
+  revision_no:revision,revision_id:'00000000-0000-4000-8000-0000000000e5',
+  collected_at_ms:100_000,valid_until_ms:200_000,
+  producer:{principal_id:id.issuerActor,key_id:id.issuer,domain:'SECURITY'},
+  artifacts:[
+   {id:'EXT-001-E1',kind:'IAM_ROLE_INVENTORY',uri:'fixture://ext001/archive/iam-inventory',
+    sha256:hashed(raw['EXT-001-E1']),source:'CI_SYNTHETIC',classification:'SYNTHETIC',
+    captured_at_ms:90_000,expires_at_ms:200_000},
+   {id:'EXT-001-E2',kind:'RBAC_NEGATIVE_TESTS',uri:'fixture://ext001/archive/denial-tests',
+    sha256:hashed(raw['EXT-001-E2']),source:'CI_SYNTHETIC',classification:'SYNTHETIC',
+    captured_at_ms:90_000,expires_at_ms:200_000}
+  ],
+  role_inventory:REQUIRED_IAM_ROLES.map(role=>{
+   const human=['SALES','FINANCE','ACADEMIC','DEPLOYMENT'].includes(role);
+   return {role,principal_class:human?'HUMAN':'SERVICE',
+    authentication:human?'MFA':'WORKLOAD_IDENTITY',
+    organization_id:org,least_privilege_asserted:true};
+  }),
+  denial_matrix:REQUIRED_DENIAL_CASES.map(value=>({
+   case:value,result:'DENIED_IN_FIXTURE',artifact_id:'EXT-001-E2'
+  }))
+ };
+ const envelope=signFixtureExt001Envelope(body,{
+  issuerPrivateKey:k.issuer.privateKey,reviewerPrivateKey:k.reviewer.privateKey,
+  reviewerId:id.reviewerActor,reviewerKeyId:id.reviewer,reviewedAtMs:110_000
+ });
+ const trustedKeys=new Map([
+  [id.issuer,{status:'ACTIVE',domain:'SECURITY',principal_id:id.issuerActor,publicKey:k.issuer.publicKey}],
+  [id.reviewer,{status:'ACTIVE',domain:'AUDIT',principal_id:id.reviewerActor,publicKey:k.reviewer.publicKey}]
+ ]);
+ const sourceKeys=new Map([
+  [id.primary,{status:'ACTIVE',domain:'FIXTURE_PRIMARY_STORE',
+   principal_id:id.primaryActor,publicKey:k.primary.publicKey}],
+  [id.audit,{status:'ACTIVE',domain:'FIXTURE_AUDIT_MIRROR',
+   principal_id:id.auditActor,publicKey:k.audit.publicKey}]
+ ]);
+ const manifest={
+  schema_version:'v3.2-121-ext001-source-version-v1',scope:'CI_FIXTURE_ONLY',
+  organization_id:org,revision_no:revision,revision_id:body.revision_id,
+  envelope_digest:fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs:120_000}).evidence_digest,
+  recorded_at_ms:111_000,expires_at_ms:195_000,
+  objects:body.artifacts.map((art,i)=>({
+   artifact_id:art.id,object_ref:art.uri,
+   object_version_id:'fixture-v'+revision+'-'+(i===0?'inventory':'denials'),
+   generation:revision,sha256:art.sha256
+  }))
+ };
+ const signManifest=(m=manifest)=>signFixtureExt001SourceManifest(m,{
+  primaryPrivateKey:k.primary.privateKey,auditPrivateKey:k.audit.privateKey,
+  primaryKeyId:id.primary,primaryPrincipalId:id.primaryActor,
+  auditKeyId:id.audit,auditPrincipalId:id.auditActor
+ });
+ let primaryCalls=0,auditCalls=0;
+ const primaryReader=async rec=>{
+  primaryCalls++;
+  return {artifact_id:rec.artifact_id,object_ref:rec.object_ref,
+   object_version_id:rec.object_version_id,generation:rec.generation,
+   sha256:rec.sha256,bytes:Buffer.from(raw[rec.artifact_id]),
+   observed_at_ms:119_990,is_current:true,lock_mode:'FIXTURE_IMMUTABLE',
+   source_domain:'FIXTURE_PRIMARY_STORE'};
+ };
+ const auditReader=async rec=>{
+  auditCalls++;
+  return {artifact_id:rec.artifact_id,object_ref:rec.object_ref,
+   object_version_id:rec.object_version_id,generation:rec.generation,
+   sha256:rec.sha256,bytes:Buffer.from(raw[rec.artifact_id]),
+   observed_at_ms:119_995,is_current:true,lock_mode:'FIXTURE_IMMUTABLE',
+   source_domain:'FIXTURE_AUDIT_MIRROR'};
+ };
+ return {
+  envelope,manifest,signManifest,sourceKeys,primaryReader,auditReader,
+  options:{envelope,trustedKeys,sourceKeys,sourceProof:signManifest(),
+   primaryReader,auditReader,nowMs:120_000},
+  calls:()=>[primaryCalls,auditCalls]
+ };
+}
+const rejects=async(fn,code)=>assert.rejects(fn(),{code});
+
+test('versioned source manifest is independently signed and both stores are read twice before HOLD result',async()=>{
+ const x=setup();
+ const r=await verifyFixtureExt001SourceVersion(x.options);
+ assert.equal(r.decision,'TWO_FIXTURE_SOURCES_RECHECKED_STILL_HOLD');
+ assert.deepEqual(x.calls(),[4,4]);
+ assert.equal(r.objects_verified,2);
+ assert.equal(r.read_rounds,2);
+ assert.equal(r.artifactBytes.get('EXT-001-E1').toString(),raw['EXT-001-E1'].toString());
+ assert.equal(r.production_source_authenticated,false);
+ assert.equal(r.release_authorized,false);
+ assert.equal(r.hold_active,true);
+ assert.equal(r.release_eligible,false);
+ assert.ok(Object.isFrozen(r));
+});
+
+test('new current object version, replaced bytes, stale mirror, weak lock and missing files are rejected',async()=>{
+ const x=setup();
+ const p=x.primaryReader;
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,primaryReader:async o=>({...await p(o),object_version_id:'fixture-v2-inventory'})
+ }),'V121_IAM_SOURCE_VERSION_OR_FRESHNESS_MISMATCH');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,primaryReader:async o=>({...await p(o),generation:44})
+ }),'V121_IAM_SOURCE_VERSION_OR_FRESHNESS_MISMATCH');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,primaryReader:async o=>({...await p(o),bytes:Buffer.from('replaced file')})
+ }),'V121_IAM_SOURCE_CONTENT_MISMATCH');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,auditReader:async o=>({...await x.auditReader(o),object_version_id:'fixture-v0-stale'})
+ }),'V121_IAM_SOURCE_VERSION_OR_FRESHNESS_MISMATCH');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,primaryReader:async o=>({...await p(o),lock_mode:'UNLOCKED'})
+ }),'V121_IAM_SOURCE_VERSION_OR_FRESHNESS_MISMATCH');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,primaryReader:async o=>({...await p(o),is_current:false})
+ }),'V121_IAM_SOURCE_VERSION_OR_FRESHNESS_MISMATCH');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,primaryReader:async o=>({...await p(o),observed_at_ms:80_000})
+ }),'V121_IAM_SOURCE_VERSION_OR_FRESHNESS_MISMATCH');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,primaryReader:async()=>{throw Error('object deleted');}
+ }),'V121_IAM_SOURCE_UNAVAILABLE');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,auditReader:async()=>Promise.reject(Error('mirror offline'))
+ }),'V121_IAM_SOURCE_UNAVAILABLE');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,primaryReader:async o=>({...await p(o),bytes:Buffer.alloc(0)})
+ }),'V121_IAM_SOURCE_BYTES_INVALID');
+});
+
+test('source and audit witnesses cannot impersonate each other or reuse earlier signed review',async()=>{
+ const x=setup();
+ const mutate=(callback)=>{
+  const clone=structuredClone(x.manifest);
+  callback(clone);
+  return x.signManifest(clone);
+ };
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,sourceProof:mutate(m=>{m.revision_no=2;})
+ }),'V121_IAM_SOURCE_MANIFEST_INVALID');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,sourceProof:mutate(m=>{m.objects[0].sha256='f'.repeat(64);})
+ }),'V121_IAM_SOURCE_MANIFEST_INVALID');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,sourceProof:mutate(m=>{m.objects[0].object_ref=m.objects[1].object_ref;})
+ }),'V121_IAM_SOURCE_MANIFEST_INVALID');
+ const forged=structuredClone(x.options.sourceProof);
+ forged.manifest.objects[0].object_version_id='fixture-v9-attacker';
+ await rejects(()=>verifyFixtureExt001SourceVersion({...x.options,sourceProof:forged}),
+  'V121_IAM_SOURCE_SIGNATURE_INVALID');
+ const sameKey=structuredClone(x.options.sourceProof);
+ sameKey.audit_witness.key_id=sameKey.primary_witness.key_id;
+ await rejects(()=>verifyFixtureExt001SourceVersion({...x.options,sourceProof:sameKey}),
+  'V121_IAM_SOURCE_WITNESSES_NOT_INDEPENDENT');
+ const staleKeys=new Map(x.sourceKeys);
+ staleKeys.set(id.primary,{...staleKeys.get(id.primary),status:'REVOKED'});
+ await rejects(()=>verifyFixtureExt001SourceVersion({...x.options,sourceKeys:staleKeys}),
+  'V121_IAM_SOURCE_TRUST_INVALID');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,auditReader:x.options.primaryReader
+ }),'V121_IAM_SOURCE_READERS_NOT_INDEPENDENT');
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,sourceProof:mutate(m=>{m.expires_at_ms=119_999;})
+ }),'V121_IAM_SOURCE_MANIFEST_INVALID');
+ const newEnvelope=setup(2).envelope;
+ await rejects(()=>verifyFixtureExt001SourceVersion({...x.options,envelope:newEnvelope}),
+  'V121_IAM_SOURCE_MANIFEST_INVALID');
+});
+
+test('remote recheck is mandatory before attestation, with no SQL call on invalid source or audit',async()=>{
+ const x=setup();
+ let issued=0;
+ const receiptId='00000000-0000-4000-8000-0000000000e6';
+ const attester={query:async()=>{
+  issued++;
+  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+ }};
+ const r=await issueFixtureExt001FromTwoSources({...x.options,receiptId,attester});
+ assert.equal(issued,1);
+ assert.equal(r.independent_read_rounds,2);
+ assert.equal(r.source_checked_in_fixture,true);
+ assert.equal(r.release_authorized,false);
+ assert.equal(r.production_evidence_collected,false);
+ assert.equal(r.hold_active,true);
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,receiptId,attester,
+  auditReader:async()=>{throw Error('audit source not reachable');}
+ }),'V121_IAM_SOURCE_UNAVAILABLE');
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,receiptId,attester,
+  primaryReader:async rec=>({...await x.primaryReader(rec),bytes:Buffer.from('wrong bytes')})
+ }),'V121_IAM_SOURCE_CONTENT_MISMATCH');
+ assert.equal(issued,1,'Failed source verification must not issue DB attestation');
+});
