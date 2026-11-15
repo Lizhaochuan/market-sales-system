@@ -96,14 +96,14 @@ test('rejects missing evidence, invalid provenance, cross-organization scope and
 test('detects altered payload, signatures, reviewer impersonation and revoked trust independently',()=>{
  changed(e=>{e.body.artifacts[0].sha256=digest('changed inventory');},'V121_IAM_EVIDENCE_REVIEW_INVALID');
  changed(e=>{e.body.artifacts[0].captured_at_ms=98_000;},'V121_IAM_EVIDENCE_REVIEW_INVALID');
- changed(e=>{e.review.reviewer_id=issuerId;},'V121_IAM_EVIDENCE_REVIEW_INVALID');
- changed(e=>{e.review.domain='SECURITY';},'V121_IAM_EVIDENCE_REVIEW_INVALID');
- changed(e=>{e.review.decision='SIGNED_PRODUCTION';},'V121_IAM_EVIDENCE_REVIEW_INVALID');
- changed(e=>{e.review.body_digest='f'.repeat(64);},'V121_IAM_EVIDENCE_REVIEW_INVALID');
- changed(e=>{e.review.reviewed_at_ms=200_000;},'V121_IAM_EVIDENCE_REVIEW_INVALID');
- changed(e=>{e.review.reviewed_at_ms=125_000;},'V121_IAM_EVIDENCE_REVIEW_INVALID');
+ changed(e=>{e.reviewer.reviewer_id=issuerId;},'V121_IAM_EVIDENCE_REVIEW_INVALID');
+ changed(e=>{e.reviewer.domain='SECURITY';},'V121_IAM_EVIDENCE_REVIEW_INVALID');
+ changed(e=>{e.reviewer.decision='SIGNED_PRODUCTION';},'V121_IAM_EVIDENCE_REVIEW_INVALID');
+ changed(e=>{e.reviewer.body_digest='f'.repeat(64);},'V121_IAM_EVIDENCE_REVIEW_INVALID');
+ changed(e=>{e.reviewer.reviewed_at_ms=200_000;},'V121_IAM_EVIDENCE_REVIEW_INVALID');
+ changed(e=>{e.reviewer.reviewed_at_ms=125_000;},'V121_IAM_EVIDENCE_REVIEW_INVALID');
  changed(e=>{e.issuer_signature_b64='A'.repeat(86)+'==';},'V121_IAM_EVIDENCE_SIGNATURE_INVALID');
- changed(e=>{e.review.signature_b64='A'.repeat(86)+'==';},'V121_IAM_EVIDENCE_SIGNATURE_INVALID');
+ changed(e=>{e.reviewer.signature_b64='A'.repeat(86)+'==';},'V121_IAM_EVIDENCE_SIGNATURE_INVALID');
  const good=signBody(safeBody());
  assert.throws(()=>verifyFixtureExt001Envelope(good,{trustedKeys:new Map(),nowMs:120_000}),
   {code:'V121_IAM_EVIDENCE_TRUST_INVALID'});
