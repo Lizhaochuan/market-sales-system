@@ -180,7 +180,8 @@ test('LIFE-04 conflict reviewer from one of six submitted roles is never reassig
    'academic_owner-owner-fixture-001',old]){
    const r=await f.makeGate().transition(
     f.req('replace',old,name,'conflict_of_interest'));safe(r);
-   assert.equal(r.reason_code,'REVIEWER_RECUSAL_CONFLICT_OR_REPLAY');
+   assert.equal(r.reason_code,name===old?
+    'INVALID_REVIEW_LIFECYCLE_ACTION':'REVIEWER_RECUSAL_CONFLICT_OR_REPLAY');
   }
   assert.equal(await f.lifecycleLedger.head(f.s),null);
  });
