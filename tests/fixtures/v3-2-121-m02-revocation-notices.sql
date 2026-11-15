@@ -703,3 +703,55 @@ REVOKE ALL ON FUNCTION v106_test.fixture_append_closeout_review(
 GRANT EXECUTE ON FUNCTION v106_test.fixture_append_closeout_review(
  uuid,uuid,uuid,uuid,char(64),char(64),uuid,uuid,bigint,text,text)
  TO v106_closeout_writer;
+
+-- UAT preparation evidence: append-only simulated checklist, not a release authorization.
+CREATE TABLE v106_test.fixture_closeout_uat_evidence (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ event_id uuid NOT NULL,
+ evidence_kind text NOT NULL CHECK(evidence_kind IN (
+  'SOURCE_EVENT_AUTHENTICATED','AUDIT_CHAIN_RECONCILED',
+  'REVOCATION_EFFECTS_RECONCILED','FINANCIAL_IMPACT_RECONCILED',
+  'ACADEMIC_FULFILLMENT_RECONCILED')),
+ evidence_digest char(64) NOT NULL CHECK(evidence_digest ~ '^[a-f0-9]{64}$' AND evidence_digest <> repeat('0',64)),
+ responsible_domain text NOT NULL CHECK(responsible_domain IN ('SECURITY','AUDIT','SALES','FINANCE','ACADEMIC')),
+ checked_by uuid NOT NULL,
+ recorded_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(organization_id,event_id,evidence_kind),
+ FOREIGN KEY(organization_id,event_id)
+  REFERENCES v106_test.fixture_external_security_events(organization_id,event_id)
+);
+REVOKE ALL ON v106_test.fixture_closeout_uat_evidence FROM PUBLIC;
+CREATE TRIGGER fixture_closeout_uat_evidence_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_closeout_uat_evidence FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+-- A read-only diagnostic summary explicitly never authorizes release.
+CREATE VIEW v106_test.fixture_closeout_uat_readiness AS
+SELECT ev.organization_id,ev.incident_id,ev.event_id,
+ (SELECT count(*)::integer FROM v106_test.fixture_closeout_uat_evidence e
+   WHERE e.organization_id=ev.organization_id AND e.incident_id=ev.incident_id
+     AND e.event_id=ev.event_id
+     AND ((e.evidence_kind='SOURCE_EVENT_AUTHENTICATED' AND e.responsible_domain='SECURITY') OR
+          (e.evidence_kind='AUDIT_CHAIN_RECONCILED' AND e.responsible_domain='AUDIT') OR
+          (e.evidence_kind='REVOCATION_EFFECTS_RECONCILED' AND e.responsible_domain='SALES') OR
+          (e.evidence_kind='FINANCIAL_IMPACT_RECONCILED' AND e.responsible_domain='FINANCE') OR
+          (e.evidence_kind='ACADEMIC_FULFILLMENT_RECONCILED' AND e.responsible_domain='ACADEMIC'))
+  ) AS evidence_count,
+ (SELECT count(DISTINCT e.checked_by)::integer
+  FROM v106_test.fixture_closeout_uat_evidence e
+  WHERE e.organization_id=ev.organization_id AND e.incident_id=ev.incident_id
+    AND e.event_id=ev.event_id) AS independent_reviewers,
+ (SELECT count(*)::integer FROM v106_test.fixture_cross_module_holds h
+  WHERE h.organization_id=ev.organization_id AND h.incident_id=ev.incident_id
+   AND h.module_name IN ('SALES','FINANCE','ACADEMIC')
+   AND h.hold_active IS TRUE AND h.release_eligible IS FALSE) AS held_domains,
+ EXISTS(SELECT 1 FROM v106_test.fixture_recovery_emergency_stops st
+  WHERE st.organization_id=ev.organization_id AND st.incident_id=ev.incident_id
+   AND st.issuance_blocked IS TRUE) AS emergency_stop_active,
+ EXISTS(SELECT 1 FROM v106_test.fixture_closeout_reviews rev
+  WHERE rev.organization_id=ev.organization_id AND rev.incident_id=ev.incident_id
+   AND rev.event_id=ev.event_id AND rev.review_status='REVIEWED_STILL_HOLD') AS dual_review_recorded,
+ false::boolean AS release_eligible,
+ true::boolean AS hold_active
+FROM v106_test.fixture_external_security_events ev;
+REVOKE ALL ON v106_test.fixture_closeout_uat_readiness FROM PUBLIC;
