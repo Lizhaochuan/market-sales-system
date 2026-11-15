@@ -133,3 +133,11 @@ EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`
 - A 机构合成证据、来源清单和有效 MAC 尝试以 B 机构身份提交，必须被隔离认证入口拒绝；B 机构不能生成该组织的证据认证记录。这只是固化的测试组织范围，并非通用多租户 IAM 实现。
 - CI sourceAuthSigner 异步故障/拒绝时返回 V121_IAM_SOURCE_SIGNER_UNAVAILABLE，不进入 SQL；若来源身份或文件在 signer 异步处理期间发生撤权、替换，签名后再次双来源检查并在 SQL 前失败关闭。正常双来源模拟读取分为签名前、签名后、SQL 后三个阶段，各两轮读取，总共六轮；失败不自动回滚已经提交的 SQL 历史。
 - **限制：** 数据库管理员仍拥有临时密钥及旧版历史播种权限；CI signer 和数据库不构成生产级独立信任根。并发锁只保证该隔离数据库的本地事务顺序，跨服务撤权与最终响应之间仍存在窗口。EXT-001 继续 UNVERIFIED，HOLD=true、release_eligible=false，PR Draft / CI-only，不合并、不部署。
+
+## EXT-001 来源密钥不可变生命周期审计与历史校验（CI-only）
+
+- 新增隔离 SQL 表 fixture_iam_source_key_events。每次启用或撤销临时 HMAC 来源密钥时，数据库触发器在同一事务内只追加 ACTIVATED 或 REVOKED 事件，记录租户、递增事件序号、密钥版本、密钥 SHA-256 指纹、时间和前序事件摘要。不记录密钥原文。
+- 按租户加事务级 advisory lock 串行化审计事件追加；每一行的 event_digest 绑定版本、操作、时间、前序摘要及密钥指纹。首次事件的前序摘要为 64 个零。独立测试重新读取原始审计行并逐条重算哈希链。
+- 合约保留不可修改历史，UPDATE/DELETE 被测试库触发器拒绝；普通 writer 和 attester 对事件表没有直接 SELECT 权限。集成验收检查 v1/v2/v3 的启用及撤销共六条事件，连接重建后顺序、指纹和摘要一致；未提交的 v4 创建被事务回滚，不留下密钥或审计行。跨组织 B 没有组织 A 的事件。
+- 限制：这里的不可变性是 PostgreSQL 测试表权限加触发器，不是外部 WORM。数据库超级用户和同一控制域可以改动记录或重新计算哈希链，无法证明组织级身份独立性，也不具备生产密钥保管和签署证明。真正的外部审计锚、密钥管理、真实 IAM 及 UAT 仍需独立验收。
+- EXT-001=UNVERIFIED，production_evidence_collected=false、release_eligible=false、hold_active=true。PR #129 Draft / CI-only，禁止合并、部署及解除跨模块隔离。
