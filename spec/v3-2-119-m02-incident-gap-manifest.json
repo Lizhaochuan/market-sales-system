@@ -1,0 +1,173 @@
+{
+  "schema_version": "v3.2-119-m02-incident-student-gap-manifest-v1",
+  "module": "M02",
+  "parent_pr": 125,
+  "parent_head_sha": "1492d9ce0eed554410e0ceffff2cbcefc3a04063",
+  "parent_ci": [
+    {
+      "run_id": 43668130652,
+      "conclusion": "success"
+    },
+    {
+      "run_id": 43668130594,
+      "conclusion": "success"
+    }
+  ],
+  "implementation": "src/cross-module-incident-gap-manifest.mjs",
+  "test": "tests/integration/v3-2-119-m02-incident-gap-manifest.test.mjs",
+  "sql_adapter": "tests/helpers/v3-2-119-m02-postgres-incident-gap-manifest.mjs",
+  "sql_fixture": "tests/fixtures/v3-2-119-m02-incident-gap-manifest.sql",
+  "sql_setup": "scripts/v3-2-119-setup-incident-gap-manifest.mjs",
+  "runtime": "CI_ONLY_POSTGRESQL16_ISOLATED_NO_EXTERNAL_NETWORK",
+  "source_data": {
+    "v115": "append-only fixture HOLD event chain and incident student roster",
+    "v116": "fixture outbox and negative-only receipts",
+    "v118": "latest per-student append-only gap-scan event and head",
+    "real_students_processed": false,
+    "real_sales_finance_academic_sources_accepted": false
+  },
+  "discovery_contract": {
+    "organization_incident_query_only": true,
+    "student_ids_discovered_inside_sql_transaction": true,
+    "allow_caller_provided_student_subset": false,
+    "student_is_primary_unit": true,
+    "real_sibling_family_is_optional_and_not_grouped": true,
+    "max_students_per_incident_scan": 8,
+    "max_hold_events_per_student": 64,
+    "max_scans_per_student": 128,
+    "over_limit_fails_closed": true,
+    "empty_incident_fails_closed": true,
+    "no_hidden_early_gap": true,
+    "missing_student_scan_visible": true,
+    "stale_student_scan_visible": true,
+    "revalidate_live_hold_outbox_receipts_and_v118_audit": true,
+    "whole_incident_current_snapshot_is_local_transaction_only": true
+  },
+  "export_contract": {
+    "envelope_schema": "v3.2-119-ci-export-envelope-v1",
+    "manifest_schema": "v3.2-119-ci-incident-gap-export-v1",
+    "audit_event_schema": "v3.2-119-ci-incident-gap-audit-v1",
+    "stable_json_stringify_order": true,
+    "aggregate_counts": [
+      "student_count",
+      "hold_event_count",
+      "scanned_student_count",
+      "missing_scan_count",
+      "stale_scan_count",
+      "unresolved_gap_count"
+    ],
+    "ordered_student_fields": [
+      "student_id",
+      "checked_through",
+      "outbox_prefix",
+      "negative_receipt_prefix",
+      "scan_status",
+      "snapshot_digest",
+      "gaps"
+    ],
+    "gap_fields": [
+      "hold_sequence",
+      "reason_code",
+      "hold_event_digest",
+      "message_digest"
+    ],
+    "cryptographic_digest_algorithm": "SHA-256",
+    "digest_verification_checks_both_manifest_and_audit_event": true,
+    "export_contains_only_synthetic_ids_and_gap_metadata": true,
+    "actual_organizational_signer_or_key_custody": false,
+    "independently_witnessed_tamper_evidence": false,
+    "no_real_external_approval_from_complete_manifest": true
+  },
+  "sql": {
+    "database": "v106_isolated",
+    "schema": "v106_test",
+    "postgres_version": 16,
+    "guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "event_table": "fixture_incident_gap_manifest_events",
+    "head_table": "fixture_incident_gap_manifest_heads",
+    "compound_scope": [
+      "organization_id",
+      "incident_id"
+    ],
+    "serializable_incident_scan": true,
+    "per_scope_advisory_lock": true,
+    "events_append_only_to_restricted_roles": true,
+    "unique_source_snapshot_digest": true,
+    "monotone_sequence_and_student_count_sql_trigger": true,
+    "hold_active_true_check_constraint": true,
+    "force_tenant_row_level_security": true,
+    "business_payments_orders_lessons_updated": false,
+    "production_migration_039_created": false,
+    "production_database_connected": false
+  },
+  "test_cases": [
+    "MAN-01",
+    "MAN-02",
+    "MAN-03",
+    "MAN-04",
+    "MAN-05",
+    "MAN-06",
+    "MAN-07",
+    "MAN-08",
+    "MAN-09",
+    "MAN-10",
+    "MAN-11",
+    "MAN-12",
+    "MAN-13",
+    "MAN-14",
+    "MAN-15",
+    "MAN-16",
+    "MAN-17",
+    "MAN-18",
+    "MAN-19",
+    "MAN-20"
+  ],
+  "external_acceptance": {
+    "all_real_six_domain_owners": "UNASSIGNED",
+    "independent_finance_signature_verified": false,
+    "independent_academic_signature_verified": false,
+    "real_three_party_handoff_receipt_verified": false,
+    "actual_source_review_proven": false,
+    "actual_outbox_network_delivery": false,
+    "official_contract_status": "proposed-unimplemented",
+    "sixteen_external_conditions": "UNVERIFIED",
+    "r01_to_r10": "UNVERIFIED",
+    "six_independent_external_authorities": "UNVERIFIED",
+    "enterprise_postgres_uat": "NOT_RUN",
+    "chromium_uat": "NOT_RUN",
+    "handoff_release_proven": false
+  },
+  "hard_denials": {
+    "external_source_verified": false,
+    "external_recipient_verified": false,
+    "external_authority_verified": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "production_integration_allowed": false,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "known_gaps": [
+    "CI-only on-demand scans: production incident discovery scheduling, event listeners and ingestion do not exist",
+    "Bounded eight student fixture intentionally fails closed for larger real incidents",
+    "Snapshot can change immediately after final recheck; no external atomic barrier",
+    "V115 holds, V116 outbox, V118 scans and V119 manifest are separate local transactions",
+    "SHA-256 export is a consistency checksum, not an independent authorized signature or WORM evidence",
+    "Test keys and identities do not establish real HR finance or academic authority",
+    "No production network delivery, retries, Chrome UAT or signed external delivery acceptance",
+    "A negative fixture receipt means still blocked; a zero gap manifest never allows release"
+  ],
+  "student_primary": true,
+  "family_only_for_real_siblings": true,
+  "original_orders_payments_saleevent_lessons_compensations_immutable": true,
+  "historical_migration_range": "001-038",
+  "production_migration_039_added": false,
+  "edu_management_system_modified": false,
+  "main_crm_runtime_modified": false,
+  "market_sales_documentation_kept_separate": true,
+  "next_stage": "V3.2-120 CI-only incident-wide export snapshot revocation and stale roster risk detection; no automatic handoff"
+}
