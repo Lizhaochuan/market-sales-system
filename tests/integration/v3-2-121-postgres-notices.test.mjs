@@ -2549,6 +2549,54 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    'EXACT_SOURCE_PROVENANCE_RETRY_STILL_HOLD');
   await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,1,rotatedMac]),
    /V121_IAM_SOURCE_AUTH_DENIED/);
+  // The same signer and envelope cannot be replayed as a different tenant.
+  // Scope rejection occurs even when the submitted digest/MAC are valid for A.
+  const crossTenant=provenanceParams(6,p6);
+  crossTenant[0]=b;
+  await assert.rejects(attester.query(sourceSql,[...crossTenant,sourceResult.source_binding_digest,2,rotatedMac]),
+   /V121_IAM_SOURCE_ATTESTER_ROLE_DENIED/);
+  assert.equal((await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_provenance_proofs WHERE organization_id=$1',[b])).rows[0].n,0);
+
+  // PostgreSQL READ COMMITTED must block a verifier on the retiring key row.
+  // The retiring transaction wins; after commit, authentication sees inactive.
+  const retiring=await audit.connect();
+  let retired=false;
+  let blockedResult;
+  try{
+   await retiring.query('BEGIN');
+   await retiring.query('UPDATE v121_anchor.fixture_iam_source_auth_keys SET active=false WHERE organization_id=$1 AND key_version=2',[a]);
+   blockedResult=attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,2,rotatedMac])
+    .then(value=>({value}),error=>({error}));
+   let lockObserved=false;
+   for(let attempt=0;attempt<60;attempt++){
+    const blocked=(await audit.query(
+     "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND usename='v121_iam_provenance_attester' AND wait_event_type='Lock' AND query LIKE $1",
+     ['%fixture_attest_iam_source_provenance%'])).rows[0].n;
+    if(blocked>0){lockObserved=true;break;}
+    await audit.query('SELECT pg_sleep(0.01)');
+   }
+   assert.equal(lockObserved,true,'SQL verifier must wait on concurrent key retirement');
+   await retiring.query('COMMIT');
+   retired=true;
+  }finally{
+   if(!retired) await retiring.query('ROLLBACK').catch(()=>{});
+   retiring.release();
+  }
+  const raced=await blockedResult;
+  assert.ok(raced.error,'retirement-first source authentication must be rejected');
+  assert.match(raced.error.message,/V121_IAM_SOURCE_AUTH_DENIED/);
+  assert.equal((await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_bindings WHERE organization_id=$1',[a])).rows[0].n,1);
+
+  // A newer key can be admitted, but an earlier MAC is not revived.
+  const thirdKey=randomBytes(32);
+  await audit.query('INSERT INTO v121_anchor.fixture_iam_source_auth_keys(organization_id,key_version,auth_key,active) VALUES($1,3,$2,true)',[a,thirdKey]);
+  const thirdMaterial=encodeFixtureExt001SourceAuthorization(
+   {...p6.fingerprint,receipt_id:p6.receiptId},sourceResult.source_binding_digest,3);
+  const thirdMac=createHmac('sha256',thirdKey).update(thirdMaterial).digest('hex');
+  assert.equal((await attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,3,thirdMac])).rows[0].verdict,
+   'EXACT_SOURCE_PROVENANCE_RETRY_STILL_HOLD');
+  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,2,rotatedMac]),
+   /V121_IAM_SOURCE_AUTH_DENIED/);
   assert.equal((await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_bindings WHERE organization_id=$1',[a])).rows[0].n,1);
   await assert.rejects(writerA.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,1,forgedMac]),
    /permission denied/);
