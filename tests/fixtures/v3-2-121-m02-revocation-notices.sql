@@ -329,6 +329,48 @@ CREATE TABLE v106_test.fixture_recovery_emergency_stops (
 );
 REVOKE ALL ON v106_test.fixture_recovery_emergency_stops FROM PUBLIC;
 
+-- Isolated automatic incident reaction to explicit approval-key retirement.
+-- Does NOT infer a compromise; revocation is an observable, admin-controlled signal.
+CREATE TABLE v106_test.fixture_recovery_security_signals (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ attestation_version integer NOT NULL,
+ signal_kind text NOT NULL CHECK(signal_kind='APPROVAL_KEY_REVOKED'),
+ observed_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(organization_id,incident_id,attestation_version,signal_kind)
+);
+REVOKE ALL ON v106_test.fixture_recovery_security_signals FROM PUBLIC;
+CREATE FUNCTION v106_test.fixture_stop_on_approval_key_retirement() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $automatic_stop$
+BEGIN
+ IF OLD.active IS TRUE AND NEW.active IS FALSE THEN
+  UPDATE v106_test.fixture_recovery_emergency_stops
+   SET issuance_blocked=true
+  WHERE organization_id=NEW.organization_id;
+  INSERT INTO v106_test.fixture_recovery_security_signals
+   (organization_id,incident_id,attestation_version,signal_kind)
+  SELECT organization_id,incident_id,NEW.attestation_version,'APPROVAL_KEY_REVOKED'
+  FROM v106_test.fixture_recovery_emergency_stops
+  WHERE organization_id=NEW.organization_id
+  ON CONFLICT DO NOTHING;
+ END IF;
+ RETURN NEW;
+END;
+$automatic_stop$;
+CREATE TRIGGER fixture_approval_key_automatic_stop AFTER UPDATE
+ ON v106_test.fixture_recovery_approval_attestation FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_stop_on_approval_key_retirement();
+CREATE FUNCTION v106_test.fixture_security_signal_immutable() RETURNS trigger
+LANGUAGE plpgsql AS $signal_immutable$
+BEGIN
+ RAISE EXCEPTION 'V121_SECURITY_SIGNAL_IMMUTABLE';
+END;
+$signal_immutable$;
+CREATE TRIGGER fixture_security_signal_guard BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_recovery_security_signals FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+
 -- SECURITY DEFINER fixture-only issuance gateway.
 -- MAC is signed by disposable verifier after JS signature checks; DB checks MAC independently.
 CREATE FUNCTION v106_test.fixture_issue_recovery_key(
