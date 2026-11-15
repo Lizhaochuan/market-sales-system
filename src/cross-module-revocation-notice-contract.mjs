@@ -53,12 +53,18 @@ export function createIsolatedRevocationNoticeService({ledger,clock}={}){
    !HEX.test(scope.manifest_digest)||!HEX.test(scope.revocation_event_digest))
    return denied('NOTICE_SCOPE_INVALID');
   try{
-   const heads=await ledger.sourceHeads(scope);
+   // Production-like SQL adapter supplies all components from one database snapshot.
+   // Unit mock compatibility retains the non-atomic legacy lookup only for fixtures.
+   const captured=typeof ledger.captureCoverageSnapshot==='function'
+    ?await ledger.captureCoverageSnapshot(scope)
+    :{heads:await ledger.sourceHeads(scope),
+      recipients:await ledger.listRecipients(scope),notices:await ledger.listNotices(scope)};
+   if(!captured||!exact(captured,['heads','recipients','notices']))
+    return denied('NOTICE_SNAPSHOT_INVALID');
+   const {heads,recipients,notices}=captured;
    if(!heads||heads.revoked!==true||heads.manifest_digest!==scope.manifest_digest||
     heads.revocation_event_digest!==scope.revocation_event_digest)
     return denied('NOTICE_SOURCE_UNVERIFIED');
-   const recipients=await ledger.listRecipients(scope);
-   const notices=await ledger.listNotices(scope);
    if(!Array.isArray(recipients)||!Array.isArray(notices)||recipients.length>256||
     new Set(recipients).size!==recipients.length||recipients.some(r=>!UUID.test(r)))
     return denied('NOTICE_RECIPIENT_SET_UNVERIFIED');
