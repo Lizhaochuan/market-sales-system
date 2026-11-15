@@ -100,3 +100,12 @@ EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`
 - 对证据 envelope 和两个来源签署的 manifest 在每轮异步读取后重查有效期。SQL 返回后若来源或证据过期，不得返回合成成功结果；如隔离 SQL 已产生取证行，保留不可修改记录，不虚构回滚。
 - 此时钟是 CI 注入的逻辑值，不是生产可信授时；进程可控时间源与数据库 clock_timestamp() 并非跨系统原子一致。该加固不能解决最终校验之后的撤权/过期竞态，也不提供真实外部 IAM、WORM 或签署认证。
 - EXT-001 保持 UNVERIFIED；证据仍 NOT_COLLECTED / NOT_REVIEWED / NOT_SIGNED。HOLD、release_eligible=false、PR #129 Draft、CI-only、不合并、不部署。
+
+
+## EXT-001 对象版本与双见证摘要的 SQL 留痕（CI-only）
+
+- 合成 E1/E2 对象除要求独立路径、内容 SHA-256，还必须有不同的对象版本 ID；两份材料不可复用一个版本身份。签名正确但版本 ID 别名的清单也会拒绝。
+- 双来源版本读取通过时，以有域隔离的 SHA-256 记录完整签名 sourceProof（版本清单以及主存储、审计镜像两份见证签名）。调用隔离 PostgreSQL 的 source-aware attester；新增只追加 `fixture_iam_source_bindings`，与原始 `fixture_iam_provenance_proofs` 通过租户、EXT-001、递增版本关联。SQL 要求原始证据与来源绑定在同一查询事务内提交，冲突摘要、回填旧版及非法调用者均拒绝。普通写入角色没有该表读写或来源认证入口执行权限。
+- PostgreSQL CI 集成校验来源绑定摘要存储、冲突重试、普通角色越权、UPDATE/DELETE 拒绝、证据收据原流程及三个业务模块 HOLD 不变。
+- **限制明确**：该 SQL 来源摘要由隔离 attester 角色提供；数据库没有独立验证双来源 Ed25519 签名和外部 IAM。测试 attester 凭据被盗仍能制造形状正确但来源未经复核的摘要。旧的原始字节级 fixture attestation 路径仍存在，不能把来源专用入口声称为全库不可绕过的生产策略。SQL 触发器也不是外部不可篡改 WORM。
+- EXT-001=UNVERIFIED；真实文件、外部身份、组织责任和 UAT 尚未验收；`hold_active=true`、`release_eligible=false`、`merge_authorized=false`、`deploy_authorized=false`。PR #129 仅 Draft / CI-only，禁止合并部署。
