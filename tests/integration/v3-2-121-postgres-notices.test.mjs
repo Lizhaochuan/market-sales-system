@@ -1489,9 +1489,12 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
  await admin.query("CREATE ROLE v121_anchor_writer LOGIN PASSWORD 'test_only_anchor_writer'");
  await admin.query("CREATE ROLE v121_anchor_attester LOGIN PASSWORD 'test_only_anchor_attester'");
  await admin.query("CREATE ROLE v121_anchor_security LOGIN PASSWORD 'test_only_anchor_security'");
+ await admin.query("CREATE ROLE v121_anchor_investigator LOGIN PASSWORD 'test_only_quarantine_investigator'");
+ await admin.query("CREATE ROLE v121_anchor_security_reviewer LOGIN PASSWORD 'test_only_quarantine_security'");
+ await admin.query("CREATE ROLE v121_anchor_audit_reviewer LOGIN PASSWORD 'test_only_quarantine_audit'");
  await admin.query('CREATE DATABASE v121_anchor_isolated');
  await admin.query('REVOKE CONNECT ON DATABASE v121_anchor_isolated FROM PUBLIC');
- await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security');
+ await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security,v121_anchor_investigator,v121_anchor_security_reviewer,v121_anchor_audit_reviewer');
  const ledgerAdmin=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
  let anchorReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
  const anchorWriter=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
@@ -2054,5 +2057,89 @@ test('independent monitor quarantines compromised attester and invalidates all o
  }finally{
   await Promise.allSettled([observer.end(),verifier.end(),writer.end(),security.end(),stateReader.end()]);
   await ledger.end();
+ }
+});
+
+
+test('independent false-positive assessment remains quarantined, latest-version reviews only and no cross-org authority',async()=>{
+ const ledgerAdmin=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
+ const reader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
+ const investigator=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_investigator',password:'test_only_quarantine_investigator'});
+ const security=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_security_reviewer',password:'test_only_quarantine_security'});
+ const audit=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_audit_reviewer',password:'test_only_quarantine_audit'});
+ const writer=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
+ const reviewSql='SELECT v121_anchor.record_quarantine_review($1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::char(64))';
+ const assessmentSql='SELECT v121_anchor.record_quarantine_assessment($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::uuid,$6::text,$7::char(64))';
+ const investigatorId='00000000-0000-4000-8000-0000000000d1';
+ const securityId='00000000-0000-4000-8000-0000000000d2';
+ const auditId='00000000-0000-4000-8000-0000000000d3';
+ const assessment1='00000000-0000-4000-8000-0000000000d4';
+ const assessment2='00000000-0000-4000-8000-0000000000d5';
+ const unknown='00000000-0000-4000-8000-0000000000dd';
+ const digest1=createHash('sha256').update('quarantine-unresolved-first-digest').digest('hex');
+ const digest2=createHash('sha256').update('quarantine-false-positive-second-digest').digest('hex');
+ try{
+  await Promise.all([reader.connect(),investigator.connect(),security.connect(),audit.connect(),writer.connect()]);
+  const quarantines=(await reader.query('SELECT event_id FROM v121_anchor.attester_quarantine_events WHERE organization_id=$1 ORDER BY recorded_at DESC',[a])).rows;
+  assert.equal(quarantines.length,1);
+  const event=quarantines[0].event_id;
+  const diagnostic=async()=> (await reader.query('SELECT * FROM v121_anchor.quarantine_review_diagnostics WHERE organization_id=$1 AND event_id=$2',[a,event])).rows[0];
+  let state=await diagnostic();
+  assert.deepEqual([state.latest_assessment_id,state.latest_agreed_reviews,state.quarantine_active,state.hold_active,state.release_eligible],
+   [null,0,true,true,false]);
+  await assert.rejects(investigator.query(assessmentSql,[b,event,assessment1,1,investigatorId,'INCONCLUSIVE',digest1]),
+   /V121_QUARANTINE_INVESTIGATOR_DENIED/);
+  await assert.rejects(investigator.query(assessmentSql,[a,unknown,assessment1,1,investigatorId,'INCONCLUSIVE',digest1]),
+   /V121_QUARANTINE_EVENT_UNKNOWN/);
+  await assert.rejects(writer.query(assessmentSql,[a,event,assessment1,1,investigatorId,'INCONCLUSIVE',digest1]),
+   /permission denied/);
+  await investigator.query(assessmentSql,[a,event,assessment1,1,investigatorId,'INCONCLUSIVE',digest1]);
+  await assert.rejects(investigator.query(assessmentSql,[a,event,assessment1,1,investigatorId,'INCONCLUSIVE',digest1]),
+   /V121_QUARANTINE_VERSION_NOT_NEXT/);
+  await assert.rejects(security.query(reviewSql,[b,assessment1,securityId,'SECURITY','AGREED',digest1]),
+   /V121_QUARANTINE_REVIEW_ROLE_DENIED/);
+  await assert.rejects(security.query(reviewSql,[a,assessment1,securityId,'AUDIT','AGREED',digest1]),
+   /V121_QUARANTINE_REVIEW_ROLE_DENIED/);
+  await assert.rejects(audit.query(reviewSql,[a,assessment1,auditId,'SECURITY','AGREED',digest1]),
+   /V121_QUARANTINE_REVIEW_ROLE_DENIED/);
+  await assert.rejects(security.query(reviewSql,[a,assessment1,investigatorId,'SECURITY','AGREED',digest1]),
+   /V121_QUARANTINE_REVIEW_NOT_INDEPENDENT/);
+  await assert.rejects(security.query(reviewSql,[a,assessment1,securityId,'SECURITY','AGREED',digest2]),
+   /V121_QUARANTINE_REVIEW_EVIDENCE_MISMATCH/);
+  await security.query(reviewSql,[a,assessment1,securityId,'SECURITY','AGREED',digest1]);
+  await assert.rejects(audit.query(reviewSql,[a,assessment1,securityId,'AUDIT','AGREED',digest1]),
+   /V121_QUARANTINE_REVIEW_NOT_INDEPENDENT/);
+  await audit.query(reviewSql,[a,assessment1,auditId,'AUDIT','AGREED',digest1]);
+  state=await diagnostic();
+  assert.equal(state.latest_agreed_reviews,2);
+  assert.equal(state.status,'QUARANTINE_RETAINED');
+  const original=(await reader.query('SELECT event_kind,evidence_digest FROM v121_anchor.attester_quarantine_events WHERE organization_id=$1 AND event_id=$2',[a,event])).rows[0];
+  await investigator.query(assessmentSql,[a,event,assessment2,2,investigatorId,'FALSE_POSITIVE_CANDIDATE',digest2]);
+  state=await diagnostic();
+  assert.deepEqual([state.latest_assessment_id,state.latest_version,state.latest_finding,state.latest_agreed_reviews],
+   [assessment2,2,'FALSE_POSITIVE_CANDIDATE',0]);
+  await assert.rejects(security.query(reviewSql,[a,assessment1,'00000000-0000-4000-8000-0000000000d6','SECURITY','AGREED',digest1]),
+   /V121_QUARANTINE_ASSESSMENT_SUPERSEDED/);
+  await security.query(reviewSql,[a,assessment2,securityId,'SECURITY','AGREED',digest2]);
+  await audit.query(reviewSql,[a,assessment2,auditId,'AUDIT','AGREED',digest2]);
+  state=await diagnostic();
+  assert.deepEqual([state.latest_agreed_reviews,state.quarantine_active,state.hold_active,state.release_eligible,state.status],
+   [2,true,true,false,'QUARANTINE_RETAINED']);
+  await assert.rejects(audit.query(reviewSql,[a,assessment2,auditId,'AUDIT','AGREED',digest2]),
+   /duplicate key/);
+  await assert.rejects(ledgerAdmin.query('UPDATE v121_anchor.attester_quarantine_events SET event_kind=$1 WHERE organization_id=$2 AND event_id=$3',
+   ['UNEXPECTED_ATTESTATION',a,event]),/V121_ANCHOR_LEDGER_IMMUTABLE/);
+  const preserved=(await reader.query('SELECT event_kind,evidence_digest FROM v121_anchor.attester_quarantine_events WHERE organization_id=$1 AND event_id=$2',[a,event])).rows[0];
+  assert.deepEqual(preserved,original);
+  assert.equal((await reader.query('SELECT count(*)::int AS n FROM v121_anchor.quarantine_assessment_reviews WHERE organization_id=$1 AND assessment_id IN ($2,$3)',[a,assessment1,assessment2])).rows[0].n,4);
+  assert.equal((await reader.query('SELECT count(*)::int AS n FROM v121_anchor.quarantine_assessments WHERE organization_id=$1 AND event_id=$2',[a,event])).rows[0].n,2);
+  const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
+  assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
+   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+  const stopped=(await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0];
+  assert.equal(stopped.issuance_blocked,true);
+ }finally{
+  await Promise.allSettled([reader.end(),investigator.end(),security.end(),audit.end(),writer.end()]);
+  await ledgerAdmin.end();
  }
 });
