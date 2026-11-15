@@ -2126,7 +2126,7 @@ test('independent false-positive assessment remains quarantined, latest-version 
   assert.deepEqual([state.latest_agreed_reviews,state.quarantine_active,state.hold_active,state.release_eligible,state.status],
    [2,true,true,false,'QUARANTINE_RETAINED']);
   await assert.rejects(audit.query(reviewSql,[a,assessment2,auditId,'AUDIT','AGREED',digest2]),
-   /duplicate key/);
+   /V121_QUARANTINE_REVIEW_NOT_INDEPENDENT|duplicate key/);
   await assert.rejects(ledgerAdmin.query('UPDATE v121_anchor.attester_quarantine_events SET event_kind=$1 WHERE organization_id=$2 AND event_id=$3',
    ['UNEXPECTED_ATTESTATION',a,event]),/V121_ANCHOR_LEDGER_IMMUTABLE/);
   const preserved=(await reader.query('SELECT event_kind,evidence_digest FROM v121_anchor.attester_quarantine_events WHERE organization_id=$1 AND event_id=$2',[a,event])).rows[0];
