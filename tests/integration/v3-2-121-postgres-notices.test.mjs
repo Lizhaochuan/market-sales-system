@@ -191,3 +191,21 @@ test('receipt integrity failure prevents coverage report',async()=>{
  assert.equal(report.reason_code,'NOTICE_DEPENDENCY_UNAVAILABLE');
  assert.equal(report.hold_active,true);
 });
+
+test('unsigned receipt is blocked before SQL insert',async()=>{
+ const q=await service.enqueue({...input,epoch:31});
+ const params={organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'};
+ await assert.rejects(ledger.appendNegativeReceipt(params),{code:'NOTICE_RECEIPT_INPUT_INVALID'});
+ const r=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(r.rows[0].n,0);
+});
+test('invalid signer snapshot blocks both initial receipt and replay',async()=>{
+ const q=await service.enqueue({...input,epoch:32});
+ const data={organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'};
+ const signed=signedReceipt(data);
+ assert.equal((await signed).hold_active,true);
+ const invalid= createIsolatedPostgresRevocationNotices({pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:3,active:false})});
+ const statement={organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',signer_id:'00000000-0000-4000-8000-000000000081',authority_epoch:4,revocation_watermark:2,issued_at_ms:100,expires_at_ms:500};
+ const signature_b64=sign(null,encodeFixtureReceiptProof(statement),keyPair.privateKey).toString('base64');
+ await assert.rejects(invalid.appendNegativeReceipt({...data,proof:{statement,signature_b64}}),{code:'FIXTURE_RECEIPT_AUTHORITY_STALE'});
+});
