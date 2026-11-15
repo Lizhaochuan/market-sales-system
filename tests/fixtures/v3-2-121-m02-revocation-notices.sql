@@ -126,7 +126,7 @@ CREATE TABLE v106_test.fixture_receipt_attestation_secrets (
 REVOKE ALL ON v106_test.fixture_receipt_attestation_secrets FROM PUBLIC;
 CREATE UNIQUE INDEX fixture_attestation_one_active ON v106_test.fixture_receipt_attestation_secrets(organization_id) WHERE active IS TRUE;
 CREATE FUNCTION v106_test.fixture_attestation_no_reactivation() RETURNS trigger
-LANGUAGE plpgsql AS $
+LANGUAGE plpgsql AS $rotate_gate$
 BEGIN
  IF NEW.organization_id<>OLD.organization_id OR
     NEW.key_version<>OLD.key_version OR
@@ -135,7 +135,8 @@ BEGIN
   RAISE EXCEPTION 'V121_ATTESTATION_KEY_IMMUTABLE';
  END IF;
  RETURN NEW;
-END $;
+END;
+$rotate_gate$;
 CREATE TRIGGER fixture_attestation_immutable BEFORE UPDATE ON v106_test.fixture_receipt_attestation_secrets
 FOR EACH ROW EXECUTE FUNCTION v106_test.fixture_attestation_no_reactivation();
 
