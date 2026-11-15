@@ -22,6 +22,7 @@ const receiptWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_receip
 const issuerWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_key_issuer',password:'test_only_key_issuer'});
 const auditReader=new pg.Pool({host,database:'v106_isolated',user:'v106_audit_reader',password:'test_only_auditor'});
 const receiptAttestationKey=randomBytes(32);
+const approvalAttestationKey=randomBytes(32);
 const hmacReceipt=value=>createHmac('sha256',receiptAttestationKey).update(value).digest('hex');
 const keyPair=generateKeyPairSync('ed25519');
 const fixtureLeaseKeys=generateKeyPairSync('ed25519');
@@ -75,6 +76,7 @@ test.before(async()=>{
  }
  await admin.query(await readFile(new URL('../fixtures/v3-2-121-m02-revocation-notices.sql',import.meta.url),'utf8'));
  await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,1,$2,true)',[a,receiptAttestationKey]);
+ await admin.query('INSERT INTO v106_test.fixture_recovery_approval_attestation(organization_id,approval_key) VALUES($1,$2)',[a,approvalAttestationKey]);
  const m={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),status:'FIXTURE_EXPORT'};
  const md=hash(m);
  const r={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),target_manifest_sequence:1,
@@ -672,7 +674,7 @@ function freshRecoveryIssuer({fault,anchorOk=true}={}){
   readAnchor:async e=>({request_digest:e.request_digest,audit_digest:e.audit_digest,
    anchored:anchorOk,source:'FIXTURE_SEPARATE_ARCHIVE'})
  });
- return createFixtureRecoveryIssuance({issuerPool:issuerWriter,recoveryGate:gate,
+ return createFixtureRecoveryIssuance({issuerPool:issuerWriter,recoveryGate:gate,approvalAttestationKey,
   beforeKeyInsert:fault|| (async()=>{})});
 }
 test('two-person recovery issuance and durable replay fencing across adapter instances',async()=>{
@@ -732,7 +734,34 @@ test('scoped key issuer has no direct DML and cannot impersonate admin or bypass
  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=7')).rows[0].n,0);
 });
 test('ordinary receipt role cannot execute scoped issuance gateway',async()=>{
- await assert.rejects(receiptWriter.query('SELECT v106_test.fixture_issue_recovery_key($1::uuid,$2::uuid,$3::uuid,$4::char(64),$5::integer,$6::char(64),$7::uuid,$8::uuid,$9::bytea)',
+ await assert.rejects(receiptWriter.query('SELECT v106_test.fixture_issue_recovery_key($1::uuid,$2::uuid,$3::uuid,$4::char(64),$5::integer,$6::char(64),$7::uuid,$8::uuid,$9::bytea,$10::text)',
   [a,incident,'00000000-0000-4000-8000-0000000000f8','a'.repeat(64),7,'b'.repeat(64),
-   recoveryApproverIds.AUDIT_REVIEW,recoveryApproverIds.SECURITY_REVIEW,randomBytes(32)]),/permission denied/);
+   recoveryApproverIds.AUDIT_REVIEW,recoveryApproverIds.SECURITY_REVIEW,randomBytes(32),'0'.repeat(64)]),/permission denied/);
+});
+
+test('issuer direct SQL gateway call without valid independent approval attestation fails closed',async()=>{
+ await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=6',[a]);
+ const {request,approvals}=await recoveryInputs(7,'00000000-0000-4000-8000-0000000000a7');
+ const requestDigest=createHash('sha256').update(encodeFixtureRecoveryRequest(request)).digest('hex');
+ const auditId=approvals.find(x=>x.role==='AUDIT_REVIEW').approver_id;
+ const securityId=approvals.find(x=>x.role==='SECURITY_REVIEW').approver_id;
+ const sql='SELECT v106_test.fixture_issue_recovery_key($1::uuid,$2::uuid,$3::uuid,$4::char(64),$5::integer,$6::char(64),$7::uuid,$8::uuid,$9::bytea,$10::text)';
+ const key=randomBytes(32);
+ const params=[a,incident,request.request_id,requestDigest,7,request.audit_digest,auditId,securityId,key,'0'.repeat(64)];
+ await assert.rejects(issuerWriter.query(sql,params),/V121_RECOVERY_APPROVAL_ATTESTATION_REJECTED/);
+ const genuineEnvelope=['v121-recovery-attestation-v1',a,incident,request.request_id,requestDigest,7,request.audit_digest,auditId,securityId,
+  createHash('sha256').update(key).digest('hex')].join('|');
+ const genuineMac=createHmac('sha256',approvalAttestationKey).update(genuineEnvelope).digest('hex');
+ await assert.rejects(issuerWriter.query(sql,[...params.slice(0,8),randomBytes(32),genuineMac]),/V121_RECOVERY_APPROVAL_ATTESTATION_REJECTED/);
+ await assert.rejects(issuerWriter.query(sql,[...params.slice(0,4),8,...params.slice(5,9),genuineMac]),/RECOVERY_PREVIOUS_KEY_NOT_REVOKED|V121_RECOVERY_APPROVAL_ATTESTATION_REJECTED/);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=7')).rows[0].n,0);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=7')).rows[0].n,0);
+ const good=await freshRecoveryIssuer().issue({request,approvals,attestationKey:key});
+ assert.equal(good.hold_active,true);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=7')).rows[0].n,1);
+});
+test('issuer and auditor cannot extract approval secret, keeping role separation',async()=>{
+ await assert.rejects(issuerWriter.query('SELECT approval_key FROM v106_test.fixture_recovery_approval_attestation'),/permission denied/);
+ await assert.rejects(auditReader.query('SELECT approval_key FROM v106_test.fixture_recovery_approval_attestation'),/permission denied/);
+ await assert.rejects(receiptWriter.query('UPDATE v106_test.fixture_recovery_approval_attestation SET approval_key=$1',[randomBytes(32)]),/permission denied/);
 });
