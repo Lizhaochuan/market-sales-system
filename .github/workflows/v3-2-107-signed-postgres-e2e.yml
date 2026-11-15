@@ -1,0 +1,60 @@
+name: V3.2-107 signed sources to isolated PostgreSQL end-to-end
+on:
+  pull_request:
+    paths:
+      - 'tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs'
+      - 'spec/v3-2-107-m02-signed-postgres-e2e.json'
+      - 'docs/V3.2-107_M02_SIGNED_POSTGRES_E2E.md'
+      - '.github/workflows/v3-2-107-signed-postgres-e2e.yml'
+      - 'src/cross-module-source-trust-fence.mjs'
+      - 'tests/helpers/v3-2-106-m02-postgres-checkpoint.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  signed-source-real-sql-e2e:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned runtime dependencies for ephemeral runner
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Syntax check signed-source and PostgreSQL integration
+        run: |
+          node --check tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs
+          node --check src/cross-module-source-trust-fence.mjs
+          node --check tests/helpers/v3-2-106-m02-postgres-checkpoint.mjs
+      - name: Set up disposable SQL fixture and scoped roles
+        run: node scripts/v3-2-106-setup-isolated-pg.mjs
+      - name: Run V107 source signatures and real SQL end-to-end integration
+        run: node --test tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs
+      - name: Repeat V106 real disposable PostgreSQL DB-01 through DB-08
+        run: node --test tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Assert real authority, merge, deployment and migration remain forbidden
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-107-m02-signed-postgres-e2e.json'));if(s.parent_pr!==113||s.scenarios.length!==9||s.test_only_postgresql.production_database_used!==false||s.production_migration_039_added!==false||s.real_source_authority_verified!==false||s.finance_authorized!==false||s.academic_authorized!==false||s.handoff_allowed!==false||s.compensation_write_allowed!==false||s.release_eligible!==false||s.hold_active!==true||s.merge_authorized!==false||s.deploy_authorized!==false||s.external_contract_status!=='proposed-unimplemented')process.exit(1)"
+      - name: Recheck V105 admission contract blockers
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress V104 trust fence and V101 facade
+        run: node --test tests/security/v3-2-104-m02-source-trust-fence.test.mjs tests/security/v3-2-101-m02-readonly-verification-facade.test.mjs
+      - name: Regress eighteen V3.2-82 through V3.2-99 Node safety suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
