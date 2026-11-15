@@ -547,7 +547,7 @@ test('invalid key versions and unauthorized secret updates are rejected',async()
  const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text,$10::integer)';
  const base=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),hash(payload),raw,hmacReceipt(raw)];
  await assert.rejects(receiptWriter.query(sql,[...base,0]),/V121_RECEIPT_KEY_VERSION_INVALID/);
- await assert.rejects(receiptWriter.query(sql,[...base,99]),/V121_RECEIPT_ATTESTATION_REJECTED/);
+ await assert.rejects(receiptWriter.query(sql,[...base,99]),/V121_RECEIPT_KEY_AUDIT_UNVERIFIED/);
  await assert.rejects(receiptWriter.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true'),/permission denied/);
  assert.equal((await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id])).rows[0].n,0);
 });
