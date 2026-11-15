@@ -109,3 +109,11 @@ EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`
 - PostgreSQL CI 集成校验来源绑定摘要存储、冲突重试、普通角色越权、UPDATE/DELETE 拒绝、证据收据原流程及三个业务模块 HOLD 不变。
 - **限制明确**：该 SQL 来源摘要由隔离 attester 角色提供；数据库没有独立验证双来源 Ed25519 签名和外部 IAM。测试 attester 凭据被盗仍能制造形状正确但来源未经复核的摘要。旧的原始字节级 fixture attestation 路径仍存在，不能把来源专用入口声称为全库不可绕过的生产策略。SQL 触发器也不是外部不可篡改 WORM。
 - EXT-001=UNVERIFIED；真实文件、外部身份、组织责任和 UAT 尚未验收；`hold_active=true`、`release_eligible=false`、`merge_authorized=false`、`deploy_authorized=false`。PR #129 仅 Draft / CI-only，禁止合并部署。
+
+## EXT-001 SQL 来源 HMAC 独立认证边界（一次性 CI）
+
+- 原 SQL 来源认证只接受来源摘要，模拟 attester 角色可绕过 JS 提交伪造指纹。本阶段在 PostgreSQL 16 隔离库中加入不向普通或 attester 角色开放的 fixture_iam_source_auth_keys（32 字节临时随机测试密钥，按租户和版本区分）和 pgcrypto HMAC-SHA256 校验。
+- 双来源校验通过后，由注入的独立 CI 模拟 signer 通过 sourceAuthSigner 对域标识、租户、证据版本和收据、E1/E2 内容摘要、SECURITY/AUDIT 签名摘要、过期时间及完整双来源清单指纹签发 MAC。SQL 在执行追加写入之前核验 MAC；无密钥、错误版本、篡改参数和自造摘要均拒绝。认证角色无法直接 SELECT/UPDATE 密钥表。
+- 回归测试包含缺少 signer、格式错误 MAC、错误密钥版本、伪造 MAC、合法签名但来源指纹冲突和角色权限拒绝。所有成功模拟验证继续 HOLD。
+- 限制：CI runner 和模拟 signer 持有密钥，不能代替真正独立、受认证的生产验证服务。SQL 不自行验证真实 Ed25519 签名，旧的原始合成证据 attester 入口仍存在；没有 KMS/HSM、真实 IAM、外部不可变存储和跨系统原子撤权。这是隔离来源入口的局部收敛，不是全库或生产不可绕过授权。
+- EXT-001 继续 UNVERIFIED、NOT_COLLECTED、NOT_REVIEWED、NOT_SIGNED；hold_active=true、release_eligible=false、merge_authorized=false、deploy_authorized=false。PR #129 Draft / CI-only，禁止合并部署或发出真实通知。
