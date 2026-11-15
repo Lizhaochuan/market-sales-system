@@ -12,7 +12,7 @@
     "Production API runtime does not import these eighteen stage modules; adapters are CI fixture injection",
     "Existing npm test script does not include V3.2-82 through V3.2-99 security suites",
     "SHA-256 in-memory chains are not durable or tamper-proof trust anchors",
-    "V3.2-89 head-sha workflow lookup returned zero runs, but separately retrieved known workflow job completed/success"
+    "V3.2-89 initial audit draft used a truncated 39-digit SHA; corrected full HEAD and live workflow lookup confirmed CI #43631897201 completed/success"
   ],
   "entrypoints_reviewed": [
     "src/app.mjs",
@@ -36,14 +36,13 @@
   },
   "coverage": {
     "stage_count": 18,
-    "individual_head_ci_success_excluding_v89": 17,
-    "v89_known_run_jobs_success": 1,
     "combined_node_security_regression": "PENDING_V3.2_100_CI",
     "core_contract_suite_on_v3_2_99_head": "NOT_RUN",
     "postgresql_suite": "NOT_RUN",
     "chromium_suite": "NOT_RUN",
     "external_authority_contract_test": "NOT_RUN",
-    "production_e2e": "NOT_RUN"
+    "production_e2e": "NOT_RUN",
+    "individual_head_ci_success": 18
   },
   "findings": [
     {
@@ -91,9 +90,9 @@
     {
       "id": "INT-007",
       "severity": "P2",
-      "title": "V3.2-89 HEAD workflow lookup unavailable despite separately verified successful job",
-      "impact": "Proof audit needs explicit evidence provenance",
-      "recommendation": "Retain run/job identifiers and recheck after changes"
+      "title": "Point-in-time PR and CI manifest can become stale",
+      "impact": "GitHub status and source evidence may change after the audit snapshot",
+      "recommendation": "Recheck all PR HEADs, base refs and CI at review/merge time; reject malformed SHAs"
     }
   ],
   "stages": [
@@ -271,14 +270,14 @@
       "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/96",
       "head_branch": "chatgpt/v3-2-89-m02-frozen-unified-report-invalidation",
       "base_branch": "chatgpt/v3-2-88-m02-unified-pending-review-report",
-      "head_sha": "5ae3412df48b58fd2e6536074cad5a279e9f22f",
+      "head_sha": "5ae3412df48b58fd2e6536074cad5a279e9f22f0",
       "pr_state_at_review": "draft_open_unmerged",
       "expected_parent_pr": 95,
       "ci": {
         "run_id": 43631897201,
         "status": "completed",
         "conclusion": "success",
-        "evidence": "known_run_jobs_verified; head_sha_lookup_returned_empty"
+        "evidence": "head_sha_workflow_lookup"
       },
       "files": {
         "source": "src/cross-module-unified-report-freeze.mjs",
