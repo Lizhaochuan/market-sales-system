@@ -19,6 +19,7 @@ on:
       - 'tests/contracts/v3-2-121-external-audit-anchor.test.mjs'
       - 'tests/helpers/v3-2-121-m02-postgres-revocation-notices.mjs'
       - 'tests/fixtures/v3-2-121-m02-revocation-notices.sql'
+      - 'tests/fixtures/v3-2-121-external-anchor-ledger.sql'
       - '.github/workflows/v3-2-121-m02-notices.yml'
 jobs:
   notice-unit-and-postgres:
