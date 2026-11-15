@@ -289,3 +289,10 @@
 - `quarantine_review_diagnostics` 输出当前最新调查版本、结论、双方认可数量与固定 `QUARANTINE_RETAINED`。**即使最新调查为 `FALSE_POSITIVE_CANDIDATE` 且 SECURITY、AUDIT 双方均认可，也依旧保持原始隔离、所有历史记录、`quarantine_active=true`、`hold_active=true` 和 `release_eligible=false`**。本轮没有创建任何恢复凭据、撤销隔离、跳过签名验真或改变生产资金订单的路径。
 - CI 覆盖无原始事件、跨租户尝试、错误复核职责、调查人自审、重复审核、跨职责重用审核人、错误证据摘要、旧版复核失效及两次调查后重建最新诊断。原始隔离事件、CRM 三模块 HOLD 和事故 STOP 全程保留。
 - **限制**：这是隔离 PostgreSQL 中的工作流边界测试，尚无真实安全调查的证据采集、独立身份认证、法律合规调查确认或生产隔离解除机制。误报候选仅是待调查结论，**不是恢复批准**。继续 Draft / CI-only / 不合并 / 不部署。
+
+## V121 调查—安全事件—复核证据链完整性及解除隔离前验收边界（CI-only）
+- 独立审计模拟库新增不可变的 `quarantine_evidence_chains`，在**最新调查版本已分别取得 SECURITY 和 AUDIT 两份 AGREED 复核、两名审核人不同且均非调查人、复核摘要都与调查证据一致**的条件下，由第三个独立 `v121_anchor_evidence_checker` 生成追加式证据链。证据检查人不得同时是该版调查人或双域审核人。调查、复核与证据链追加使用相同的事件级 PostgreSQL 事务锁，避免旧版在版本切换竞争中被错误视为最新。
+- `quarantine_expected_chain` 使用显式版本号与 SHA-256 域分隔规范，将机构、原始安全事件 ID/类型/机构或失败项范围/初始证据摘要、最新调查 ID/版本/调查人/结论/证据摘要、SECURITY 与 AUDIT 的各自审核人/意见/审核证据摘要纳入**确定顺序的完整摘要**。`quarantine_chain_diagnostics` 每次只读重算最新版本摘要，分别给出 `INVESTIGATION_MISSING`、`EVIDENCE_INCOMPLETE_OR_CONFLICTING`、`EVIDENCE_ATTESTATION_MISSING`、`EVIDENCE_CHAIN_MISMATCH` 或 `EVIDENCE_LINKED_STILL_HOLD`；即使全部匹配也只表示 CI 证据链内部一致，不代表调查事实正确或有权解除隔离。
+- PostgreSQL 测试覆盖：缺失独立证据链、跨机构检查、旧版证据链签发、调查人及审核人自查、重复签发、原始事件摘要发生变动、审核意见被改成 DISAGREED、后续调查版本使之前两份审核和证据链失效、新版本只有一份审核时不得签发、重新双域审核后才能产生新证据链。隔离事件、全部调查和旧审核、旧证据链不可覆盖或删除，最新报告恒定 `quarantine_active=true`、`hold_active=true`、`release_eligible=false`。
+- **真实解除隔离前仍需独立验收**：需要可信安全事件来源及完整链外证据、不可篡改的外部审计和签名密钥托管、生产级身份与职责独立性、密钥被盗后的重新发行/吊销与历史取证、销售/财务/教务影响核对和回滚补偿、正式的多部门 UAT、灰度与故障恢复，以及专门审批的受控恢复路径。以上任一环节未完成不得将 CI `EVIDENCE_LINKED_STILL_HOLD` 误用为生产恢复授权。
+- 限制：当前 SHA-256 仅验证**同一隔离审计库中的记录一致性**，不证明调查证据来自可信外部事实；超级管理员仍可控制数据库，不能替代 WORM/HSM/可信时间或生产安全 UAT。继续 Draft / CI-only / 不合并 / 不部署 / 不改真实业务数据。
