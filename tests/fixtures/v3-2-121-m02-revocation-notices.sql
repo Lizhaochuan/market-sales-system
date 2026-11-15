@@ -154,7 +154,7 @@ BEGIN
   previous_digest,receipt_digest,receipt_payload)
  VALUES(p_organization,p_incident,p_notice,p_sequence,p_state,
         p_previous,p_digest,p_payload);
-END $receipt_gate$;
+END; $receipt_gate$;
 REVOKE ALL ON FUNCTION v106_test.fixture_append_negative_receipt(
  uuid,uuid,char(64),integer,text,char(64),char(64),text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v106_test.fixture_append_negative_receipt(
