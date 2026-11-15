@@ -1086,3 +1086,51 @@ test('new remediation versions invalidate old review eligibility without overwri
  assert.equal(status.issuance_blocked,true);
  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=9')).rows[0].n,0);
 });
+
+test('concurrent remediation candidates serialize to one next version and keep old reviews stale',async()=>{
+ const failure='00000000-0000-4000-8000-0000000000b1';
+ const fourthA='00000000-0000-4000-8000-0000000000b5';
+ const fourthB='00000000-0000-4000-8000-0000000000b6';
+ const digestA=createHash('sha256').update('fixture-concurrent-v4-a').digest('hex');
+ const digestB=createHash('sha256').update('fixture-concurrent-v4-b').digest('hex');
+ const note=createHash('sha256').update('fixture-concurrent-note').digest('hex');
+ const originalRemediator='00000000-0000-4000-8000-000000000016';
+ const sql='INSERT INTO v106_test.fixture_uat_remediations(organization_id,failure_id,remediation_id,remediation_version,new_evidence_digest,remediated_by,remediation_note_digest) VALUES($1,$2,$3,$4,$5,$6,$7)';
+ const outcomes=await Promise.allSettled([
+  admin.query(sql,[a,failure,fourthA,4,digestA,originalRemediator,note]),
+  admin.query(sql,[a,failure,fourthB,4,digestB,originalRemediator,note])
+ ]);
+ assert.equal(outcomes.filter(x=>x.status==='fulfilled').length,1);
+ assert.equal(outcomes.filter(x=>x.status==='rejected').length,1);
+ assert.match(String(outcomes.find(x=>x.status==='rejected').reason.message),/V121_UAT_REMEDIATION_VERSION_NOT_NEXT|duplicate key/);
+ const latest=(await admin.query('SELECT remediation_id,new_evidence_digest FROM v106_test.fixture_uat_remediations WHERE organization_id=$1 AND failure_id=$2 AND remediation_version=4',[a,failure])).rows;
+ assert.equal(latest.length,1);
+ const winner=latest[0];
+ const losing=winner.remediation_id===fourthA?fourthB:fourthA;
+ const rejectedDigest=winner.remediation_id===fourthA?digestB:digestA;
+ const view=async()=>(await admin.query('SELECT attempts,latest_version,latest_remediation_id,accepted_review_roles,hold_active,release_eligible FROM v106_test.fixture_uat_remediation_diagnostics WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0];
+ let result=await view();
+ assert.deepEqual([result.attempts,result.latest_version,result.latest_remediation_id,result.accepted_review_roles],[4,4,winner.remediation_id,0]);
+ const review='SELECT v106_test.fixture_record_uat_remediation_review($1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::char(64))';
+ await assert.rejects(closeoutWriter.query(review,[a,'00000000-0000-4000-8000-0000000000b4','00000000-0000-4000-8000-000000000021','SECURITY','ACCEPTED_FOR_REVIEW',createHash('sha256').update('fixture-finance-corrected-v3').digest('hex')]),/V121_UAT_REMEDIATION_SUPERSEDED/);
+ await assert.rejects(closeoutWriter.query(review,[a,losing,'00000000-0000-4000-8000-000000000021','SECURITY','ACCEPTED_FOR_REVIEW',rejectedDigest]),/V121_UAT_REMEDIATION_NOT_FOUND/);
+ await closeoutWriter.query(review,[a,winner.remediation_id,'00000000-0000-4000-8000-000000000021','SECURITY','ACCEPTED_FOR_REVIEW',winner.new_evidence_digest]);
+ result=await view();
+ assert.equal(result.accepted_review_roles,1);
+ // A simultaneous v5 insertion and additional v4 review must never grant v5 v4's approval.
+ const fifth='00000000-0000-4000-8000-0000000000b7';
+ const fifthDigest=createHash('sha256').update('fixture-concurrent-v5').digest('hex');
+ const race=await Promise.allSettled([
+  admin.query(sql,[a,failure,fifth,5,fifthDigest,originalRemediator,note]),
+  closeoutWriter.query(review,[a,winner.remediation_id,'00000000-0000-4000-8000-000000000022','AUDIT','ACCEPTED_FOR_REVIEW',winner.new_evidence_digest])
+ ]);
+ assert.equal(race[0].status,'fulfilled');
+ if(race[1].status==='rejected')
+  assert.match(String(race[1].reason.message),/V121_UAT_REMEDIATION_SUPERSEDED/);
+ result=await view();
+ assert.deepEqual([result.attempts,result.latest_version,result.latest_remediation_id,result.accepted_review_roles,result.hold_active,result.release_eligible],[5,5,fifth,0,true,false]);
+ const historical=(await admin.query('SELECT remediation_version,remediation_id FROM v106_test.fixture_uat_remediations WHERE organization_id=$1 AND failure_id=$2 ORDER BY remediation_version',[a,failure])).rows;
+ assert.deepEqual(historical.map(x=>x.remediation_version),[1,2,3,4,5]);
+ const stop=(await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0];
+ assert.equal(stop.issuance_blocked,true);
+});
