@@ -10,6 +10,7 @@ import {signFixtureAuditAnchor,verifyFixtureAuditAnchor,verifyFixtureActiveAudit
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
+import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake} from '../../src/cross-module-v121-iam-evidence.mjs';
 const hash=o=>createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const a='11111111-1111-4111-8111-111111111111';
 const b='22222222-2222-4222-8222-222222222222';
@@ -1493,9 +1494,12 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
  await admin.query("CREATE ROLE v121_anchor_security_reviewer LOGIN PASSWORD 'test_only_quarantine_security'");
  await admin.query("CREATE ROLE v121_anchor_audit_reviewer LOGIN PASSWORD 'test_only_quarantine_audit'");
  await admin.query("CREATE ROLE v121_anchor_evidence_checker LOGIN PASSWORD 'test_only_quarantine_evidence'");
+ await admin.query("CREATE ROLE v121_iam_intake_writer LOGIN PASSWORD 'test_only_iam_intake_writer'");
+ await admin.query("CREATE ROLE v121_iam_intake_reader LOGIN PASSWORD 'test_only_iam_intake_reader'");
+ await admin.query("CREATE ROLE v121_iam_revoker LOGIN PASSWORD 'test_only_iam_revoker'");
  await admin.query('CREATE DATABASE v121_anchor_isolated');
  await admin.query('REVOKE CONNECT ON DATABASE v121_anchor_isolated FROM PUBLIC');
- await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security,v121_anchor_investigator,v121_anchor_security_reviewer,v121_anchor_audit_reviewer,v121_anchor_evidence_checker');
+ await admin.query('GRANT CONNECT ON DATABASE v121_anchor_isolated TO v121_anchor_reader,v121_anchor_writer,v121_anchor_attester,v121_anchor_security,v121_anchor_investigator,v121_anchor_security_reviewer,v121_anchor_audit_reviewer,v121_anchor_evidence_checker,v121_iam_intake_writer,v121_iam_intake_reader,v121_iam_revoker');
  const ledgerAdmin=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
  let anchorReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
  const anchorWriter=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
