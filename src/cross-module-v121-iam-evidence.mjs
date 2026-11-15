@@ -165,3 +165,24 @@ export function verifyFixtureExt001Envelope(envelope,{trustedKeys,nowMs}={}){
   quarantine_active:true,hold_active:true,release_eligible:false
  });
 }
+
+
+// Intake metadata is derived only after validating BOTH synthetic signatures.
+// No untrusted caller may provide digest or issuer identity as a substitute.
+export function fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs}={}){
+ verifyFixtureExt001Envelope(envelope,{trustedKeys,nowMs});
+ const body=envelope.body;
+ return Object.freeze({
+  gap_id:'EXT-001',
+  organization_id:body.organization_id,
+  evidence_digest:sha(encoded('v121-ext001-intake-envelope-v1',envelope)),
+  evidence_e1_digest:body.artifacts.find(a=>a.id==='EXT-001-E1').sha256,
+  evidence_e2_digest:body.artifacts.find(a=>a.id==='EXT-001-E2').sha256,
+  issuer_id:body.producer.principal_id,
+  reviewer_id:envelope.reviewer.reviewer_id,
+  valid_until_ms:body.valid_until_ms,
+  production_evidence_collected:false,
+  release_eligible:false,
+  hold_active:true
+ });
+}
