@@ -53,7 +53,7 @@ async function seedHold(pool,s,count=1){
   [s.organization_id,s.incident_id,s.student_id,count,previous]);
  return out;
 }
-function harness(s,pool,extra={}){
+function harness(s,pool){
  const holdLedger=createIsolatedPostgresReviewHoldLedger({pool});
  const outboxLedger=createIsolatedPostgresHoldOutbox({pool});
  const sourceKey=generateKeyPairSync('ed25519');
@@ -88,7 +88,7 @@ function harness(s,pool,extra={}){
   readSignedFixtureRecipient:recipient,
   fixtureSourcePublicKey:publicPem(sourceKey),
   fixtureRecipientPublicKey:publicPem(recipientKey),
-  getFixtureNow:()=>clock,...extra
+  getFixtureNow:()=>clock,...opts
  });
  const input=(sequence=1)=>({...s,hold_sequence:sequence});
  return {s,pool,holdLedger,outboxLedger,sourceKey,recipientKey,
