@@ -285,3 +285,66 @@ $recovery_immutable$;
 CREATE TRIGGER fixture_recovery_immutable BEFORE UPDATE OR DELETE
  ON v106_test.fixture_recovery_consumptions FOR EACH ROW
  EXECUTE FUNCTION v106_test.fixture_recovery_no_mutation();
+
+-- SECURITY DEFINER fixture-only issuance gateway. The executing role has no table DML.
+-- Ed25519 fixture approvals are checked in JS, NOT independently in PostgreSQL.
+CREATE FUNCTION v106_test.fixture_issue_recovery_key(
+ p_organization uuid,p_incident uuid,p_request uuid,p_digest char(64),
+ p_version integer,p_revocation_digest char(64),
+ p_audit_id uuid,p_security_id uuid,p_key bytea)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $issue_gateway$
+DECLARE predecessor record;
+DECLARE audit_event record;
+DECLARE latest integer;
+BEGIN
+ IF session_user <> 'v106_key_issuer' OR
+    p_organization <> '11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_ISSUER_ROLE_SCOPE_DENIED';
+ END IF;
+ IF p_version IS NULL OR p_version<2 OR
+    p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}$' OR
+    p_revocation_digest IS NULL OR p_revocation_digest !~ '^[a-f0-9]{64}$' OR
+    p_audit_id=p_security_id OR p_key IS NULL OR octet_length(p_key)<>32 THEN
+  RAISE EXCEPTION 'V121_ISSUANCE_ENVELOPE_INVALID';
+ END IF;
+ SELECT key_version,active INTO predecessor
+ FROM v106_test.fixture_receipt_attestation_secrets
+ WHERE organization_id=p_organization AND key_version=p_version-1 FOR UPDATE;
+ IF NOT FOUND OR predecessor.active IS DISTINCT FROM false THEN
+  RAISE EXCEPTION 'RECOVERY_PREVIOUS_KEY_NOT_REVOKED';
+ END IF;
+ SELECT event_digest,actor,event_kind,key_version INTO audit_event
+ FROM v106_test.fixture_receipt_key_audit
+ WHERE organization_id=p_organization AND key_version=p_version-1
+  AND event_kind='KEY_REVOKED';
+ IF NOT FOUND OR audit_event.event_digest<>p_revocation_digest THEN
+  RAISE EXCEPTION 'RECOVERY_AUDIT_CHANGED';
+ END IF;
+ IF audit_event.event_digest<>encode(sha256(convert_to(
+  p_organization::text||'|'||audit_event.key_version::text||'|'||
+  audit_event.event_kind||'|'||audit_event.actor,'UTF8')),'hex') THEN
+  RAISE EXCEPTION 'RECOVERY_AUDIT_TAMPERED';
+ END IF;
+ IF EXISTS (SELECT 1 FROM v106_test.fixture_recovery_consumptions
+  WHERE organization_id=p_organization AND request_id=p_request) THEN
+  RAISE EXCEPTION 'RECOVERY_ALREADY_CONSUMED';
+ END IF;
+ SELECT COALESCE(MAX(key_version),0) INTO latest
+ FROM v106_test.fixture_receipt_attestation_secrets
+ WHERE organization_id=p_organization;
+ IF latest<>p_version-1 THEN RAISE EXCEPTION 'RECOVERY_VERSION_NOT_NEXT'; END IF;
+ INSERT INTO v106_test.fixture_recovery_consumptions
+ (organization_id,incident_id,request_id,request_digest,key_version,
+  revocation_audit_digest,approver_audit_id,approver_security_id,anchor_source)
+ VALUES(p_organization,p_incident,p_request,p_digest,p_version,p_revocation_digest,
+        p_audit_id,p_security_id,'FIXTURE_SEPARATE_ARCHIVE');
+ INSERT INTO v106_test.fixture_receipt_attestation_secrets
+ (organization_id,key_version,attestation_key,active)
+ VALUES(p_organization,p_version,p_key,true);
+END;
+$issue_gateway$;
+REVOKE ALL ON FUNCTION v106_test.fixture_issue_recovery_key(
+ uuid,uuid,uuid,char(64),integer,char(64),uuid,uuid,bytea) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_issue_recovery_key(
+ uuid,uuid,uuid,char(64),integer,char(64),uuid,uuid,bytea) TO v106_key_issuer;
