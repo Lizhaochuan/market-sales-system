@@ -1,0 +1,131 @@
+{
+  "schema_version": "v3.2-120-m02-incident-export-revocation-v1",
+  "module": "M02",
+  "parent_pr": 126,
+  "parent_head_sha": "24636b2d03e6be76f335bcbdd7f4b26bae00aed5",
+  "parent_ci": [
+    {
+      "id": 43669251047,
+      "conclusion": "success"
+    },
+    {
+      "id": 43669251225,
+      "conclusion": "success"
+    }
+  ],
+  "execution_boundary": "ISOLATED_POSTGRESQL16_CI_ONLY",
+  "purpose": "Prevent obsolete V119 incident-level export from being treated as currently valid after source changes or newer exports",
+  "source": "src/cross-module-manifest-revocation-audit.mjs",
+  "sql_adapter": "tests/helpers/v3-2-120-m02-postgres-manifest-revocation.mjs",
+  "sql_fixture": "tests/fixtures/v3-2-120-m02-manifest-revocation.sql",
+  "setup": "scripts/v3-2-120-setup-manifest-revocation.mjs",
+  "tests": "tests/integration/v3-2-120-m02-manifest-revocation.test.mjs",
+  "source_contract": {
+    "v119_full_export_chain_verified_inside_same_serializable_sql_transaction": true,
+    "v119_student_roster_and_current_v115_v116_v118_snapshot_recomputed_inside_same_transaction": true,
+    "exported_manifest_sequence_bounded": 128,
+    "no_client_supplied_manifest_digest_accepted": true,
+    "current_source_snapshot_matches_target": false,
+    "classification": [
+      "CURRENT_FIXTURE_SNAPSHOT_STILL_UNAUTHORIZED",
+      "REVOKED_SOURCE_CHANGED_AFTER_EXPORT",
+      "REVOKED_SUPERSEDED_BY_LATER_EXPORT",
+      "REVOKED_PREVIOUSLY"
+    ],
+    "previously_revoked_cannot_reactivate_if_source_reverts": true,
+    "duplicate_observation_deduplicated": true,
+    "after_sql_commit_recheck_current_roster_source_and_v119_head": true,
+    "last_check_to_external_action_race_closed": false,
+    "no_real_issuer_or_external_signature_claim": true
+  },
+  "sql": {
+    "database": "v106_isolated",
+    "postgres_version": 16,
+    "schema": "v106_test",
+    "guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "tables": [
+      "fixture_manifest_revocation_events",
+      "fixture_manifest_revocation_heads"
+    ],
+    "event_insert_only_to_test_writers": true,
+    "permanent_prior_revocation_recorded": true,
+    "count_distinct_revoked_export_sequences": true,
+    "scope": [
+      "organization_id",
+      "incident_id"
+    ],
+    "serializable_transaction": true,
+    "scope_advisory_lock": true,
+    "force_row_level_security": true,
+    "hold_active_true_check": true,
+    "monotone_head_sequence_and_revoked_count_trigger": true,
+    "real_revocation_delivery": false,
+    "real_business_release_capability": false,
+    "production_migration_created": false
+  },
+  "tests_cases": [
+    "REV-01",
+    "REV-02",
+    "REV-03",
+    "REV-04",
+    "REV-05",
+    "REV-06",
+    "REV-07",
+    "REV-08",
+    "REV-09",
+    "REV-10",
+    "REV-11",
+    "REV-12",
+    "REV-13",
+    "REV-14",
+    "REV-15",
+    "REV-16",
+    "REV-17",
+    "REV-18",
+    "REV-19",
+    "REV-20"
+  ],
+  "acceptance": {
+    "real_authorized_business_owners": "UNASSIGNED",
+    "sixteen_external_admission_conditions": "UNVERIFIED",
+    "r01_to_r10": "UNVERIFIED",
+    "six_real_authorities": "UNVERIFIED",
+    "finance_signature_verified": false,
+    "academic_signature_verified": false,
+    "real_atomic_cross_module_handoff": false,
+    "remote_export_notification_receipt": false,
+    "real_managed_key_signatures": false,
+    "enterprise_postgresql_uat": "NOT_RUN",
+    "chromium_uat": "NOT_RUN",
+    "contract_status": "proposed-unimplemented",
+    "student_primary": true,
+    "family_only_for_actual_siblings": true,
+    "original_order_payment_saleevent_lesson_compensation_preserved": true,
+    "main_crm_and_edu_management_unmodified": true,
+    "market_sales_documents_independent": true
+  },
+  "hard_denials": {
+    "external_source_verified": false,
+    "external_recipient_verified": false,
+    "external_authority_verified": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "production_integration_allowed": false,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "unresolved": [
+    "No production messaging or notification of recipients holding obsolete export copies",
+    "No trusted real organizational signer, holder identity or immutable independent custody",
+    "V115/V116/V118/V119 records originated in distinct prior local transactions",
+    "The final postcommit comparison does not create external cross-service atomicity",
+    "No real production payroll/financial/academic authority evidence or customer data",
+    "An authorized DB administrator can tamper with local evidence; local SHA-256 detects only inconsistent history",
+    "Without V119 export there is no claim of complete incident coverage and it remains blocked"
+  ],
+  "next_stage": "V3.2-121 CI-only export-holder acknowledgement debt and repeatable manual invalidation notification roster; no real outbound delivery"
+}

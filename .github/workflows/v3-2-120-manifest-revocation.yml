@@ -1,0 +1,83 @@
+name: V3.2-120 irreversible exported-manifest revocation audit
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-manifest-revocation-audit.mjs'
+      - 'tests/helpers/v3-2-119-m02-postgres-incident-gap-manifest.mjs'
+      - 'tests/helpers/v3-2-120-m02-postgres-manifest-revocation.mjs'
+      - 'tests/fixtures/v3-2-120-m02-manifest-revocation.sql'
+      - 'tests/integration/v3-2-120-m02-manifest-revocation.test.mjs'
+      - 'scripts/v3-2-120-setup-manifest-revocation.mjs'
+      - 'spec/v3-2-120-m02-manifest-revocation.json'
+      - 'docs/V3.2-120_M02_MANIFEST_REVOCATION_AUDIT.md'
+      - '.github/workflows/v3-2-120-manifest-revocation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-export-revocation:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install disposable CI dependencies
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Syntax check V120 source and test-only SQL helpers
+        run: |
+          node --check src/cross-module-manifest-revocation-audit.mjs
+          node --check tests/helpers/v3-2-120-m02-postgres-manifest-revocation.mjs
+          node --check tests/integration/v3-2-120-m02-manifest-revocation.test.mjs
+          node --check scripts/v3-2-120-setup-manifest-revocation.mjs
+          node --check tests/helpers/v3-2-119-m02-postgres-incident-gap-manifest.mjs
+      - name: Initialize V106 V109 V110 V112 V113 V114 V115 V116 V117 V118 V119 V120 disposable fixture schemas
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+          node scripts/v3-2-112-setup-evidence-intake-sql.mjs
+          node scripts/v3-2-113-setup-reviewer-assignments.mjs
+          node scripts/v3-2-114-setup-reviewer-lifecycle.mjs
+          node scripts/v3-2-115-setup-review-hold.mjs
+          node scripts/v3-2-116-setup-hold-outbox.mjs
+          node scripts/v3-2-117-setup-delivery-reconciliation.mjs
+          node scripts/v3-2-118-setup-hold-gap-scan.mjs
+          node scripts/v3-2-119-setup-incident-gap-manifest.mjs
+          node scripts/v3-2-120-setup-manifest-revocation.mjs
+      - name: V120 irreversible export revocation and source-race PostgreSQL cases
+        run: node --test tests/integration/v3-2-120-m02-manifest-revocation.test.mjs
+      - name: Regress V119 incident manifest V118 monotone gap scan and V117 delivery reconciliation
+        run: node --test tests/integration/v3-2-119-m02-incident-gap-manifest.test.mjs tests/integration/v3-2-118-m02-hold-gap-watermark-scan.test.mjs tests/integration/v3-2-117-m02-hold-delivery-reconciliation.test.mjs
+      - name: Regress V116 signed outbox V115 permanent HOLD and V114 reviewer lifecycle
+        run: node --test tests/integration/v3-2-116-m02-hold-outbox-delivery.test.mjs tests/integration/v3-2-115-m02-review-invalidation-hold.test.mjs tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs
+      - name: Regress V113 reviewer assignment and V112 evidence quarantine
+        run: node --test tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs
+      - name: Regress V111 independent authorities V110 loss notice and V109 lease fence
+        run: node --test tests/security/v3-2-111-m02-independent-evidence-review.test.mjs tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs
+      - name: Regress V108 postcommit race V107 signed PostgreSQL and V106 checkpoints
+        run: node --test tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Confirm fixture tests never grant real business permissions or migration
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-120-m02-manifest-revocation.json'));const d=s.hard_denials;if(s.parent_pr!==126||s.tests_cases.length!==20||s.source_contract.previously_revoked_cannot_reactivate_if_source_reverts!==true||s.sql.production_migration_created!==false||s.acceptance.contract_status!=='proposed-unimplemented'||Object.entries(d).some(([k,v])=>k==='hold_active'?v!==true:v!==false))process.exit(1)"
+      - name: Recheck V105 external admission unresolved
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress V82 through V99 eighteen isolated M02 security stages
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
