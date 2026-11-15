@@ -22,8 +22,8 @@ const approvals=(r=request)=>{
 function gate(overrides={}){
  return createFixtureRecoveryGate({approverKeys:Object.fromEntries(Object.keys(ids).map(role=>[role,
  {approver_id:ids[role],publicKey:keys[role].publicKey}])),clock:()=>150,
- readAudit:async r=>({organization_id:r.organization_id,key_version:r.key_version,
-  event_kind:'KEY_ISSUED',event_digest:r.audit_digest}),
+ readAudit:async r=>({organization_id:r.organization_id,key_version:r.key_version-1,
+  event_kind:'KEY_REVOKED',event_digest:r.audit_digest}),
  readAnchor:async r=>({request_digest:r.request_digest,audit_digest:r.audit_digest,anchored:true,source:'FIXTURE_SEPARATE_ARCHIVE'}),
  ...overrides});
 }
