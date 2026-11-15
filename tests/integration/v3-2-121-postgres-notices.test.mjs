@@ -173,7 +173,7 @@ test('receipt cannot skip sequence, use positive ack or rewrite history',async()
 test('receipt cross-tenant write and unknown notice fail closed',async()=>{
  const q=await service.enqueue({...input,epoch:22});
  await assert.rejects(signedReceipt({organization_id:b,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'}),{code:'NOTICE_RECEIPT_TARGET_ABSENT'});
- await assert.rejects(receiptWriter.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[b,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']),/row-level security/);
+ await assert.rejects(receiptWriter.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[b,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']),/permission denied/);
 });
 test('coverage snapshot contains consistent recipient set and receipt states',async()=>{
  const scope=Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest'].map(k=>[k,input[k]]));
@@ -183,15 +183,20 @@ test('coverage snapshot contains consistent recipient set and receipt states',as
  assert.equal(snap.notices.find(n=>n.epoch===20).state,'COPY_NOT_RETRACTABLE');
  assert.equal((await service.report(scope)).hold_active,true);
 });
-test('failed SQL insert rolls back with no partial negative receipt',async()=>{
+test('definer admission rollback leaves no partial receipt',async()=>{
  const q=await service.enqueue({...input,epoch:24});
- const before=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
- assert.equal(before.rows[0].n,0);
+ const value=fixtureSignedInput(q);
+ const payload={organization_id:a,incident_id:incident,notice_id:q.notice_id,
+  receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),
+  proof:value.proof,lease:value.lease};
+ const json=JSON.stringify(payload),digest=hash(payload);
+ const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),digest,json];
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text)';
  const client=await receiptWriter.connect();
  try{
   await client.query('BEGIN');
-  await client.query('INSERT INTO v106_test.fixture_revocation_negative_receipts(organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[a,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']);
-  await assert.rejects(client.query('INSERT INTO v106_test.fixture_revocation_negative_receipts(organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',[a,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']));
+  await client.query(sql,params);
+  await assert.rejects(client.query(sql,params));
   await client.query('ROLLBACK');
  }finally{client.release();}
  const after=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
@@ -437,4 +442,23 @@ test('receipt adapter cannot accept ordinary writer as privileged receipt connec
   leaseGate:fixtureGate(),receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:proofAuthority});
  await assert.rejects(incorrectlyWired.appendNegativeReceipt(fixtureSignedInput(q)),{code:'NOTICE_SQL_CONTEXT_UNTRUSTED'});
+});
+
+test('dedicated receipt role cannot INSERT table directly',async()=>{
+ const q=await service.enqueue({...input,epoch:83});
+ await assert.rejects(receiptWriter.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,1,$4,$5,$6,$7)',
+  [a,incident,q.notice_id,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}']),/permission denied/);
+ const row=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(row.rows[0].n,0);
+});
+test('definer receipt gate rejects mismatched digest and unsigned envelope',async()=>{
+ const q=await service.enqueue({...input,epoch:84});
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text)';
+ const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}'];
+ await assert.rejects(receiptWriter.query(sql,params),/V121_RECEIPT_GATE_INVALID/);
+ const forged={organization_id:a,incident_id:incident,notice_id:q.notice_id,
+  receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64)};
+ await assert.rejects(receiptWriter.query(sql,[...params.slice(0,6),hash(forged),JSON.stringify(forged)]),/V121_RECEIPT_GATE_ENVELOPE/);
+ const after=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(after.rows[0].n,0);
 });
