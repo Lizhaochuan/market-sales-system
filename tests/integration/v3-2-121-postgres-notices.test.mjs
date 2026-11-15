@@ -19,8 +19,8 @@ const writer=new pg.Pool({host,database:'v106_isolated',user:'v106_writer_a',pas
 const keyPair=generateKeyPairSync('ed25519');
 const fixtureLeaseKeys=generateKeyPairSync('ed25519');
 const fixtureSigner='00000000-0000-4000-8000-000000000081';
-function makeFixtureLease(notice_id,authority_epoch=4,revocation_watermark=2,lease_sequence=1){
- const lease={organization_id:a,incident_id:incident,signer_id:fixtureSigner,notice_id,
+function makeFixtureLease(notice_id,authority_epoch=4,revocation_watermark=2,lease_sequence=1,organization_id=a){
+ const lease={organization_id,incident_id:incident,signer_id:fixtureSigner,notice_id,
   authority_epoch,revocation_watermark,lease_sequence,issued_at_ms:100,expires_at_ms:200};
  return {lease,signature_b64:sign(null,encodeFixtureLease(lease),fixtureLeaseKeys.privateKey).toString('base64')};
 }
@@ -35,7 +35,7 @@ function signedReceipt(value){
  if(!['NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE'].includes(value.receipt_state))return ledger.appendNegativeReceipt({...value,proof:null});
  const statement={organization_id:value.organization_id,incident_id:value.incident_id,notice_id:value.notice_id,receipt_sequence:value.receipt_sequence,receipt_state:value.receipt_state,signer_id:'00000000-0000-4000-8000-000000000081',authority_epoch:4,revocation_watermark:2,issued_at_ms:100,expires_at_ms:500};
  const signature_b64=sign(null,encodeFixtureReceiptProof(statement),keyPair.privateKey).toString('base64');
- return ledger.appendNegativeReceipt({...value,proof:{statement,signature_b64},lease:makeFixtureLease(value.notice_id)});
+ return ledger.appendNegativeReceipt({...value,proof:{statement,signature_b64},lease:makeFixtureLease(value.notice_id,4,2,1,value.organization_id)});
 }
 
 test.before(async()=>{
