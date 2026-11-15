@@ -1,0 +1,533 @@
+{
+  "schema_version": "v3.2-100-m02-integration-review-v1",
+  "repository": "Lizhaochuan/market-sales-system",
+  "reviewed_on": "2026-11-15",
+  "reviewed_parent_stage": "V3.2-99",
+  "reviewed_parent_pr": 106,
+  "reviewed_parent_head_sha": "9a583072c324b409b52b53c24f0e808cf6400445",
+  "scope": "STATIC_AND_OFFLINE_NODE_CROSS_STAGE_REVIEW_ONLY",
+  "limitations": [
+    "GitHub metadata and prior CI results are point-in-time snapshots; CI does not query live PR state",
+    "Only isolation Node tests; no current HEAD PostgreSQL, Chromium, real external contract or production end-to-end acceptance",
+    "Production API runtime does not import these eighteen stage modules; adapters are CI fixture injection",
+    "Existing npm test script does not include V3.2-82 through V3.2-99 security suites",
+    "SHA-256 in-memory chains are not durable or tamper-proof trust anchors",
+    "V3.2-89 head-sha workflow lookup returned zero runs, but separately retrieved known workflow job completed/success"
+  ],
+  "entrypoints_reviewed": [
+    "src/app.mjs",
+    "src/server.mjs",
+    "package.json"
+  ],
+  "release_gate": {
+    "external_contract_status": "proposed-unimplemented",
+    "expected_production_migration_count_from_specs": 38,
+    "new_migrations_in_reviewed_prs": 0,
+    "sixteen_external_admission_checks": "UNVERIFIED",
+    "r01_to_r10": "UNVERIFIED",
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "coverage": {
+    "stage_count": 18,
+    "individual_head_ci_success_excluding_v89": 17,
+    "v89_known_run_jobs_success": 1,
+    "combined_node_security_regression": "PENDING_V3.2_100_CI",
+    "core_contract_suite_on_v3_2_99_head": "NOT_RUN",
+    "postgresql_suite": "NOT_RUN",
+    "chromium_suite": "NOT_RUN",
+    "external_authority_contract_test": "NOT_RUN",
+    "production_e2e": "NOT_RUN"
+  },
+  "findings": [
+    {
+      "id": "INT-001",
+      "severity": "P0",
+      "title": "No real external financial/academic authority or atomic handoff",
+      "impact": "No legal operational release",
+      "recommendation": "Keep all gates denied; require independent evidence, external signatures and transactional acceptance"
+    },
+    {
+      "id": "INT-002",
+      "severity": "P1",
+      "title": "18 CI-only modules are not wired to production entrypoints",
+      "impact": "Test adapter behavior is not runtime business integration",
+      "recommendation": "V3.2-101 define typed read-only adapter contract and source-of-truth integration seam; don't deploy"
+    },
+    {
+      "id": "INT-003",
+      "severity": "P1",
+      "title": "Global npm test does not include V3.2-82..99 suites",
+      "impact": "Standard test run can pass while safety tests are not run",
+      "recommendation": "Add dedicated aggregate Node CI matrix and explicit documentation"
+    },
+    {
+      "id": "INT-004",
+      "severity": "P1",
+      "title": "18 Draft unmerged PRs form deep chain",
+      "impact": "Unreviewed dependency drift and no accepted mainline",
+      "recommendation": "Freeze branch changes, reconcile PR dependency and acceptance gates before selected merges"
+    },
+    {
+      "id": "INT-005",
+      "severity": "P1",
+      "title": "Revocation semantics are not enforced through earlier standalone CI adapters",
+      "impact": "Older result readers may miss newer revocation overlay",
+      "recommendation": "Define one canonical read-only verification facade before any production wiring"
+    },
+    {
+      "id": "INT-006",
+      "severity": "P2",
+      "title": "Stage workflows omit docs/spec from pull_request.paths",
+      "impact": "Docs-only changes may not run stage CI",
+      "recommendation": "Include docs/spec paths in V3.2-100 audit CI triggers; update old workflows only after review"
+    },
+    {
+      "id": "INT-007",
+      "severity": "P2",
+      "title": "V3.2-89 HEAD workflow lookup unavailable despite separately verified successful job",
+      "impact": "Proof audit needs explicit evidence provenance",
+      "recommendation": "Retain run/job identifiers and recheck after changes"
+    }
+  ],
+  "stages": [
+    {
+      "stage": "V3.2-82",
+      "pr_number": 89,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/89",
+      "head_branch": "chatgpt/v3-2-82-m02-unified-handoff-blocker",
+      "base_branch": "chatgpt/v3-2-81-m02-supplement-review-final-consistency",
+      "head_sha": "9c69c3bd37cf4d46b40068cb003fc8a8c929fbbf",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 88,
+      "ci": {
+        "run_id": 43628060729,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-unified-handoff-blocker.mjs",
+        "test": "tests/security/v3-2-82-m02-unified-handoff-blocker.test.mjs",
+        "workflow": ".github/workflows/v3-2-82-unified-handoff.yml",
+        "spec": "spec/v3-2-82-m02-unified-handoff-blocker.json",
+        "document": "docs/V3.2-82_M02_UNIFIED_HANDOFF_BLOCKER.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-83",
+      "pr_number": 90,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/90",
+      "head_branch": "chatgpt/v3-2-83-m02-unified-blocker-audit-snapshot",
+      "base_branch": "chatgpt/v3-2-82-m02-unified-handoff-blocker",
+      "head_sha": "018e36e7a7a463b536431a0b7c072f5211831ef8",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 89,
+      "ci": {
+        "run_id": 43628480251,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-unified-blocker-audit.mjs",
+        "test": "tests/security/v3-2-83-m02-unified-blocker-audit.test.mjs",
+        "workflow": ".github/workflows/v3-2-83-blocker-audit.yml",
+        "spec": "spec/v3-2-83-m02-unified-blocker-audit.json",
+        "document": "docs/V3.2-83_M02_UNIFIED_BLOCKER_AUDIT.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-84",
+      "pr_number": 91,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/91",
+      "head_branch": "chatgpt/v3-2-84-m02-blocker-triage-audit-link",
+      "base_branch": "chatgpt/v3-2-83-m02-unified-blocker-audit-snapshot",
+      "head_sha": "d6c787049db66bf587ad4b2d4f61aae38e552275",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 90,
+      "ci": {
+        "run_id": 43628929505,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-blocker-triage.mjs",
+        "test": "tests/security/v3-2-84-m02-blocker-triage.test.mjs",
+        "workflow": ".github/workflows/v3-2-84-blocker-triage.yml",
+        "spec": "spec/v3-2-84-m02-blocker-triage-audit-link.json",
+        "document": "docs/V3.2-84_M02_BLOCKER_TRIAGE_AUDIT_LINK.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-85",
+      "pr_number": 92,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/92",
+      "head_branch": "chatgpt/v3-2-85-m02-triage-reopen-rereview",
+      "base_branch": "chatgpt/v3-2-84-m02-blocker-triage-audit-link",
+      "head_sha": "5171d002e8a8485ebfe3a90e1aa01afcd3ccacf3",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 91,
+      "ci": {
+        "run_id": 43629325254,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-triage-reopen.mjs",
+        "test": "tests/security/v3-2-85-m02-triage-reopen.test.mjs",
+        "workflow": ".github/workflows/v3-2-85-triage-reopen.yml",
+        "spec": "spec/v3-2-85-m02-triage-reopen-rereview.json",
+        "document": "docs/V3.2-85_M02_TRIAGE_REOPEN_REREVIEW.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-86",
+      "pr_number": 93,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/93",
+      "head_branch": "chatgpt/v3-2-86-m02-reopened-evidence-diff-report",
+      "base_branch": "chatgpt/v3-2-85-m02-triage-reopen-rereview",
+      "head_sha": "ef7d7e753cf297ee4a620270e2f1aa1d4503e08d",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 92,
+      "ci": {
+        "run_id": 43629796867,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-reopened-evidence-diff.mjs",
+        "test": "tests/security/v3-2-86-m02-reopened-evidence-diff.test.mjs",
+        "workflow": ".github/workflows/v3-2-86-evidence-diff.yml",
+        "spec": "spec/v3-2-86-m02-reopened-evidence-diff.json",
+        "document": "docs/V3.2-86_M02_REOPENED_EVIDENCE_DIFF.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-87",
+      "pr_number": 94,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/94",
+      "head_branch": "chatgpt/v3-2-87-m02-diff-rereview-tasks",
+      "base_branch": "chatgpt/v3-2-86-m02-reopened-evidence-diff-report",
+      "head_sha": "d3631f3408757ee5da007c323aff92f53a111b58",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 93,
+      "ci": {
+        "run_id": 43630458914,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-diff-review-tasks.mjs",
+        "test": "tests/security/v3-2-87-m02-diff-review-tasks.test.mjs",
+        "workflow": ".github/workflows/v3-2-87-diff-review-tasks.yml",
+        "spec": "spec/v3-2-87-m02-diff-review-tasks.json",
+        "document": "docs/V3.2-87_M02_DIFF_REVIEW_TASKS.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-88",
+      "pr_number": 95,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/95",
+      "head_branch": "chatgpt/v3-2-88-m02-unified-pending-review-report",
+      "base_branch": "chatgpt/v3-2-87-m02-diff-rereview-tasks",
+      "head_sha": "3434c15d095155254861d047acc803647487b6e5",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 94,
+      "ci": {
+        "run_id": 43630872360,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-unified-pending-review-report.mjs",
+        "test": "tests/security/v3-2-88-m02-unified-pending-review-report.test.mjs",
+        "workflow": ".github/workflows/v3-2-88-unified-pending-review.yml",
+        "spec": "spec/v3-2-88-m02-unified-pending-review-report.json",
+        "document": "docs/V3.2-88_M02_UNIFIED_PENDING_REVIEW_REPORT.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-89",
+      "pr_number": 96,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/96",
+      "head_branch": "chatgpt/v3-2-89-m02-frozen-unified-report-invalidation",
+      "base_branch": "chatgpt/v3-2-88-m02-unified-pending-review-report",
+      "head_sha": "5ae3412df48b58fd2e6536074cad5a279e9f22f",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 95,
+      "ci": {
+        "run_id": 43631897201,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "known_run_jobs_verified; head_sha_lookup_returned_empty"
+      },
+      "files": {
+        "source": "src/cross-module-unified-report-freeze.mjs",
+        "test": "tests/security/v3-2-89-m02-unified-report-freeze.test.mjs",
+        "workflow": ".github/workflows/v3-2-89-unified-report-freeze.yml",
+        "spec": "spec/v3-2-89-m02-unified-report-freeze.json",
+        "document": "docs/V3.2-89_M02_UNIFIED_REPORT_FREEZE.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-90",
+      "pr_number": 97,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/97",
+      "head_branch": "chatgpt/v3-2-90-m02-freeze-invalidation-recheck-plan",
+      "base_branch": "chatgpt/v3-2-89-m02-frozen-unified-report-invalidation",
+      "head_sha": "75eeb4211987308dfc93276381ab25c2e7aa85f3",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 96,
+      "ci": {
+        "run_id": 43632345744,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-freeze-invalidation-plan.mjs",
+        "test": "tests/security/v3-2-90-m02-freeze-invalidation-plan.test.mjs",
+        "workflow": ".github/workflows/v3-2-90-freeze-invalidation.yml",
+        "spec": "spec/v3-2-90-m02-freeze-invalidation-plan.json",
+        "document": "docs/V3.2-90_M02_FREEZE_INVALIDATION_PLAN.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-91",
+      "pr_number": 98,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/98",
+      "head_branch": "chatgpt/v3-2-91-m02-gated-refreeze-recheck-tasks",
+      "base_branch": "chatgpt/v3-2-90-m02-freeze-invalidation-recheck-plan",
+      "head_sha": "d267206c2c5db7512ea5e5be388bd2e343675385",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 97,
+      "ci": {
+        "run_id": 43632836124,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-gated-refreeze.mjs",
+        "test": "tests/security/v3-2-91-m02-gated-refreeze.test.mjs",
+        "workflow": ".github/workflows/v3-2-91-gated-refreeze.yml",
+        "spec": "spec/v3-2-91-m02-gated-refreeze.json",
+        "document": "docs/V3.2-91_M02_GATED_REFREEZE.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-92",
+      "pr_number": 99,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/99",
+      "head_branch": "chatgpt/v3-2-92-m02-freeze-handoff-lineage",
+      "base_branch": "chatgpt/v3-2-91-m02-gated-refreeze-recheck-tasks",
+      "head_sha": "cfb7649a14f5b4d17cafc906f0445242a33fb7b9",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 98,
+      "ci": {
+        "run_id": 43633294385,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-freeze-handoff-lineage.mjs",
+        "test": "tests/security/v3-2-92-m02-freeze-handoff-lineage.test.mjs",
+        "workflow": ".github/workflows/v3-2-92-freeze-handoff-lineage.yml",
+        "spec": "spec/v3-2-92-m02-freeze-handoff-lineage.json",
+        "document": "docs/V3.2-92_M02_FREEZE_HANDOFF_LINEAGE.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-93",
+      "pr_number": 100,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/100",
+      "head_branch": "chatgpt/v3-2-93-m02-freeze-lineage-integrity-recovery",
+      "base_branch": "chatgpt/v3-2-92-m02-freeze-handoff-lineage",
+      "head_sha": "29e890481d155833c8028c0bd49c44a7213dca61",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 99,
+      "ci": {
+        "run_id": 43633757396,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-lineage-integrity-audit.mjs",
+        "test": "tests/security/v3-2-93-m02-lineage-integrity-audit.test.mjs",
+        "workflow": ".github/workflows/v3-2-93-lineage-integrity.yml",
+        "spec": "spec/v3-2-93-m02-lineage-integrity-recovery.json",
+        "document": "docs/V3.2-93_M02_LINEAGE_INTEGRITY_RECOVERY.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-94",
+      "pr_number": 101,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/101",
+      "head_branch": "chatgpt/v3-2-94-m02-lineage-recovery-case",
+      "base_branch": "chatgpt/v3-2-93-m02-freeze-lineage-integrity-recovery",
+      "head_sha": "f00c0d784e6bc5bd4e6d94ba123829cf27e806b6",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 100,
+      "ci": {
+        "run_id": 43656984127,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-manual-lineage-recovery.mjs",
+        "test": "tests/security/v3-2-94-m02-manual-lineage-recovery.test.mjs",
+        "workflow": ".github/workflows/v3-2-94-manual-lineage-recovery.yml",
+        "spec": "spec/v3-2-94-m02-manual-lineage-recovery.json",
+        "document": "docs/V3.2-94_M02_MANUAL_LINEAGE_RECOVERY.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-95",
+      "pr_number": 102,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/102",
+      "head_branch": "chatgpt/v3-2-95-m02-recovery-conclusion-validity",
+      "base_branch": "chatgpt/v3-2-94-m02-lineage-recovery-case",
+      "head_sha": "51eab3598b5665653705dca041c4f35439d8b8f2",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 101,
+      "ci": {
+        "run_id": 43657342626,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-recovery-conclusion-validity.mjs",
+        "test": "tests/security/v3-2-95-m02-recovery-conclusion-validity.test.mjs",
+        "workflow": ".github/workflows/v3-2-95-recovery-conclusion-validity.yml",
+        "spec": "spec/v3-2-95-m02-recovery-conclusion-validity.json",
+        "document": "docs/V3.2-95_M02_RECOVERY_CONCLUSION_VALIDITY.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-96",
+      "pr_number": 103,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/103",
+      "head_branch": "chatgpt/v3-2-96-m02-unified-recovery-conclusion-gate",
+      "base_branch": "chatgpt/v3-2-95-m02-recovery-conclusion-validity",
+      "head_sha": "3d528e9d5d6135568112046b07e409f331566512",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 102,
+      "ci": {
+        "run_id": 43657612335,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-unified-recovery-conclusion-gate.mjs",
+        "test": "tests/security/v3-2-96-m02-unified-recovery-conclusion-gate.test.mjs",
+        "workflow": ".github/workflows/v3-2-96-unified-recovery-conclusion.yml",
+        "spec": "spec/v3-2-96-m02-unified-recovery-conclusion-gate.json",
+        "document": "docs/V3.2-96_M02_UNIFIED_RECOVERY_CONCLUSION_GATE.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-97",
+      "pr_number": 104,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/104",
+      "head_branch": "chatgpt/v3-2-97-m02-final-review-audit-snapshot",
+      "base_branch": "chatgpt/v3-2-96-m02-unified-recovery-conclusion-gate",
+      "head_sha": "8ac886a0f792deb3beb9dd5088224d2670dcd5b8",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 103,
+      "ci": {
+        "run_id": 43657929828,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-final-review-snapshot.mjs",
+        "test": "tests/security/v3-2-97-m02-final-review-snapshot.test.mjs",
+        "workflow": ".github/workflows/v3-2-97-final-review-snapshot.yml",
+        "spec": "spec/v3-2-97-m02-final-review-snapshot.json",
+        "document": "docs/V3.2-97_M02_FINAL_REVIEW_SNAPSHOT.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-98",
+      "pr_number": 105,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/105",
+      "head_branch": "chatgpt/v3-2-98-m02-final-review-independent-attestation",
+      "base_branch": "chatgpt/v3-2-97-m02-final-review-audit-snapshot",
+      "head_sha": "4f3e04e481d9788526a34200bb132b771dd7a0ad",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 104,
+      "ci": {
+        "run_id": 43658249388,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-final-review-attestation.mjs",
+        "test": "tests/security/v3-2-98-m02-final-review-attestation.test.mjs",
+        "workflow": ".github/workflows/v3-2-98-final-review-attestation.yml",
+        "spec": "spec/v3-2-98-m02-final-review-attestation.json",
+        "document": "docs/V3.2-98_M02_FINAL_REVIEW_ATTESTATION.md"
+      },
+      "pr_changed_file_count": 5
+    },
+    {
+      "stage": "V3.2-99",
+      "pr_number": 106,
+      "pr_url": "https://github.com/Lizhaochuan/market-sales-system/pull/106",
+      "head_branch": "chatgpt/v3-2-99-m02-attestation-revocation-resign",
+      "base_branch": "chatgpt/v3-2-98-m02-final-review-independent-attestation",
+      "head_sha": "9a583072c324b409b52b53c24f0e808cf6400445",
+      "pr_state_at_review": "draft_open_unmerged",
+      "expected_parent_pr": 105,
+      "ci": {
+        "run_id": 43658691737,
+        "status": "completed",
+        "conclusion": "success",
+        "evidence": "head_sha_workflow_lookup"
+      },
+      "files": {
+        "source": "src/cross-module-attestation-lifecycle.mjs",
+        "test": "tests/security/v3-2-99-m02-attestation-lifecycle.test.mjs",
+        "workflow": ".github/workflows/v3-2-99-attestation-lifecycle.yml",
+        "spec": "spec/v3-2-99-m02-attestation-lifecycle.json",
+        "document": "docs/V3.2-99_M02_ATTESTATION_LIFECYCLE.md"
+      },
+      "pr_changed_file_count": 5
+    }
+  ]
+}
