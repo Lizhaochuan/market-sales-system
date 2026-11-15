@@ -1,0 +1,30 @@
+name: V3.2-100 M02 cross-stage integration audit
+on:
+  pull_request:
+    paths:
+      - 'spec/v3-2-100-m02-integration-review-manifest.json'
+      - 'docs/V3.2-100_M02_INTEGRATION_AUDIT.md'
+      - 'tests/security/v3-2-100-m02-integration-review.test.mjs'
+      - 'scripts/v3-2-100-run-m02-node-regressions.mjs'
+      - '.github/workflows/v3-2-100-integration-audit.yml'
+      - 'src/cross-module-*.mjs'
+      - 'tests/security/v3-2-*.test.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-integration-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate audit and runner syntax
+        run: |
+          node --check tests/security/v3-2-100-m02-integration-review.test.mjs
+          node --check scripts/v3-2-100-run-m02-node-regressions.mjs
+      - name: Verify all stage artifacts, safety specs and PR dependency snapshot
+        run: node --test tests/security/v3-2-100-m02-integration-review.test.mjs
+      - name: Run all eighteen V3.2-82 through V3.2-99 Node safety suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
