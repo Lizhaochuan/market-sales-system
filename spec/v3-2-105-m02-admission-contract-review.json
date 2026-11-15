@@ -1,0 +1,325 @@
+{
+  "schema_version": "v3.2-105-m02-comprehensive-admission-review-v1",
+  "project": "CRM系统制作",
+  "repository": "Lizhaochuan/market-sales-system",
+  "module": "M02",
+  "scope": "STATIC_REVIEW_AND_CI_ONLY_NO_PRODUCTION_CHANGE",
+  "baseline": {
+    "pr": 111,
+    "head_sha": "1714220b8362eb08d58e16b8e9d32e9dadadd743",
+    "base_branch": "chatgpt/v3-2-104-m02-source-trust-persistent-fence-contract",
+    "node_ci_run_ids": [
+      43660853839,
+      43660853915
+    ],
+    "node_ci_conclusions": [
+      "success",
+      "success"
+    ]
+  },
+  "evidence_sources": {
+    "original_inventory": "spec/v3-2-100-m02-integration-review-manifest.json",
+    "facade_contract": "spec/v3-2-101-m02-readonly-verification-facade.json",
+    "fixture_signature_contract": "spec/v3-2-102-m02-signed-source-contract.json",
+    "fault_drill_contract": "spec/v3-2-103-m02-trust-boundary-fault-drill.json",
+    "trust_fence_contract": "spec/v3-2-104-m02-source-trust-fence.json",
+    "facade_implementation": "src/cross-module-readonly-verification-facade.mjs",
+    "trust_implementation": "src/cross-module-source-trust-fence.mjs"
+  },
+  "readiness": {
+    "fixture_node_test_passed_on_parent": true,
+    "real_source_authority_verified": false,
+    "real_finance_independent_signoff_verified": false,
+    "real_academic_independent_signoff_verified": false,
+    "persistent_atomic_checkpoint_verified": false,
+    "cross_domain_atomicity_verified": false,
+    "prod_readonly_adapter_wired": false,
+    "postgresql_contract_uat_verified": false,
+    "chromium_uat_verified": false,
+    "security_uat_verified": false,
+    "sixteen_external_checks_verified": false,
+    "r01_to_r10_verified": false,
+    "production_readonly_ready": false,
+    "merge_authorized": false,
+    "deploy_authorized": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true
+  },
+  "aggregate_checks": {
+    "original_stage_count": 18,
+    "external_admission_checks_required": 16,
+    "r01_to_r10_required": 10,
+    "required_external_authority_categories": 6,
+    "database_plan_checks": 8,
+    "real_postgresql_checks_passed": 0,
+    "real_external_checks_passed": 0,
+    "production_schema_migrations_added": 0,
+    "historical_migration_range_only_per_prior_specs": "001-038",
+    "new_migration_039_allowed": false
+  },
+  "gaps": [
+    {
+      "id": "ADM-001",
+      "severity": "P0",
+      "domain": "identity",
+      "requirement": "Real organizational authority, approved trust root and accountable key custody",
+      "state": "UNVERIFIED",
+      "owner_role": "security_identity_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Signed trust-root policy and human approval",
+        "KMS/HSM lifecycle and audit proof",
+        "Organization-scoped production key mapping"
+      ],
+      "blocks": [
+        "trusted_source",
+        "production_readonly"
+      ]
+    },
+    {
+      "id": "ADM-002",
+      "severity": "P0",
+      "domain": "finance",
+      "requirement": "Independent financial signatory identity, delegated authority and live revocation evidence",
+      "state": "UNVERIFIED",
+      "owner_role": "finance_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Read-only finance signatory and revocation contract",
+        "Authority provenance and independent approval",
+        "Historical payment/order reconciliation evidence"
+      ],
+      "blocks": [
+        "external_authorization",
+        "production_readonly"
+      ]
+    },
+    {
+      "id": "ADM-003",
+      "severity": "P0",
+      "domain": "academic",
+      "requirement": "Independent academic signatory authority and live revocation evidence",
+      "state": "UNVERIFIED",
+      "owner_role": "academic_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Read-only academic entitlement/lesson contract",
+        "Authority provenance and independent approval",
+        "Historical fulfilment reconciliation evidence"
+      ],
+      "blocks": [
+        "external_authorization",
+        "production_readonly"
+      ]
+    },
+    {
+      "id": "ADM-004",
+      "severity": "P0",
+      "domain": "database",
+      "requirement": "Trusted durable atomic compare-and-advance instead of in-memory Map or claimed accepted response",
+      "state": "NOT_RUN",
+      "owner_role": "database_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Isolated PostgreSQL test instance with separate credentials",
+        "Serializable/CAS concurrency result and restart replay logs",
+        "Crash atomicity, tenant isolation, rollback and spoofed success rejection"
+      ],
+      "blocks": [
+        "trusted_checkpoint",
+        "production_readonly"
+      ]
+    },
+    {
+      "id": "ADM-005",
+      "severity": "P0",
+      "domain": "integration",
+      "requirement": "Cross-domain causal barrier and independently verified atomic handoff receipt",
+      "state": "UNIMPLEMENTED",
+      "owner_role": "integration_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Cross-system version and revocation causality contract",
+        "Atomic acceptance/rejection and receipt provenance",
+        "Three-party independent UAT signoff"
+      ],
+      "blocks": [
+        "external_authorization",
+        "business_release"
+      ]
+    },
+    {
+      "id": "ADM-006",
+      "severity": "P1",
+      "domain": "security",
+      "requirement": "Signed key rotation, key revocation ordering, overlap and rollback semantics",
+      "state": "UNVERIFIED",
+      "owner_role": "security_identity_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "KeyId lifecycle contract and revocation proof",
+        "Two-phase rotation and incident rollback playbook",
+        "Stale key and cross-domain substitution security tests"
+      ],
+      "blocks": [
+        "trusted_source",
+        "production_readonly"
+      ]
+    },
+    {
+      "id": "ADM-007",
+      "severity": "P1",
+      "domain": "security",
+      "requirement": "Trusted identity, scope and staff-role revocation must propagate to V3.2-101/V3.2-99",
+      "state": "UNIMPLEMENTED",
+      "owner_role": "identity_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Cross-tenant role authorization and revocation propagation contract",
+        "External identity-role version and timestamp guarantees",
+        "Tests that stale V3.2-98 approval cannot bypass V3.2-99 revocation"
+      ],
+      "blocks": [
+        "production_readonly",
+        "business_release"
+      ]
+    },
+    {
+      "id": "ADM-008",
+      "severity": "P1",
+      "domain": "database",
+      "requirement": "Read-only workflow has an audit/checkpoint write side effect; isolate writer privileges",
+      "state": "UNVERIFIED",
+      "owner_role": "database_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Explicit checkpoint-only writer permission design",
+        "Demonstrated no write access to orders/payment/lessons",
+        "Scoped audit store schema design (no production migration)"
+      ],
+      "blocks": [
+        "trusted_checkpoint",
+        "production_readonly"
+      ]
+    },
+    {
+      "id": "ADM-009",
+      "severity": "P1",
+      "domain": "integration",
+      "requirement": "Fault handling, timeout cancellation and retry idempotency across sources",
+      "state": "NOT_RUN",
+      "owner_role": "integration_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Abort/cancel-on-timeout contract",
+        "Late response and concurrent update rejection tests",
+        "No false acknowledgment after partial failure"
+      ],
+      "blocks": [
+        "production_readonly"
+      ]
+    },
+    {
+      "id": "ADM-010",
+      "severity": "P1",
+      "domain": "quality",
+      "requirement": "PostgreSQL, Chromium, official contract and real business UAT",
+      "state": "NOT_RUN",
+      "owner_role": "qa_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Isolated PostgreSQL results DB-01..DB-08",
+        "Chromium UI/security regression",
+        "Actual read adapters and contract test artifacts"
+      ],
+      "blocks": [
+        "production_readonly",
+        "business_release"
+      ]
+    },
+    {
+      "id": "ADM-011",
+      "severity": "P1",
+      "domain": "governance",
+      "requirement": "16 external admission checks and R01..R10 verified by real accountable reviewers",
+      "state": "UNVERIFIED",
+      "owner_role": "project_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "Approved 16-check checklist with signatures",
+        "R01..R10 completion evidence",
+        "Explicit review and non-automatic merge authorization"
+      ],
+      "blocks": [
+        "production_readonly",
+        "business_release"
+      ]
+    },
+    {
+      "id": "ADM-012",
+      "severity": "P2",
+      "domain": "governance",
+      "requirement": "18 Draft PR chain and code/contract references reconciled before merging",
+      "state": "UNREVIEWED_FOR_MERGE",
+      "owner_role": "code_owner",
+      "owner_assignment": "UNASSIGNED",
+      "required_evidence": [
+        "PR dependency and base/head recheck",
+        "Change-conflict review and integrated test matrix",
+        "Explicit signed merger decision"
+      ],
+      "blocks": [
+        "merge"
+      ]
+    }
+  ],
+  "architecture_decisions": [
+    {
+      "id": "DEC-01",
+      "decision": "CI-only Ed25519 test keys are not a production trust root",
+      "status": "BLOCK_PRODUCTION"
+    },
+    {
+      "id": "DEC-02",
+      "decision": "Read-only verification may advance a separate audit checkpoint; it must never write business ledgers",
+      "status": "REQUIRES_ISOLATED_ROLE_AND_TRANSACTION"
+    },
+    {
+      "id": "DEC-03",
+      "decision": "An accepted=true echo from checkpointStore is insufficient proof of durability or serializability",
+      "status": "REQUIRES_DATABASE_EVIDENCE"
+    },
+    {
+      "id": "DEC-04",
+      "decision": "V3.2-99 revocation overlay must remain mandatory after V3.2-98 success",
+      "status": "MANDATORY_INTEGRATION_CONTRACT"
+    },
+    {
+      "id": "DEC-05",
+      "decision": "Per-domain versions and equal revocation watermarks do not prove a shared causal snapshot",
+      "status": "REQUIRES_EXTERNAL_BARRIER"
+    },
+    {
+      "id": "DEC-06",
+      "decision": "Student is primary; family is only linked for actual siblings",
+      "status": "FROZEN_BUSINESS_RULE"
+    },
+    {
+      "id": "DEC-07",
+      "decision": "Immutable order, receipt, payment, SaleEvent, lesson and compensation history",
+      "status": "FROZEN_BUSINESS_RULE"
+    }
+  ],
+  "next_stage": "V3.2-106: contract-driven isolated PostgreSQL checkpoint prototype only after independent test DB details and owner are available; otherwise implement stronger non-production DB integration test harness without touching existing production schemas",
+  "real_external_contract_status": "proposed-unimplemented",
+  "production_runtime_touched": false,
+  "production_database_touched": false,
+  "edu_management_system_touched": false,
+  "student_primary": true,
+  "family_optional": true,
+  "original_orders_payments_saleevent_lessons_compensations_immutable": true
+}

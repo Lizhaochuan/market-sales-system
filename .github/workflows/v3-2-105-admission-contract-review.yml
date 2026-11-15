@@ -1,0 +1,36 @@
+name: V3.2-105 cross-domain contract admission review
+on:
+  pull_request:
+    paths:
+      - 'spec/v3-2-105-m02-admission-contract-review.json'
+      - 'docs/V3.2-105_M02_CROSS_DOMAIN_ADMISSION_REVIEW.md'
+      - 'scripts/v3-2-105-audit-admission.mjs'
+      - 'tests/security/v3-2-105-m02-admission-contract-review.test.mjs'
+      - '.github/workflows/v3-2-105-admission-contract-review.yml'
+      - 'src/cross-module-source-trust-fence.mjs'
+      - 'src/cross-module-readonly-verification-facade.mjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract-admission-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate audit schema and test code
+        run: |
+          node --check scripts/v3-2-105-audit-admission.mjs
+          node --check tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Confirm all external and production gates remain blocked
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Print machine-readable unresolved acceptance report
+        run: node scripts/v3-2-105-audit-admission.mjs
+      - name: Regress trust roster, signed sources, failure drills, and revocation facade
+        run: node --test tests/security/v3-2-104-m02-source-trust-fence.test.mjs tests/security/v3-2-103-m02-trust-boundary-fault-drill.test.mjs tests/security/v3-2-102-m02-signed-source-contract.test.mjs tests/security/v3-2-101-m02-readonly-verification-facade.test.mjs
+      - name: Regress the eighteen isolated M02 stage tests
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
+      - name: Reverify stage dependency and safety inventory
+        run: node --test tests/security/v3-2-100-m02-integration-review.test.mjs
