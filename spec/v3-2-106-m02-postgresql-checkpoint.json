@@ -1,0 +1,113 @@
+{
+  "schema_version": "v3.2-106-m02-ephemeral-postgresql-validation-v1",
+  "module": "M02",
+  "parent_pr": 112,
+  "parent_head": "0bd2657e4364384fe510745066ec11faecd1b477",
+  "parent_ci_runs": [
+    43661276084,
+    43661276022
+  ],
+  "scope": "GITHUB_ACTIONS_DISPOSABLE_POSTGRESQL_ONLY_NOT_PRODUCTION",
+  "database": {
+    "engine": "PostgreSQL",
+    "image": "postgres:16",
+    "database_name": "v106_isolated",
+    "network": "127.0.0.1:5432",
+    "setup_script": "scripts/v3-2-106-setup-isolated-pg.mjs",
+    "schema_fixture": "tests/fixtures/v3-2-106-m02-isolated-postgres.sql",
+    "isolation_guard_env": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "separate_tenant_roles": [
+      "v106_writer_a",
+      "v106_writer_b"
+    ],
+    "policy": "PostgreSQL FORCE ROW LEVEL SECURITY",
+    "prohibited_business_data_table": "v106_test.protected_business_fixture",
+    "production_migration_created": false,
+    "external_database_connected": false
+  },
+  "runtime": {
+    "adapter": "tests/helpers/v3-2-106-m02-postgres-checkpoint.mjs",
+    "integration_test": "tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs",
+    "transaction_isolation": "SERIALIZABLE",
+    "locking": "scope-keyed pg_advisory_xact_lock and row FOR UPDATE",
+    "serialization_retry_max": 4,
+    "stored_checkpoint_payload_format": "JSON text plus SHA-256 digest",
+    "return_contract": [
+      "accepted",
+      "checkpoint_digest",
+      "reason_code"
+    ],
+    "production_adapter_implemented": false
+  },
+  "db_acceptance": [
+    {
+      "id": "DB-01",
+      "checks": "Disposable PostgreSQL DB identity, writer role and non-production guard",
+      "scope": "CI_EPHEMERAL"
+    },
+    {
+      "id": "DB-02",
+      "checks": "Committed checkpoint visible after opening new connections",
+      "scope": "CI_EPHEMERAL"
+    },
+    {
+      "id": "DB-03",
+      "checks": "Two conflicting same-version concurrent updates cannot both commit",
+      "scope": "CI_EPHEMERAL"
+    },
+    {
+      "id": "DB-04",
+      "checks": "Identical trust revision with different signed-roster digest is denied",
+      "scope": "CI_EPHEMERAL"
+    },
+    {
+      "id": "DB-05",
+      "checks": "Key replacement requires newer trust revision and revoked key IDs",
+      "scope": "CI_EPHEMERAL"
+    },
+    {
+      "id": "DB-06",
+      "checks": "Separate tenant DB roles + RLS; business fixture table access denied",
+      "scope": "CI_EPHEMERAL"
+    },
+    {
+      "id": "DB-07",
+      "checks": "Pre-COMMIT injected fault rolls back; clean retry commits",
+      "scope": "CI_EPHEMERAL"
+    },
+    {
+      "id": "DB-08",
+      "checks": "CI-only negative authority invariant; full PostgreSQL/Chromium/contract UAT remains absent",
+      "scope": "PARTIAL_CI_ONLY"
+    }
+  ],
+  "known_limits": [
+    "Disposable GitHub Actions PostgreSQL service is real SQL execution but not organization-administered production-equivalent acceptance",
+    "Restart simulation closes and reopens application pools, not PostgreSQL server reboot or power loss",
+    "Writer A/B roles have static tenant restriction; no real identity, provider authentication or dynamic organization mapping",
+    "Audit checkpoint writer has restricted SQL rights, but integration with production trust ownership remains unimplemented",
+    "No real source authority, live finance/academic sign-off, true cross-domain causal barrier or formal business handoff",
+    "DB-08 is only a CI non-authorization check; Chromium, real contracts and external UAT remain unverified"
+  ],
+  "external_contract_status": "proposed-unimplemented",
+  "sixteen_external_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "historical_migration_range_from_specs": "001-038",
+  "new_production_migration": false,
+  "student_primary": true,
+  "family_optional": true,
+  "original_orders_payments_saleevent_lessons_compensation_preserved": true,
+  "external_authority_verified": false,
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "production_integration_allowed": false,
+  "chromium_uat": "NOT_RUN",
+  "real_external_contract_uat": "NOT_RUN",
+  "live_finance_academic_authority": "NOT_VERIFIED"
+}
