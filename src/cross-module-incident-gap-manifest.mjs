@@ -113,11 +113,16 @@ export function buildIsolatedIncidentGapManifest({scope,studentReports,maxStuden
 // organization or proof of real external custody.
 export function verifyIsolatedIncidentGapExport(raw){
  if(!exact(raw,['schema_version','manifest','manifest_sha256',
-  'audit_event_sha256'])||
+  'audit_event','audit_event_sha256'])||
   raw.schema_version!=='v3.2-119-ci-export-envelope-v1'||
   !SHA.test(raw.manifest_sha256)||!SHA.test(raw.audit_event_sha256)||
-  !exact(raw.manifest,MANIFEST)||
-  sha(raw.manifest)!==raw.manifest_sha256)
+  !exact(raw.manifest,MANIFEST)||!exact(raw.audit_event,EVENT)||
+  sha(raw.manifest)!==raw.manifest_sha256||
+  sha(raw.audit_event)!==raw.audit_event_sha256||
+  raw.audit_event.manifest_digest!==raw.manifest_sha256||
+  JSON.stringify(raw.audit_event.manifest)!==JSON.stringify(raw.manifest)||
+  raw.audit_event.source_snapshot_digest!==sha(raw.manifest.students)||
+  raw.audit_event.status!=='HOLD_ACTIVE_MANIFEST_AUDIT_ONLY')
   return false;
  try{
   const p=buildIsolatedIncidentGapManifest({
@@ -136,7 +141,13 @@ export function verifyIsolatedIncidentGapExport(raw){
   return p.manifest_digest===raw.manifest_sha256&&
    p.manifest.coverage_status===raw.manifest.coverage_status&&
    p.manifest.unresolved_gap_count===raw.manifest.unresolved_gap_count&&
-   p.manifest.student_count===raw.manifest.student_count;
+   p.manifest.student_count===raw.manifest.student_count&&
+   p.student_count===raw.audit_event.student_count&&
+   p.hold_event_count===raw.audit_event.hold_event_count&&
+   p.scanned_student_count===raw.audit_event.scanned_student_count&&
+   p.missing_scan_count===raw.audit_event.missing_scan_count&&
+   p.stale_scan_count===raw.audit_event.stale_scan_count&&
+   p.unresolved_gap_count===raw.audit_event.unresolved_gap_count;
  }catch{return false;}
 }
 export function createIsolatedIncidentGapAudit({
@@ -213,7 +224,7 @@ export function createIsolatedIncidentGapAudit({
     fail('INCIDENT_MANIFEST_EXPORT_INTEGRITY_UNVERIFIED');
    const envelope={schema_version:'v3.2-119-ci-export-envelope-v1',
     manifest:event.manifest,manifest_sha256:event.manifest_digest,
-    audit_event_sha256:head.event_digest};
+    audit_event:event,audit_event_sha256:head.event_digest};
    if(!verifyIsolatedIncidentGapExport(envelope))
     fail('INCIDENT_MANIFEST_EXPORT_INTEGRITY_UNVERIFIED');
    return blocked('BLOCKED_INCIDENT_MANIFEST_EXPORT_READY',{
