@@ -104,7 +104,8 @@ function setup(revision=1){
  return {
   envelope,manifest,signManifest,sourceKeys,primaryReader,auditReader,
   options:{envelope,trustedKeys,sourceKeys,sourceProof:signManifest(),
-   primaryReader,auditReader,nowMs:120_000,clock:()=>120_000},
+   primaryReader,auditReader,nowMs:120_000,clock:()=>120_000,
+   sourceKeyVersion:1,sourceAuthSigner:async()=>('a'.repeat(64))},
   calls:()=>[primaryCalls,auditCalls]
  };
 }
@@ -367,4 +368,18 @@ test('source reading that outlasts the manifest expiry does not reach SQL',async
   attester:{query:async()=>{issued++;return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};}}
  }),'V121_IAM_SOURCE_MANIFEST_INVALID');
  assert.equal(issued,0);
+});
+
+test('source-auth signer is mandatory and fails closed before SQL when missing',async()=>{
+ const x=setup();
+ let sqlCalls=0;
+ const receiptId='00000000-0000-4000-8000-0000000000e6';
+ const attester={query:async()=>{sqlCalls++;return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};}};
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,receiptId,attester,sourceAuthSigner:undefined
+ }),'V121_IAM_SOURCE_AUTH_REQUIRED');
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,receiptId,attester,sourceAuthSigner:async()=>('not-a-mac')
+ }),'V121_IAM_SOURCE_AUTH_INVALID');
+ assert.equal(sqlCalls,0);
 });
