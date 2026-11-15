@@ -1,7 +1,7 @@
 // EXT-001 CI fixture simulation of pinned external object versions and two
 // independently authenticated storage observations. No external network,
 // production IAM credentials, or release authorization are used.
-import {createHash, sign, verify} from 'node:crypto';
+import {createHash, createPublicKey, sign, verify} from 'node:crypto';
 import {
  fingerprintFixtureExt001ForIntake,
  issueFixtureExt001VerifiedProvenance
@@ -102,6 +102,34 @@ export function signFixtureExt001SourceManifest(manifest,{
  };
 }
 
+// Distinct role IDs are insufficient if two roles alias the same Ed25519 key.
+// This is fixture-only local key separation, not external identity proof.
+function checkKeySeparation(envelope,trustedKeys,sourceKeys,primary,audit){
+ const refs=[
+  [trustedKeys,envelope.body.producer.key_id],
+  [trustedKeys,envelope.reviewer.key_id],
+  [sourceKeys,primary.key_id],
+  [sourceKeys,audit.key_id]
+ ];
+ const observed=new Set();
+ for(const [registry,keyId] of refs){
+  const entry=registry?.get(keyId);
+  if(!entry?.publicKey) fail('V121_IAM_SOURCE_TRUST_INVALID');
+  let publicKey;
+  try{
+   publicKey=createPublicKey(entry.publicKey);
+   if(publicKey.asymmetricKeyType!=='ed25519')
+    fail('V121_IAM_SOURCE_TRUST_INVALID');
+  }catch{
+   fail('V121_IAM_SOURCE_TRUST_INVALID');
+  }
+  const digest=sha(publicKey.export({type:'spki',format:'der'}));
+  if(observed.has(digest))
+   fail('V121_IAM_SOURCE_WITNESSES_NOT_INDEPENDENT');
+  observed.add(digest);
+ }
+}
+
 function checkRead(read,record,reader,nowMs){
  if(!required(read,['artifact_id','object_ref','object_version_id','generation',
   'sha256','bytes','observed_at_ms','is_current','lock_mode','source_domain'])||
@@ -139,6 +167,7 @@ export async function verifyFixtureExt001SourceVersion({
   fail('V121_IAM_SOURCE_WITNESSES_NOT_INDEPENDENT');
  checkWitness(p,SOURCE_DOMAIN,'primary',envelope,sourceProof.manifest,sourceKeys);
  checkWitness(a,AUDIT_DOMAIN,'audit',envelope,sourceProof.manifest,sourceKeys);
+ checkKeySeparation(envelope,trustedKeys,sourceKeys,p,a);
  if(typeof primaryReader!=='function'||typeof auditReader!=='function'||
     primaryReader===auditReader)
   fail('V121_IAM_SOURCE_READERS_NOT_INDEPENDENT');
@@ -162,6 +191,12 @@ export async function verifyFixtureExt001SourceVersion({
     fail('V121_IAM_SOURCE_CHANGED_DURING_RECHECK');
    }
   }
+  // Reads await untrusted fixture providers. Detect key revocation or key
+  // material replacement during either round, before attester admission.
+  fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs});
+  checkWitness(p,SOURCE_DOMAIN,'primary',envelope,sourceProof.manifest,sourceKeys);
+  checkWitness(a,AUDIT_DOMAIN,'audit',envelope,sourceProof.manifest,sourceKeys);
+  checkKeySeparation(envelope,trustedKeys,sourceKeys,p,a);
  }
  return Object.freeze({
   decision:'TWO_FIXTURE_SOURCES_RECHECKED_STILL_HOLD',
