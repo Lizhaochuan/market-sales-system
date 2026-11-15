@@ -1,0 +1,101 @@
+{
+  "schema_version": "v3.2-107-m02-signed-postgres-e2e-v1",
+  "module": "M02",
+  "scope": "CI_ONLY_SIGNED_SOURCE_TO_DISPOSABLE_POSTGRESQL_END_TO_END",
+  "parent_pr": 113,
+  "parent_head": "20bcae39008c99b2e5aaa38adeb9e3c3d8f3be34",
+  "parent_ci": {
+    "run_id": 43661791907,
+    "status": "completed",
+    "conclusion": "success"
+  },
+  "source_proof_module": "src/cross-module-source-trust-fence.mjs",
+  "checkpoint_adapter": "tests/helpers/v3-2-106-m02-postgres-checkpoint.mjs",
+  "facade_module": "src/cross-module-readonly-verification-facade.mjs",
+  "integration_test": "tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs",
+  "isolated_database_fixture": "tests/fixtures/v3-2-106-m02-isolated-postgres.sql",
+  "test_only_postgresql": {
+    "container": "postgres:16",
+    "database": "v106_isolated",
+    "schema": "v106_test",
+    "guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "separate_test_roles": [
+      "v106_writer_a",
+      "v106_writer_b"
+    ],
+    "row_level_security": true,
+    "production_database_used": false,
+    "production_migration_created": false
+  },
+  "scenarios": [
+    {
+      "id": "E2E-01",
+      "name": "Real signed source evidence commits checkpoint in disposable SQL"
+    },
+    {
+      "id": "E2E-02",
+      "name": "New application Pool and verifier reject older signed versions"
+    },
+    {
+      "id": "E2E-03",
+      "name": "Forged, missing and timed-out sources never write checkpoint"
+    },
+    {
+      "id": "E2E-04",
+      "name": "Governance key rotation requires old-key revocation and higher revision"
+    },
+    {
+      "id": "E2E-05",
+      "name": "Same-version signed evidence conflict and three-domain causal mismatch deny"
+    },
+    {
+      "id": "E2E-06",
+      "name": "Precommit failure rolls back signed evidence; clean retry succeeds"
+    },
+    {
+      "id": "E2E-07",
+      "name": "Competing signed views of same-version evidence cannot both commit"
+    },
+    {
+      "id": "E2E-08",
+      "name": "PostgreSQL RLS blocks signed source from writing a different tenant"
+    },
+    {
+      "id": "E2E-09",
+      "name": "V3.2-101 facade reads actual signed+SQL watermark and never grants authorization"
+    }
+  ],
+  "trust_limits": [
+    "All keys are ephemeral fixture-generated Ed25519 keys, not finance/academic production signatories",
+    "PostgreSQL is a disposable CI service; no real KMS, IAM, durable production trust root, enterprise replication or server crash recovery",
+    "Source readers and positive V3.2-101 downstream adapters use synthetic test data",
+    "PostgreSQL checkpoint stores a monotonically versioned audit record; it does not authenticate business facts",
+    "Source fence double-read plus SQL commit is not cross-system atomic handoff, and has a possible source-update-after-read race",
+    "Database roles can update only audit checkpoints, never protected payment or lesson records",
+    "Real account attribution, family linking and business contract UAT are not tested by this module"
+  ],
+  "real_source_authority_verified": false,
+  "real_finance_independent_signoff_verified": false,
+  "real_academic_independent_signoff_verified": false,
+  "real_three_party_handoff_verified": false,
+  "real_contract_uat_verified": false,
+  "chromium_uat_verified": false,
+  "enterprise_postgres_uat_verified": false,
+  "sixteen_external_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "external_contract_status": "proposed-unimplemented",
+  "student_primary": true,
+  "family_optional": true,
+  "original_orders_payments_saleevent_lessons_compensation_preserved": true,
+  "historical_migration_range_from_specs": "001-038",
+  "production_migration_039_added": false,
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "production_integration_allowed": false
+}
