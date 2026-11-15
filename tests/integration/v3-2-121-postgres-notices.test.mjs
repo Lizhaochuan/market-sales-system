@@ -40,9 +40,9 @@ test.before(async()=>{
   await admin.query(`CREATE POLICY ${name}_b ON v106_test.${name} FOR SELECT TO v106_writer_b USING(organization_id='${b}'::uuid)`);
  }
  await admin.query(await readFile(new URL('../fixtures/v3-2-121-m02-revocation-notices.sql',import.meta.url),'utf8'));
- const m={scope:{organization_id:a,incident_id:incident},sequence:1,status:'FIXTURE_EXPORT'};
+ const m={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),status:'FIXTURE_EXPORT'};
  const md=hash(m);
- const r={scope:{organization_id:a,incident_id:incident},target_manifest_sequence:1,
+ const r={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),target_manifest_sequence:1,
   target_manifest_digest:md,revocation_recorded:true,classification:'REVOKED_SOURCE_CHANGED_AFTER_EXPORT'};
  const rd=hash(r);
  await admin.query('INSERT INTO v106_test.fixture_incident_gap_manifest_events VALUES($1,$2,1,$3,$4)',[a,incident,JSON.stringify(m),md]);
@@ -87,4 +87,33 @@ test('RLS denies cross-tenant read and insert',async()=>{
 test('forged source prevents write',async()=>{
  const r=await service.enqueue({...input,manifest_digest:'f'.repeat(64),epoch:2});
  assert.equal(r.notice_accepted,false);
+});
+
+test('manifest history gap fails closed, even when head still exists',async()=>{
+ const row=await admin.query('SELECT event_payload,event_digest FROM v106_test.fixture_incident_gap_manifest_events WHERE organization_id=$1 AND incident_id=$2 AND sequence=1',[a,incident]);
+ await admin.query('DELETE FROM v106_test.fixture_incident_gap_manifest_events WHERE organization_id=$1 AND incident_id=$2 AND sequence=1',[a,incident]);
+ try{
+  const r=await service.enqueue({...input,epoch:5});
+  assert.equal(r.notice_accepted,false);
+  assert.equal(r.reason_code,'NOTICE_MANIFEST_HISTORY_INVALID');
+ }finally{
+  await admin.query('INSERT INTO v106_test.fixture_incident_gap_manifest_events VALUES($1,$2,1,$3,$4)',[a,incident,row.rows[0].event_payload,row.rows[0].event_digest]);
+ }
+});
+test('revocation history corruption fails closed',async()=>{
+ const row=await admin.query('SELECT event_payload,event_digest FROM v106_test.fixture_manifest_revocation_events WHERE organization_id=$1 AND incident_id=$2 AND sequence=1',[a,incident]);
+ await admin.query('UPDATE v106_test.fixture_manifest_revocation_events SET event_payload=$3 WHERE organization_id=$1 AND incident_id=$2 AND sequence=1',[a,incident,'{}']);
+ try{
+  const r=await service.enqueue({...input,epoch:6});
+  assert.equal(r.notice_accepted,false);
+  assert.equal(r.reason_code,'NOTICE_REVOCATION_HISTORY_INVALID');
+ }finally{
+  await admin.query('UPDATE v106_test.fixture_manifest_revocation_events SET event_payload=$3,event_digest=$4 WHERE organization_id=$1 AND incident_id=$2 AND sequence=1',[a,incident,row.rows[0].event_payload,row.rows[0].event_digest]);
+ }
+});
+test('concurrent identical notice uses one persisted event',async()=>{
+ const batch=await Promise.all(Array.from({length:8},()=>service.enqueue({...input,epoch:7})));
+ assert.ok(batch.every(x=>x.notice_accepted===true),JSON.stringify(batch));
+ const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_notices WHERE organization_id=$1 AND incident_id=$2 AND epoch=7',[a,incident]);
+ assert.equal(count.rows[0].n,1);
 });
