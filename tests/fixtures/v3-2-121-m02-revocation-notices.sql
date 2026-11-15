@@ -66,7 +66,7 @@ CREATE TABLE v106_test.fixture_revocation_negative_receipts (
 REVOKE ALL ON v106_test.fixture_revocation_negative_receipts FROM PUBLIC;
 -- Ordinary writer roles cannot directly append receipts. Only isolated dedicated receipt role may INSERT.
 GRANT SELECT ON v106_test.fixture_revocation_negative_receipts TO v106_writer_a,v106_writer_b;
-GRANT INSERT ON v106_test.fixture_revocation_negative_receipts TO v106_receipt_writer_a;
+-- Receipt role receives EXECUTE on a constrained function below, no direct table INSERT.
 ALTER TABLE v106_test.fixture_revocation_negative_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE v106_test.fixture_revocation_negative_receipts FORCE ROW LEVEL SECURITY;
 CREATE POLICY v121_rcpt_a ON v106_test.fixture_revocation_negative_receipts
@@ -113,3 +113,49 @@ CREATE POLICY v121_wm_a ON v106_test.fixture_signer_watermarks FOR ALL TO v106_w
 CREATE POLICY v121_wm_b ON v106_test.fixture_signer_watermarks FOR ALL TO v106_writer_b
  USING(organization_id='22222222-2222-4222-8222-222222222222'::uuid)
  WITH CHECK(organization_id='22222222-2222-4222-8222-222222222222'::uuid);
+
+-- Test-only structural admission gate. Does NOT verify Ed25519 signatures.
+-- SECURITY DEFINER owns table insertion; session_user and scope are checked explicitly.
+CREATE FUNCTION v106_test.fixture_append_negative_receipt(
+ p_organization uuid,p_incident uuid,p_notice char(64),p_sequence integer,
+ p_state text,p_previous char(64),p_digest char(64),p_payload text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $receipt_gate$
+DECLARE item jsonb;
+BEGIN
+ IF session_user <> 'v106_receipt_writer_a' OR
+    p_organization <> '11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_RECEIPT_GATE_ROLE_SCOPE';
+ END IF;
+ IF p_state NOT IN ('NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE') OR
+    p_sequence NOT BETWEEN 1 AND 128 OR
+    p_digest <> encode(sha256(convert_to(p_payload,'UTF8')),'hex') THEN
+  RAISE EXCEPTION 'V121_RECEIPT_GATE_INVALID';
+ END IF;
+ BEGIN item:=p_payload::jsonb;
+ EXCEPTION WHEN others THEN RAISE EXCEPTION 'V121_RECEIPT_GATE_INVALID_JSON';
+ END;
+ IF jsonb_typeof(item) <> 'object' OR
+    item->>'organization_id' <> p_organization::text OR
+    item->>'incident_id' <> p_incident::text OR
+    item->>'notice_id' <> trim(p_notice) OR
+    item->>'receipt_sequence' <> p_sequence::text OR
+    item->>'receipt_state' <> p_state OR
+    item->>'previous_digest' <> trim(p_previous) OR
+    item#>>'{proof,signature_b64}' IS NULL OR
+    item#>>'{proof,statement,signer_id}' IS NULL OR
+    item#>>'{lease,signature_b64}' IS NULL OR
+    item#>>'{lease,lease,signer_id}' <> item#>>'{proof,statement,signer_id}' OR
+    item#>>'{lease,lease,notice_id}' <> trim(p_notice) THEN
+  RAISE EXCEPTION 'V121_RECEIPT_GATE_ENVELOPE';
+ END IF;
+ INSERT INTO v106_test.fixture_revocation_negative_receipts
+ (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,
+  previous_digest,receipt_digest,receipt_payload)
+ VALUES(p_organization,p_incident,p_notice,p_sequence,p_state,
+        p_previous,p_digest,p_payload);
+END $receipt_gate$;
+REVOKE ALL ON FUNCTION v106_test.fixture_append_negative_receipt(
+ uuid,uuid,char(64),integer,text,char(64),char(64),text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_append_negative_receipt(
+ uuid,uuid,char(64),integer,text,char(64),char(64),text) TO v106_receipt_writer_a;
