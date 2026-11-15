@@ -1,0 +1,160 @@
+{
+  "schema_version": "v3.2-110-m02-lease-loss-negative-receipt-v1",
+  "module": "M02",
+  "scope": "CI_ONLY_SIGNED_LEASE_LOSS_NOTIFICATION_AND_NEGATIVE_RECEIPT",
+  "parent_pr": 116,
+  "parent_head_sha": "462eb7f35007b69928517e1e50243c08cca7a50c",
+  "parent_ci_runs": [
+    43662996433,
+    43662996372
+  ],
+  "source_code": "src/cross-module-lease-loss-negative-receipt.mjs",
+  "integration_test": "tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs",
+  "sql_fixture": "tests/fixtures/v3-2-110-m02-loss-notice-sql.sql",
+  "sql_adapter": "tests/helpers/v3-2-110-m02-postgres-loss-notices.mjs",
+  "sql_setup": "scripts/v3-2-110-setup-loss-notice-sql.mjs",
+  "input_upstream": [
+    "src/cross-module-causal-lease-fence.mjs",
+    "tests/helpers/v3-2-109-m02-postgres-lease-ledger.mjs",
+    "src/cross-module-source-trust-fence.mjs",
+    "tests/helpers/v3-2-106-m02-postgres-checkpoint.mjs"
+  ],
+  "contract": {
+    "independent_fixture_keys_for_notification_and_receipt": true,
+    "signed_notice_version": "v3.2-110-ci-loss-notice-v1",
+    "signed_negative_receipt_version": "v3.2-110-ci-negative-receipt-v1",
+    "notice_kinds": [
+      "lease_revoked",
+      "holder_lost",
+      "source_barrier_invalidated"
+    ],
+    "allowed_receipt_dispositions": [
+      "blocked",
+      "uncertain"
+    ],
+    "forbidden_receipt_dispositions": [
+      "accepted",
+      "committed",
+      "authorized",
+      "handoff_complete"
+    ],
+    "no_positive_receipt_implemented": true,
+    "notice_sequence": "Monotone per organization and incident; replay and missing sequence refused",
+    "previous_notice_digest": "SHA-256 of previous complete signed notice, or 64 zero characters",
+    "lease_binding": [
+      "organization_id",
+      "incident_id",
+      "lease_id",
+      "barrier_epoch",
+      "source_watermark_digest"
+    ],
+    "sql_write": "One disposable PostgreSQL SERIALIZABLE transaction must append immutable notice event, advance head and change the matching active lease state to revoked",
+    "sql_roles": "V106 restricted tenant-scoped RLS writer roles, no business table modification",
+    "commit_uncertainty": "Unknown response or failure after COMMIT always remains business blocked; re-read SQL to determine persisted notice without granting authority",
+    "ack_integrity": "Signed negative receipt must bind the committed notice's digest, scope, lease ID, epoch and sequence",
+    "after_final_read_window": "Still not closed; real source-side atomic barrier is absent"
+  },
+  "test_database": {
+    "version": 16,
+    "database_name": "v106_isolated",
+    "schema": "v106_test",
+    "guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "ephemeral": true,
+    "production_connected": false,
+    "production_migration_added": false,
+    "tenant_row_level_security": true,
+    "sql_events_immutable_to_test_writer": true
+  },
+  "cases": [
+    {
+      "id": "LOSS-01",
+      "expected": "Signed lease-loss notice and negative receipt atomically revoke SQL lease; no business release"
+    },
+    {
+      "id": "LOSS-02",
+      "expected": "Forged notification signature rejected before DB write"
+    },
+    {
+      "id": "LOSS-03",
+      "expected": "Validly signed cross-tenant notice rejected"
+    },
+    {
+      "id": "LOSS-04",
+      "expected": "Stale or out-of-order notice rejected before DB write"
+    },
+    {
+      "id": "LOSS-05",
+      "expected": "Forged receipt denied after durable SQL revocation"
+    },
+    {
+      "id": "LOSS-06",
+      "expected": "Signed false success or changed receipt digest/scope rejected"
+    },
+    {
+      "id": "LOSS-07",
+      "expected": "Signed uncertain outcome blocks all action"
+    },
+    {
+      "id": "LOSS-08",
+      "expected": "Lost acknowledgement after committed SQL revocation treated uncertain"
+    },
+    {
+      "id": "LOSS-09",
+      "expected": "Pre-commit DB failure rolls back both notice and lease change"
+    },
+    {
+      "id": "LOSS-10",
+      "expected": "Concurrent/replayed signed notice cannot double-revoke or overwrite history"
+    },
+    {
+      "id": "LOSS-11",
+      "expected": "Wrong tenant DB role cannot append loss event"
+    },
+    {
+      "id": "LOSS-12",
+      "expected": "Revoked lease cannot be reused for a new negative receipt"
+    },
+    {
+      "id": "LOSS-13",
+      "expected": "Source revision after lease inspection proves missing cross-system atomic barrier"
+    },
+    {
+      "id": "LOSS-14",
+      "expected": "Caller approval flags and invalid scope are rejected"
+    }
+  ],
+  "known_gaps": [
+    "Ephemeral lease issuer, notification authority, receipt signers and Ed25519 keys are not real business approvals",
+    "Atomic SQL transaction covers only local lease and notification tables, not external sales, finance and academic sources",
+    "The source may change after V109 lease validation; signing a loss notice only blocks, never commits a real handoff",
+    "Last-read to business-operation time-of-check/time-of-use gap remains unclosed",
+    "No trustworthy independent cross-domain atomic acceptance/commit receipt exists",
+    "No production key custody, enterprise PostgreSQL/Chromium UAT or official contract verification",
+    "16 external admission items, R01-R10 and six independent authority conditions remain unverified"
+  ],
+  "external_contract_status": "proposed-unimplemented",
+  "real_external_source_authority_verified": false,
+  "real_finance_academic_signatures_verified": false,
+  "real_atomic_handoff_verified": false,
+  "business_commit_receipt_implemented": false,
+  "business_release_authorized": false,
+  "post_final_observation_race_closed": false,
+  "sixteen_external_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "production_integration_allowed": false,
+  "student_primary": true,
+  "family_optional": true,
+  "original_orders_payments_saleevent_lessons_compensation_preserved": true,
+  "historical_migration_range_per_prior_specs": "001-038",
+  "production_migration_039_added": false,
+  "edu_management_system_modified": false,
+  "next_stage": "V3.2-111: reconcile source-side atomic-barrier evidence and negative-receipt non-repudiation with independent business authority; do not connect production"
+}
