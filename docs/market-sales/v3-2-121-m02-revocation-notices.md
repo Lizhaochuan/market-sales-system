@@ -317,3 +317,9 @@
 - `src/cross-module-v121-iam-evidence.mjs` 仅处理**内存中的合成证据**，严格要求 `CI_FIXTURE_ONLY`、`fixture://` 引用、E1/E2 摘要、八类模拟权限身份及其工作负载/MFA 模式、八项明确拒绝的越权测试。合成材料由 SECURITY 临时密钥签名，AUDIT 独立临时密钥对材料 SHA-256 摘要及模拟审核结论签名；验证器只接受从外部传入的受信公钥及有效状态，并拒绝改动、缺失、过期、跨机构或职责冲突。
 - `tests/contracts/v3-2-121-iam-evidence.test.mjs` 覆盖结构完整性、角色独立、证据过期、弱认证与未拒绝的跨模块权限、签名篡改、信任密钥吊销以及不会更新生产矩阵。新增测试已纳入 V3.2-121 GitHub Actions。
 - **边界**：CI 合成资料证明的只是验收接口与检查规则；未获得任何真实生产 IAM 导出、证据字节、可信身份签署或安全审计复核。`EXT-001` 继续为 `UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`；所有后续缺口、HOLD 以及禁止合并与部署约束保持不变。
+
+## V121 / EXT-001 合成证据收据与版本生命周期（CI-only）
+- 新增 `fixture_iam_evidence_receipts` 与 `fixture_iam_evidence_revocations` 两张追加式隔离数据库表，按机构/EXT-001/递增版本登记双重签名验证后的**模拟摘要**。在相同版本和相同证据内容下精确重试不会创建第二份收据；同版本内容冲突、跨机构使用、旧版本重放、跨角色越权和非 `READ COMMITTED` 事务被拒绝。
+- 由独立 `v121_iam_revoker` 模拟账号追加撤回证据，不能删除原始提交；证据有效期不超过 1 小时，过期/撤回版本不允许恢复，同版本和不同提交人的并发操作通过统一事务锁串行化。独立 reader 只读返回 `VALID_SYNTHETIC_STILL_HOLD`、`RECEIPT_REVOKED_STILL_HOLD`、`RECEIPT_SUPERSEDED_STILL_HOLD` 或 `RECEIPT_EXPIRED_STILL_HOLD`，不产生业务解除隔离权利。
+- 新增 `fingerprintFixtureExt001ForIntake` 用已验证的 SECURITY/AUDIT 合成双签名材料产生域分隔 SHA-256 摘要；数据库本身仅保存该模拟摘要，并**不自行复验 Ed25519 也不连接生产 IAM**。测试覆盖缺失/重复、版本冲突、越权撤回、过期时效、跨连接持久性、并发冲突和管理员试图覆盖历史，保持原始业务库安全 HOLD。
+- 当前 EXT-001 仍是 `UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`，10 项生产缺口与 6 项独立签署均未改变。详细规范见 `docs/market-sales/v3-2-121-ext001-iam-evidence-intake.md`。继续 Draft PR #129 / CI-only / 不合并 / 不部署。
