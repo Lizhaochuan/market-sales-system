@@ -1661,3 +1661,142 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
   await ledgerAdmin.end();
  }
 });
+
+
+test('concurrent checkpoint signer competition and key revocation serialize without partial writes',async()=>{
+ const failure='00000000-0000-4000-8000-0000000000b1';
+ const signer3='00000000-0000-4000-8000-0000000000aa';
+ const signer4='00000000-0000-4000-8000-0000000000ab';
+ const pair3=generateKeyPairSync('ed25519'),pair4=generateKeyPairSync('ed25519');
+ const ledger=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
+ const writerA=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
+ const writerB=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
+ const revoker=new pg.Client({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
+ const trustReader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
+ const businessReader=new pg.Client({host,database:'v106_isolated',user:'v106_state_reader',password:'test_only_state_reader'});
+ const reason=createHash('sha256').update('v121-fixture-race-revocation').digest('hex');
+ const append='SELECT v121_anchor.append_checkpoint($1::uuid,$2::uuid,$3::integer,$4::uuid,$5::jsonb,$6::text,$7::char(64))';
+ const revoke='INSERT INTO v121_anchor.key_events(organization_id,signer_id,event_sequence,event_kind,event_reason_digest) VALUES($1,$2,$3,$4,$5)';
+ const submit='SELECT v106_test.fixture_submit_uat_remediation($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::char(64),$6::uuid,$7::char(64))';
+ const note=createHash('sha256').update('v121-fixture-race-note').digest('hex');
+ const remediator='00000000-0000-4000-8000-000000000016';
+ try{
+  await Promise.all([writerA.connect(),writerB.connect(),revoker.connect(),trustReader.connect(),businessReader.connect()]);
+  const register=async(id,version,pair)=>{
+   await ledger.query('INSERT INTO v121_anchor.signers(organization_id,signer_id,key_version,public_key_der) VALUES($1,$2,$3,$4)',[a,id,version,pair.publicKey.export({type:'spki',format:'der'})]);
+   await ledger.query(revoke,[a,id,1,'REGISTERED',reason]);
+  };
+  await register(signer3,3,pair3);
+  await register(signer4,4,pair4);
+  const trust=async()=>{
+   const rows=(await trustReader.query(
+    "SELECT s.signer_id,s.public_key_der,e.event_kind FROM v121_anchor.signers s LEFT JOIN LATERAL (SELECT event_kind FROM v121_anchor.key_events WHERE organization_id=s.organization_id AND signer_id=s.signer_id ORDER BY event_sequence DESC LIMIT 1) e ON TRUE WHERE s.organization_id=$1",[a])).rows;
+   return {publicKeys:new Map(rows.map(r=>[r.signer_id,createPublicKey({key:r.public_key_der,format:'der',type:'spki'})])),
+    keyStates:new Map(rows.map(r=>[r.signer_id,r.event_kind]))};
+  };
+  const current=async()=>{
+   await businessReader.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+   try{
+    const rebuild=(await businessReader.query('SELECT * FROM v106_test.fixture_rebuild_uat_state($1::uuid,$2::uuid)',[a,failure])).rows[0];
+    const observed=(await businessReader.query('SELECT * FROM v106_test.fixture_observe_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+    const result=(await businessReader.query('SELECT * FROM v106_test.fixture_verify_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+    await businessReader.query('COMMIT');
+    return {organization_id:a,failure_id:failure,incident_id:rebuild.incident_scope,event_id:rebuild.event_scope,
+     snapshot_sequence:result.snapshot_sequence,remediation_version:observed.remediation_version,
+     accepted_review_roles:observed.accepted_review_roles,observed_digest:observed.observed_digest,
+     rebuild_status:observed.rebuild_status,verdict:result.verdict,snapshot_matches:result.snapshot_matches,
+     hold_active:result.hold_active,release_eligible:result.release_eligible};
+   }catch(error){await businessReader.query('ROLLBACK');throw error;}
+  };
+  const advance=async(version,seq,id)=>{
+   const evidence=createHash('sha256').update('v121-concurrent-signer-remediation-'+version).digest('hex');
+   await closeoutWriter.query(submit,[a,failure,id,version,evidence,remediator,note]);
+   const observed=(await businessReader.query('SELECT * FROM v106_test.fixture_observe_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+   assert.equal(observed.remediation_version,version);
+   await admin.query('INSERT INTO v106_test.fixture_uat_state_snapshots(organization_id,failure_id,snapshot_sequence,remediation_version,accepted_review_roles,observed_digest) VALUES($1,$2,$3,$4,$5,$6)',
+    [a,failure,seq,version,observed.accepted_review_roles,observed.observed_digest]);
+   const result=await current();
+   assert.equal(result.snapshot_sequence,seq);
+   assert.equal(result.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+   return result;
+  };
+  const signAnchor=(state,id,pair)=>signFixtureAuditAnchor({
+   organization_id:a,failure_id:failure,incident_id:state.incident_id,event_id:state.event_id,
+   snapshot_sequence:state.snapshot_sequence,remediation_version:state.remediation_version,
+   accepted_review_roles:state.accepted_review_roles,observed_digest:state.observed_digest,
+   signer_id:id,issued_at_ms:100,expires_at_ms:200
+  },pair.privateKey);
+  const proofParams=proof=>[a,failure,proof.statement.snapshot_sequence,proof.statement.signer_id,
+   proof.statement,proof.signature_b64,proof.statement.observed_digest];
+  const verifyBefore=async(proof,observed)=>{
+   const trusted=await trust();
+   return verifyFixtureActiveAuditAnchor({...trusted,anchor:proof,current:observed,
+    nowMs:150,minimumSequence:observed.snapshot_sequence});
+  };
+  // Two signing keys race the same real snapshot; exactly one append survives.
+  const v9=await advance(9,6,'00000000-0000-4000-8000-0000000000bb');
+  const proof3=signAnchor(v9,signer3,pair3),proof4=signAnchor(v9,signer4,pair4);
+  assert.equal((await verifyBefore(proof3,v9)).release_eligible,false);
+  assert.equal((await verifyBefore(proof4,v9)).release_eligible,false);
+  const outcome=await Promise.allSettled([
+   writerA.query(append,proofParams(proof3)),
+   writerB.query(append,proofParams(proof4))
+  ]);
+  assert.deepEqual(outcome.map(x=>x.status).sort(),['fulfilled','rejected']);
+  assert.match(String(outcome.find(x=>x.status==='rejected').reason.message),/V121_ANCHOR_CHECKPOINT_ROLLBACK|duplicate key/);
+  const winner=(await trustReader.query('SELECT signer_id FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=6',[a,failure])).rows;
+  assert.equal(winner.length,1);
+  assert.ok([signer3,signer4].includes(winner[0].signer_id));
+  await assert.rejects(writerA.query(revoke,[a,signer3,2,'REVOKED',reason]),/permission denied/);
+  await assert.rejects(writerA.query('UPDATE v121_anchor.checkpoints SET observed_digest=$1',['a'.repeat(64)]),/permission denied/);
+  // Writer wins the signer lock before revocation: revoker cannot commit until
+  // the checkpoint commits or rolls back. Never split an accepted write.
+  const v10=await advance(10,7,'00000000-0000-4000-8000-0000000000bc');
+  const proof10=signAnchor(v10,signer3,pair3);
+  await verifyBefore(proof10,v10);
+  await writerA.query('BEGIN');
+  try{
+   await writerA.query(append,proofParams(proof10));
+   await revoker.query('BEGIN');
+   await revoker.query("SET LOCAL lock_timeout='200ms'");
+   await assert.rejects(revoker.query(revoke,[a,signer3,2,'REVOKED',reason]),/canceling statement due to lock timeout/);
+   await revoker.query('ROLLBACK');
+   await writerA.query('COMMIT');
+  }catch(error){
+   await writerA.query('ROLLBACK').catch(()=>{});
+   await revoker.query('ROLLBACK').catch(()=>{});
+   throw error;
+  }
+  assert.equal((await trustReader.query('SELECT count(*)::int AS n FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=7',[a,failure])).rows[0].n,1);
+  assert.equal((await trust()).keyStates.get(signer3),'REGISTERED');
+  await revoker.query(revoke,[a,signer3,2,'REVOKED',reason]);
+  assert.equal((await trust()).keyStates.get(signer3),'REVOKED');
+  // Revocation wins: a correctly signed, future snapshot from the retired
+  // key is rejected by the database admission gate even if a client cache
+  // still remembers its old REGISTERED state.
+  const v11=await advance(11,8,'00000000-0000-4000-8000-0000000000bd');
+  const forbidden=signAnchor(v11,signer3,pair3);
+  await assert.rejects(writerA.query(append,proofParams(forbidden)),/V121_ANCHOR_KEY_NOT_ACTIVE/);
+  assert.throws(()=>verifyFixtureActiveAuditAnchor({...await trust(),anchor:forbidden,current:v11,
+   nowMs:150,minimumSequence:8}),{code:'V121_ANCHOR_KEY_REVOKED'});
+  // Isolation other than READ COMMITTED is rejected rather than using stale
+  // snapshots after blocking on key event locks.
+  await writerA.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+  try{
+   await assert.rejects(writerA.query(append,proofParams(signAnchor(v11,signer4,pair4))),/V121_ANCHOR_ISOLATION_UNSAFE/);
+  }finally{await writerA.query('ROLLBACK');}
+  const finalProof=signAnchor(v11,signer4,pair4);
+  await verifyBefore(finalProof,v11);
+  await writerB.query(append,proofParams(finalProof));
+  assert.equal((await trustReader.query('SELECT max(snapshot_sequence)::int AS latest FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0].latest,8);
+  assert.equal((await trustReader.query('SELECT count(*)::int AS n FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=8',[a,failure])).rows[0].n,1);
+  const stopped=(await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0];
+  assert.equal(stopped.issuance_blocked,true);
+  const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
+  assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
+   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+ }finally{
+  await Promise.allSettled([writerA.end(),writerB.end(),revoker.end(),trustReader.end(),businessReader.end()]);
+  await ledger.end();
+ }
+});
