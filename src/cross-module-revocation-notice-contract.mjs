@@ -65,11 +65,13 @@ export function createIsolatedRevocationNoticeService({ledger,clock}={}){
    const map=new Map();
    for(const n of notices){
     if(!n||!UUID.test(n.recipient_id)||!STATES.has(n.state)||
-      !Number.isSafeInteger(n.epoch)||n.epoch<1||!recipients.includes(n.recipient_id)||
-      map.has(n.recipient_id))return denied('NOTICE_HISTORY_UNVERIFIED');
-    map.set(n.recipient_id,n.state);
+      !Number.isSafeInteger(n.epoch)||n.epoch<1||!recipients.includes(n.recipient_id))
+     return denied('NOTICE_HISTORY_UNVERIFIED');
+    const prior=map.get(n.recipient_id);
+    if(prior&&n.epoch<=prior.epoch)return denied('NOTICE_HISTORY_UNVERIFIED');
+    map.set(n.recipient_id,{epoch:n.epoch,state:n.state});
    }
-   const gaps=recipients.sort().map(recipient_id=>({recipient_id,state:map.get(recipient_id)||'NOT_QUEUED'}));
+   const gaps=recipients.sort().map(recipient_id=>({recipient_id,state:map.get(recipient_id)?.state||'NOT_QUEUED'}));
    const pending=gaps.filter(x=>x.state!=='FIXTURE_ACKNOWLEDGED');
    return Object.freeze({...safe(),reason_code:'FIXTURE_REVOCATION_COVERAGE_ONLY',
     recipient_count:gaps.length,unconfirmed_count:pending.length,recipients:gaps,
