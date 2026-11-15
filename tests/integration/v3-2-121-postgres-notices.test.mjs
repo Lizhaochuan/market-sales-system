@@ -1414,7 +1414,7 @@ test('independently signed audit anchor detects forged proofs, expiry and coordi
    ['ANCHOR_MATCH_STILL_HOLD',false]);
   const forged={...oldAnchor,statement:{...oldAnchor.statement,observed_digest:'f'.repeat(64)}};
   assert.throws(()=>verifyProof(forged,original),{code:'V121_ANCHOR_SIGNATURE_INVALID'});
-  const corruptedSignature={...oldAnchor,signature_b64:'A'+oldAnchor.signature_b64.slice(1)};
+  const corruptedSignature={...oldAnchor,signature_b64:(oldAnchor.signature_b64[0]==='A'?'B':'A')+oldAnchor.signature_b64.slice(1)};
   assert.throws(()=>verifyProof(corruptedSignature,original),{code:'V121_ANCHOR_SIGNATURE_INVALID'});
   assert.throws(()=>verifyProof(oldAnchor,original,200),{code:'V121_ANCHOR_EXPIRED'});
   // Advance the durable DB snapshot, then independently sign its new state.
