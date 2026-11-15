@@ -70,13 +70,11 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
   }finally{c.release();}
  }
  async function sourceHeads(scope){return read(scope,c=>source(c,scope));}
- async function listRecipients(scope){return read(scope,async c=>{
-  await source(c,scope);
+ async function queryRecipients(c,scope){
   const r=await c.query('SELECT recipient_id::text FROM v106_test.fixture_revocation_recipients WHERE organization_id=$1 AND incident_id=$2 ORDER BY recipient_id',scopeParams(scope));
   return r.rows.map(x=>x.recipient_id);
- });}
- async function listNotices(scope){return read(scope,async c=>{
-  await source(c,scope);
+ }
+ async function queryNotices(c,scope){
   const r=await c.query('SELECT recipient_id::text,epoch,state,notice_id,event_payload,event_digest FROM v106_test.fixture_revocation_notices WHERE organization_id=$1 AND incident_id=$2 AND export_version=$3 AND manifest_digest=$4 AND revocation_event_digest=$5 ORDER BY recipient_id,epoch',
    [...scopeParams(scope),scope.export_version,scope.manifest_digest,scope.revocation_event_digest]);
   const results=[];
@@ -101,6 +99,14 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
     state:history.rowCount?history.rows.at(-1).receipt_state:x.state});
   }
   return results;
+ }
+ async function listRecipients(scope){return read(scope,async c=>{await source(c,scope);return queryRecipients(c,scope);});}
+ async function listNotices(scope){return read(scope,async c=>{await source(c,scope);return queryNotices(c,scope);});}
+ async function captureCoverageSnapshot(scope){return read(scope,async c=>{
+  const heads=await source(c,scope);
+  const recipients=await queryRecipients(c,scope);
+  const notices=await queryNotices(c,scope);
+  return {heads,recipients,notices};
  });}
  async function appendNotice(input){
   const noticeInput=Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest','recipient_id','epoch'].map(k=>[k,input[k]]));
@@ -190,5 +196,5 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
   }
   fail('NOTICE_RECEIPT_RETRY_EXHAUSTED');
  }
- return Object.freeze({sourceHeads,listRecipients,listNotices,appendNotice,appendNegativeReceipt});
+ return Object.freeze({sourceHeads,listRecipients,listNotices,captureCoverageSnapshot,appendNotice,appendNegativeReceipt});
 }
