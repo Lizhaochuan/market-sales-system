@@ -405,6 +405,13 @@ BEGIN
  ) THEN
   RAISE EXCEPTION 'V121_ISSUANCE_EMERGENCY_STOP';
  END IF;
+ -- Require the complete three-domain HOLD state before any attempted recovery.
+ IF (SELECT count(*) FROM v106_test.fixture_cross_module_holds
+     WHERE organization_id=p_organization AND incident_id=p_incident
+       AND module_name IN ('SALES','FINANCE','ACADEMIC')
+       AND hold_active IS TRUE AND release_eligible IS FALSE)<>3 THEN
+  RAISE EXCEPTION 'V121_CROSS_MODULE_HOLD_INCOMPLETE';
+ END IF;
  SELECT key_version,active INTO predecessor
  FROM v106_test.fixture_receipt_attestation_secrets
  WHERE organization_id=p_organization AND key_version=p_version-1 FOR UPDATE;
@@ -516,6 +523,24 @@ REVOKE ALL ON v106_test.fixture_external_security_events FROM PUBLIC;
 CREATE TRIGGER fixture_external_event_immutable BEFORE UPDATE OR DELETE
  ON v106_test.fixture_external_security_events FOR EACH ROW
  EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+
+-- Once an independent alert is accepted, direct administrative unstop is blocked.
+-- No production resolution workflow exists in this fixture; all three modules remain HOLD.
+CREATE FUNCTION v106_test.fixture_prevent_uncleared_security_alert() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $alert_latch$
+BEGIN
+ IF OLD.issuance_blocked IS TRUE AND NEW.issuance_blocked IS FALSE AND
+    EXISTS (SELECT 1 FROM v106_test.fixture_external_security_events
+     WHERE organization_id=NEW.organization_id AND incident_id=NEW.incident_id) THEN
+  RAISE EXCEPTION 'V121_SECURITY_ALERT_UNRESOLVED';
+ END IF;
+ RETURN NEW;
+END;
+$alert_latch$;
+CREATE TRIGGER fixture_unresolved_security_alert BEFORE UPDATE
+ ON v106_test.fixture_recovery_emergency_stops FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_prevent_uncleared_security_alert();
 
 CREATE FUNCTION v106_test.fixture_accept_external_security_event(
  p_organization uuid,p_incident uuid,p_event_id uuid,p_source text,
