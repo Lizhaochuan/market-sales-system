@@ -47,3 +47,31 @@ CREATE POLICY v121_not_b ON v106_test.fixture_revocation_notices
  WITH CHECK(organization_id='22222222-2222-4222-8222-222222222222'::uuid);
 -- Registry entries must be populated by the disposable fixture owner, never by writer clients.
 -- No UPDATE or DELETE grants: notice/event payload, digest and HOLD remain immutable.
+
+-- V121 negative-only receipts: independently appended, never acknowledgements of delivery.
+CREATE TABLE v106_test.fixture_revocation_negative_receipts (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ notice_id char(64) NOT NULL,
+ receipt_sequence integer NOT NULL CHECK(receipt_sequence BETWEEN 1 AND 128),
+ receipt_state text NOT NULL CHECK(receipt_state IN ('NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE')),
+ previous_digest char(64) NOT NULL,
+ receipt_digest char(64) NOT NULL,
+ receipt_payload text NOT NULL,
+ hold_active boolean NOT NULL DEFAULT true CHECK(hold_active IS TRUE),
+ PRIMARY KEY(organization_id,incident_id,notice_id,receipt_sequence),
+ FOREIGN KEY(organization_id,incident_id,notice_id)
+  REFERENCES v106_test.fixture_revocation_notices(organization_id,incident_id,notice_id)
+);
+REVOKE ALL ON v106_test.fixture_revocation_negative_receipts FROM PUBLIC;
+GRANT SELECT,INSERT ON v106_test.fixture_revocation_negative_receipts TO v106_writer_a,v106_writer_b;
+ALTER TABLE v106_test.fixture_revocation_negative_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE v106_test.fixture_revocation_negative_receipts FORCE ROW LEVEL SECURITY;
+CREATE POLICY v121_rcpt_a ON v106_test.fixture_revocation_negative_receipts
+ FOR ALL TO v106_writer_a
+ USING(organization_id='11111111-1111-4111-8111-111111111111'::uuid)
+ WITH CHECK(organization_id='11111111-1111-4111-8111-111111111111'::uuid);
+CREATE POLICY v121_rcpt_b ON v106_test.fixture_revocation_negative_receipts
+ FOR ALL TO v106_writer_b
+ USING(organization_id='22222222-2222-4222-8222-222222222222'::uuid)
+ WITH CHECK(organization_id='22222222-2222-4222-8222-222222222222'::uuid);
