@@ -209,8 +209,10 @@ test('remote recheck is mandatory before attestation, with no SQL call on invali
  }};
  const r=await issueFixtureExt001FromTwoSources({...x.options,receiptId,attester});
  assert.equal(issued,1);
- assert.equal(r.independent_read_rounds,2);
+ assert.equal(r.independent_read_rounds,4);
+ assert.equal(r.post_attestation_source_rechecked,true);
  assert.equal(r.source_checked_in_fixture,true);
+ assert.deepEqual(x.calls(),[8,8]);
  assert.equal(r.release_authorized,false);
  assert.equal(r.production_evidence_collected,false);
  assert.equal(r.hold_active,true);
@@ -263,4 +265,40 @@ test('revocation during fixture remote reads rejects admission without issuing a
   }
  }),'V121_IAM_SOURCE_TRUST_INVALID');
  assert.equal(issued,0,'source revoked during read cannot issue an attestation');
+});
+
+test('revoking source after SQL fixture attestation fails closed without erasing audit history',async()=>{
+ const x=setup();
+ const receiptId='00000000-0000-4000-8000-0000000000e6';
+ let admitted=0,committed=0;
+ const attester={query:async()=>{
+  admitted++;
+  committed++;
+  x.sourceKeys.set(id.audit,{...x.sourceKeys.get(id.audit),status:'REVOKED'});
+  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+ }};
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,receiptId,attester
+ }),'V121_IAM_SOURCE_TRUST_INVALID');
+ assert.equal(admitted,1);
+ assert.equal(committed,1,'simulated committed history is retained after post-write rejection');
+});
+
+test('substituting pinned bytes after SQL fixture attestation fails closed',async()=>{
+ const x=setup();
+ const receiptId='00000000-0000-4000-8000-0000000000e6';
+ let admitted=0,substitute=false;
+ const attester={query:async()=>{
+  admitted++;
+  substitute=true;
+  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+ }};
+ await rejects(()=>issueFixtureExt001FromTwoSources({
+  ...x.options,receiptId,attester,
+  primaryReader:async rec=>{
+   const r=await x.primaryReader(rec);
+   return substitute?{...r,bytes:Buffer.from('replaced after SQL append')}:r;
+  }
+ }),'V121_IAM_SOURCE_CONTENT_MISMATCH');
+ assert.equal(admitted,1);
 });
