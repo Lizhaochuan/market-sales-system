@@ -3,7 +3,7 @@
 import {createHash,createPublicKey,verify as verifySignature} from 'node:crypto';
 
 const DOMAINS=Object.freeze(['sales','finance','academic']);
-const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const SHA=/^[a-f0-9]{64}$/;
 const PAYLOAD_FIELDS=Object.freeze([
  'schema_version','domain','organization_id','incident_id',
