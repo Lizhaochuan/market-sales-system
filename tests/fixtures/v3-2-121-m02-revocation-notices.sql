@@ -83,6 +83,7 @@ CREATE TABLE v106_test.fixture_signer_watermarks (
  signer_id uuid NOT NULL,
  authority_epoch integer NOT NULL CHECK(authority_epoch>0),
  revocation_watermark integer NOT NULL CHECK(revocation_watermark>=0),
+ lease_sequence integer NOT NULL DEFAULT 0 CHECK(lease_sequence>=0),
  PRIMARY KEY(organization_id,incident_id,signer_id)
 );
 CREATE FUNCTION v106_test.fixture_watermark_monotone() RETURNS trigger
@@ -91,7 +92,8 @@ BEGIN
  IF NEW.organization_id<>OLD.organization_id OR
     NEW.incident_id<>OLD.incident_id OR NEW.signer_id<>OLD.signer_id OR
     NEW.authority_epoch<OLD.authority_epoch OR
-    NEW.revocation_watermark<OLD.revocation_watermark THEN
+    NEW.revocation_watermark<OLD.revocation_watermark OR
+    NEW.lease_sequence<OLD.lease_sequence THEN
   RAISE EXCEPTION 'V121_WATERMARK_REGRESSION';
  END IF;
  RETURN NEW;
@@ -99,7 +101,7 @@ END $$;
 CREATE TRIGGER fixture_watermark_no_regression BEFORE UPDATE ON v106_test.fixture_signer_watermarks
 FOR EACH ROW EXECUTE FUNCTION v106_test.fixture_watermark_monotone();
 REVOKE ALL ON v106_test.fixture_signer_watermarks FROM PUBLIC;
-GRANT SELECT,INSERT,UPDATE(authority_epoch,revocation_watermark)
+GRANT SELECT,INSERT,UPDATE(authority_epoch,revocation_watermark,lease_sequence)
  ON v106_test.fixture_signer_watermarks TO v106_writer_a,v106_writer_b;
 ALTER TABLE v106_test.fixture_signer_watermarks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE v106_test.fixture_signer_watermarks FORCE ROW LEVEL SECURITY;
