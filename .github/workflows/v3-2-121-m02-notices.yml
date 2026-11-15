@@ -14,6 +14,7 @@ on:
       - 'src/cross-module-revocation-notice-contract.mjs'
       - 'tests/contracts/v3-2-121-revocation-notices.test.mjs'
       - 'tests/integration/v3-2-121-postgres-notices.test.mjs'
+      - 'tests/helpers/v3-2-121-fixture-recovery-issuance.mjs'
       - 'tests/helpers/v3-2-121-m02-postgres-revocation-notices.mjs'
       - 'tests/fixtures/v3-2-121-m02-revocation-notices.sql'
       - '.github/workflows/v3-2-121-m02-notices.yml'
