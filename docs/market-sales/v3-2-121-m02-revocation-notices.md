@@ -232,3 +232,10 @@
 - 检测规则包括：版本必须从 1 连续到当前最大值、每版证据摘要不得重复；审核证据必须对应其整改版本，审核人不得与整改人/原失败审核者重叠或跨双职责冒用；事故对应的 SALES / FINANCE / ACADEMIC HOLD 必须齐全，已认证外部告警和紧急停止必须存在。明确返回 `HISTORY_INCOMPLETE`、`REVIEW_INTEGRITY_INVALID`、`CROSS_MODULE_HOLD_INCOMPLETE`、`ALERT_PROVENANCE_MISSING` 或 `EMERGENCY_STOP_MISSING`，正常历史也只返回 `REBUILT_STILL_HOLD`。
 - 隔离 PostgreSQL 测试使用新数据库客户端模拟状态读取服务重建、客户端关闭再连接，并断言两次读取完全一致。测试超级管理员临时模拟版本跳号、审核摘要被破坏和教务 HOLD 行丢失；新连接必须检测异常，恢复测试数据后状态重新一致。测试角色不能直接读取或修改基础记录，不能跨租户重建。
 - 所有重建结果恒定 `hold_active=true`、`release_eligible=false`，**并不是恢复批准或生产数据修复**。本轮只覆盖单个隔离 PostgreSQL 实例的已提交可见状态；外部历史真实完整性、跨服务日志比对、进程崩溃后的真实部署恢复、可信备份和正式 UAT 仍待独立验收。继续 Draft、CI-only、不合并、不部署。
+
+## V121 状态快照与重建历史交叉校验（CI-only）
+- 新增不可变的 `fixture_uat_state_snapshots` 作为隔离数据库内的**模拟快照基线**。每个机构和验收失败项的 `snapshot_sequence` 必须严格连续递增；UPDATE/DELETE 受阻。快照记录重建版本、最新版本接受复核数、完整历史状态 SHA-256 指纹，以及固定 HOLD / 禁止释放。**快照由隔离测试管理员写入，未连接独立备份、第三方时间戳或外部 WORM 存储。**
+- `fixture_observe_uat_snapshot` 使用确定性顺序构造历史指纹，纳入事故与原失败证据、各整改版本 ID 与证据/备注摘要、每个版本复核职责和结论、三模块 HOLD 记录、紧急停止及重建状态。仅授权独立 `v106_state_reader` 调用，不授予底层表权限。
+- `fixture_verify_uat_snapshot` 将**最新快照**与当次历史重建及状态指纹交叉校验：快照不存在返回 `SNAPSHOT_MISSING`；新整改版本超过快照返回 `SNAPSHOT_STALE`；版本或历史指纹不一致返回 `SNAPSHOT_VERSION_CONFLICT` / `SNAPSHOT_MISMATCH`；重建本身出现缺失与异常则优先返回 `REBUILD_INVALID`。完全相符也只返回 `SNAPSHOT_MATCH_STILL_HOLD`。
+- PostgreSQL 测试覆盖未建快照、跳号和不可变性、复核新增造成指纹变化、新整改造成旧快照过期、更新快照后匹配，以及模拟管理员篡改历史备注但保持版本数量不变时仍能发现指纹不一致。模拟数据恢复后重新匹配，全程 `hold_active=true`、`release_eligible=false`、安全停止保持启用。
+- 此指纹用于测试**同一数据库内的历史与快照一致性**，并不能证明快照具有外部不可篡改性：如果高权限攻击者同时修改历史和快照，单库比较可能无法发现。后续需要独立不可篡改锚点、签名快照、可信时间、独立恢复主体及真实跨模块 UAT。继续 Draft、CI-only、不合并、不部署。
