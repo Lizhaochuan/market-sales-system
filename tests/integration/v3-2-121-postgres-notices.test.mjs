@@ -511,7 +511,14 @@ test('HMAC key rotation revokes old version and permits explicit new version',as
   await assert.rejects(receiptWriter.query(sql,[...base,oldMac,1]),/V121_RECEIPT_ATTESTATION_REJECTED/);
   await assert.rejects(receiptWriter.query(sql,[...base,oldMac,2]),/V121_RECEIPT_ATTESTATION_REJECTED/);
   const q2=await service.enqueue({...input,epoch:91});
-  await assert.rejects(ledger.appendNegativeReceipt(issuedFixtureReceipt(q2.notice_id,'00000000-0000-4000-8000-000000000091',5)),
+  const stale=createIsolatedPostgresRevocationNotices({
+   receiptAttestationKey:oldKey,receiptAttestationVersion:1,
+   receiptPool:receiptWriter,pool:writer,receiptPublicKey:keyPair.publicKey,
+   receiptClock:()=>150,receiptProofAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2}),
+   leaseGate:createFixtureLeaseGate({publicKey:fixtureLeaseKeys.publicKey,clock:()=>150,
+    loadAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2,lease_sequence:5})})
+  });
+  await assert.rejects(stale.appendNegativeReceipt(issuedFixtureReceipt(q2.notice_id,'00000000-0000-4000-8000-000000000091',5)),
    /V121_RECEIPT_ATTESTATION_REJECTED/);
   const refreshed=createIsolatedPostgresRevocationNotices({
    receiptAttestationKey:newKey,receiptAttestationVersion:2,
