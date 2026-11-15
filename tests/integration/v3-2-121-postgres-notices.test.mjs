@@ -2597,6 +2597,35 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    'EXACT_SOURCE_PROVENANCE_RETRY_STILL_HOLD');
   await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,2,rotatedMac]),
    /V121_IAM_SOURCE_AUTH_DENIED/);
+  // Opposite race ordering: an admitted source proof keeps the key row
+  // locked until the attester transaction commits. Retirement waits.
+  await attester.query('BEGIN');
+  let admissionCommitted=false;
+  let waitingRetirement;
+  try{
+   assert.equal((await attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,3,thirdMac])).rows[0].verdict,
+    'EXACT_SOURCE_PROVENANCE_RETRY_STILL_HOLD');
+   waitingRetirement=audit.query('UPDATE v121_anchor.fixture_iam_source_auth_keys SET active=false WHERE organization_id=$1 AND key_version=3',[a])
+    .then(value=>({value}),error=>({error}));
+   let retirementBlocked=false;
+   for(let attempt=0;attempt<60;attempt++){
+    const blocked=(await audit.query(
+     "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname=current_database() AND usename='postgres' AND wait_event_type='Lock' AND query LIKE $1",
+     ['UPDATE v121_anchor.fixture_iam_source_auth_keys SET active=false%'])).rows[0].n;
+    if(blocked>0){retirementBlocked=true;break;}
+    await audit.query('SELECT pg_sleep(0.01)');
+   }
+   assert.equal(retirementBlocked,true,'key retirement must wait until admitted verifier commits');
+   await attester.query('COMMIT');
+   admissionCommitted=true;
+  }finally{
+   if(!admissionCommitted)await attester.query('ROLLBACK').catch(()=>{});
+  }
+  const retiredAfterAdmission=await waitingRetirement;
+  if(retiredAfterAdmission.error)throw retiredAfterAdmission.error;
+  assert.equal(retiredAfterAdmission.value.rowCount,1);
+  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,3,thirdMac]),
+   /V121_IAM_SOURCE_AUTH_DENIED/);
   assert.equal((await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_bindings WHERE organization_id=$1',[a])).rows[0].n,1);
   await assert.rejects(writerA.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,1,forgedMac]),
    /permission denied/);
