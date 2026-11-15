@@ -7,7 +7,7 @@ const sha=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const fail=c=>{const e=new Error(c);e.code=c;throw e;};
 const scopeParams=x=>[x.organization_id,x.incident_id];
 export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthority,receiptPublicKey,receiptClock,
- beforeReceiptCommit=async()=>{},afterReceiptCommit=async()=>{}}={}){
+ beforeReceiptCommit=async()=>{},afterReceiptCommit=async()=>{},leaseGate=null}={}){
  if(typeof beforeReceiptCommit!=='function'||typeof afterReceiptCommit!=='function')
   throw TypeError('V121 fixture commit hooks must be functions');
  if(process.env.V106_ISOLATED_PG!=='YES_TEST_ONLY'||!pool?.connect)
@@ -25,6 +25,18 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
   return verifyFixtureNegativeReceiptProof({
    statement:st,signature_b64:proof.signature_b64,publicKey:receiptPublicKey,
    clock:receiptClock,authority:receiptProofAuthority});
+ }
+ async function checkLease(input){
+  if(!leaseGate)return;
+  if(!input?.lease||Object.keys(input.lease).sort().join('|')!=='lease|signature_b64')
+   fail('NOTICE_LEASE_REQUIRED');
+  const st=input.proof?.statement;
+  const scope={organization_id:input.organization_id,incident_id:input.incident_id,
+   signer_id:st?.signer_id,notice_id:input.notice_id};
+  const l=input.lease.lease;
+  if(!l||l.authority_epoch!==st.authority_epoch||
+   l.revocation_watermark!==st.revocation_watermark)fail('NOTICE_LEASE_PROOF_MISMATCH');
+  return leaseGate.verifyLease({...input.lease,scope});
  }
  async function connect(){
   const c=await pool.connect();
@@ -111,7 +123,7 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
        value.previous_digest!==previous||h.previous_digest!==previous||
        !['NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE'].includes(h.receipt_state)||
        sha(value)!==h.receipt_digest)fail('NOTICE_RECEIPT_TAMPERED');
-    try{await checkProof({...value,proof:value.proof});}catch{fail('NOTICE_RECEIPT_PROOF_RECHECK_FAILED');}
+    try{await checkProof({...value,proof:value.proof});if(leaseGate)await checkLease({...value,proof:value.proof,lease:value.lease});}catch{fail('NOTICE_RECEIPT_PROOF_RECHECK_FAILED');}
     previous=h.receipt_digest;
    }
    results.push({recipient_id:x.recipient_id,epoch:x.epoch,
@@ -165,28 +177,30 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
  async function observeSignerWatermark(c,input){
   const st=input.proof.statement;
   const p=[st.organization_id,st.incident_id,st.signer_id];
-  const existing=await c.query('SELECT authority_epoch,revocation_watermark FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3 FOR UPDATE',p);
+  const existing=await c.query('SELECT authority_epoch,revocation_watermark,lease_sequence FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3 FOR UPDATE',p);
+  const sequence=leaseGate?input.lease.lease.lease_sequence:0;
   if(existing.rowCount===0){
-   await c.query('INSERT INTO v106_test.fixture_signer_watermarks(organization_id,incident_id,signer_id,authority_epoch,revocation_watermark) VALUES($1,$2,$3,$4,$5)',
-    [...p,st.authority_epoch,st.revocation_watermark]);
+   await c.query('INSERT INTO v106_test.fixture_signer_watermarks(organization_id,incident_id,signer_id,authority_epoch,revocation_watermark,lease_sequence) VALUES($1,$2,$3,$4,$5,$6)',
+    [...p,st.authority_epoch,st.revocation_watermark,sequence]);
   }else{
    const old=existing.rows[0];
-   if(st.authority_epoch<old.authority_epoch||st.revocation_watermark<old.revocation_watermark)
+   if(st.authority_epoch<old.authority_epoch||st.revocation_watermark<old.revocation_watermark||sequence<old.lease_sequence)
     fail('NOTICE_SIGNER_WATERMARK_REGRESSION');
-   if(st.authority_epoch>old.authority_epoch||st.revocation_watermark>old.revocation_watermark)
-    await c.query('UPDATE v106_test.fixture_signer_watermarks SET authority_epoch=$4,revocation_watermark=$5 WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',
-      [...p,st.authority_epoch,st.revocation_watermark]);
+   if(st.authority_epoch>old.authority_epoch||st.revocation_watermark>old.revocation_watermark||sequence>old.lease_sequence)
+    await c.query('UPDATE v106_test.fixture_signer_watermarks SET authority_epoch=$4,revocation_watermark=$5,lease_sequence=$6 WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',
+      [...p,st.authority_epoch,st.revocation_watermark,sequence]);
   }
  }
  async function appendNegativeReceipt(input){
   if(!input||Object.keys(input).sort().join('|')!==
-    ['incident_id','notice_id','organization_id','receipt_sequence','receipt_state','proof'].sort().join('|')||
+    (leaseGate?['incident_id','notice_id','organization_id','receipt_sequence','receipt_state','proof','lease']:['incident_id','notice_id','organization_id','receipt_sequence','receipt_state','proof']).sort().join('|')||
     typeof input.notice_id!=='string'||!/^[a-f0-9]{64}$/.test(input.notice_id)||
     !Number.isSafeInteger(input.receipt_sequence)||input.receipt_sequence<1||
     input.receipt_sequence>128||
     !['NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE'].includes(input.receipt_state))
    fail('NOTICE_RECEIPT_INPUT_INVALID');
   await checkProof(input);
+  await checkLease(input);
   for(let attempt=0;attempt<4;attempt++){
    const c=await connect();let started=false;
    try{
@@ -198,6 +212,7 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
     if(notice.rowCount!==1)fail('NOTICE_RECEIPT_TARGET_ABSENT');
     await source(c,{...input,...notice.rows[0]});
     await checkProof(input);
+    await checkLease(input);
     await observeSignerWatermark(c,input);
     const rows=await c.query('SELECT receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload FROM v106_test.fixture_revocation_negative_receipts WHERE organization_id=$1 AND incident_id=$2 AND notice_id=$3 ORDER BY receipt_sequence',
      [...scopeParams(input),input.notice_id]);
@@ -210,6 +225,7 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
         row.previous_digest!==previous||event.receipt_state!==row.receipt_state||
         sha(event)!==row.receipt_digest)fail('NOTICE_RECEIPT_TAMPERED');
      await checkProof({...event,proof:event.proof});
+     if(leaseGate)await checkLease({...event,proof:event.proof,lease:event.lease});
      previous=row.receipt_digest;
     }
     if(input.receipt_sequence<=rows.rowCount){
@@ -219,23 +235,27 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthor
      if(JSON.stringify(saved.proof)!==JSON.stringify(input.proof))fail('NOTICE_RECEIPT_REPLAY_CONFLICT');
      await beforeReceiptCommit({notice_id:input.notice_id,duplicate:true});
      await checkProof(input);
+     await checkLease(input);
      await c.query('COMMIT');started=false;
      await afterReceiptCommit({notice_id:input.notice_id,duplicate:true});
      await checkProof(input);
+     await checkLease(input);
      return {receipt_digest:row.receipt_digest,duplicate:true,hold_active:true};
     }
     if(input.receipt_sequence!==rows.rowCount+1)fail('NOTICE_RECEIPT_OUT_OF_ORDER');
     const payload={organization_id:input.organization_id,incident_id:input.incident_id,
      notice_id:input.notice_id,receipt_sequence:input.receipt_sequence,
-     receipt_state:input.receipt_state,previous_digest:previous,proof:input.proof};
+     receipt_state:input.receipt_state,previous_digest:previous,proof:input.proof,...(leaseGate?{lease:input.lease}:{})};
     const digest=sha(payload);
     await c.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
      [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,JSON.stringify(payload)]);
     await beforeReceiptCommit({notice_id:input.notice_id,duplicate:false});
     await checkProof(input);
+    await checkLease(input);
     await c.query('COMMIT');started=false;
     await afterReceiptCommit({notice_id:input.notice_id,duplicate:false});
     await checkProof(input);
+    await checkLease(input);
     return {receipt_digest:digest,duplicate:false,hold_active:true};
    }catch(e){
     if(started)await c.query('ROLLBACK').catch(()=>{});
