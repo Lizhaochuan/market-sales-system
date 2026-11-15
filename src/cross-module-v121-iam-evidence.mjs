@@ -216,11 +216,30 @@ export function verifyFixtureExt001BytesAndFingerprint(envelope,{trustedKeys,now
 }
 
 
+// Exact byte contract mirrored by fixture_attest_iam_source_provenance in
+// PostgreSQL. No secret is stored here; signing is a separate CI-only role.
+export function encodeFixtureExt001SourceAuthorization(proof,sourceDigest,keyVersion){
+ if(!proof||typeof sourceDigest!=='string'||
+    !/^[a-f0-9]{64}$/.test(sourceDigest)||
+    !Number.isSafeInteger(keyVersion)||keyVersion<1)
+  fail('V121_IAM_SOURCE_AUTH_INVALID');
+ const fields=[
+  'v121-ext001-source-auth-v1',keyVersion,proof.organization_id,
+  proof.revision_no,proof.revision_id,proof.receipt_id,
+  proof.evidence_digest,proof.evidence_e1_digest,proof.evidence_e2_digest,
+  proof.issuer_id,proof.reviewer_id,proof.issuer_signature_digest,
+  proof.reviewer_signature_digest,proof.valid_until_ms,sourceDigest
+ ];
+ if(fields.some(x=>x===undefined||x===null))
+  fail('V121_IAM_SOURCE_AUTH_INVALID');
+ return Buffer.from(fields.join('|'),'utf8');
+}
+
 // This is the sole supported CI attester entrypoint: re-read submitted raw
 // bytes, re-verify the two signatures, and enforce the signed revision number
 // immediately before requesting the separate PostgreSQL attestation.
 export async function issueFixtureExt001VerifiedProvenance({
- envelope,artifactBytes,trustedKeys,nowMs,revisionNo,receiptId,attester,sourceBindingDigest
+ envelope,artifactBytes,trustedKeys,nowMs,revisionNo,receiptId,attester,sourceBindingDigest,sourceAuthorization
 }={}){
  if(!Number.isSafeInteger(revisionNo) || revisionNo<1 ||
     !isUuid(receiptId)) fail('V121_IAM_PROVENANCE_INPUT_INVALID');
@@ -235,14 +254,20 @@ export async function issueFixtureExt001VerifiedProvenance({
  if(sourceBound && (typeof sourceBindingDigest!=='string'||
     !/^[a-f0-9]{64}$/.test(sourceBindingDigest)))
   fail('V121_IAM_SOURCE_BINDING_INVALID');
+ if(sourceBound && (!sourceAuthorization||
+    !Number.isSafeInteger(sourceAuthorization.key_version)||
+    sourceAuthorization.key_version<1||
+    typeof sourceAuthorization.mac!=='string'||
+    !/^[a-f0-9]{64}$/.test(sourceAuthorization.mac)))
+  fail('V121_IAM_SOURCE_AUTH_INVALID');
  const q=sourceBound
-  ?'SELECT v121_anchor.fixture_attest_iam_source_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz,$13::char(64)) AS verdict'
+  ?'SELECT v121_anchor.fixture_attest_iam_source_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz,$13::char(64),$14::integer,$15::char(64)) AS verdict'
   :'SELECT v121_anchor.fixture_attest_iam_provenance($1::uuid,$2::integer,$3::uuid,$4::uuid,$5::char(64),$6::char(64),$7::char(64),$8::uuid,$9::uuid,$10::char(64),$11::char(64),$12::timestamptz) AS verdict';
  const args=[proof.organization_id,revisionNo,proof.revision_id,receiptId,
   proof.evidence_digest,proof.evidence_e1_digest,proof.evidence_e2_digest,
   proof.issuer_id,proof.reviewer_id,proof.issuer_signature_digest,
   proof.reviewer_signature_digest,new Date(proof.valid_until_ms)];
- if(sourceBound) args.push(sourceBindingDigest);
+ if(sourceBound) args.push(sourceBindingDigest,sourceAuthorization.key_version,sourceAuthorization.mac);
  const result=await attester.query(q,args);
  const permitted=sourceBound
   ?['ATTESTED_SOURCE_PROVENANCE_STILL_HOLD','EXACT_SOURCE_PROVENANCE_RETRY_STILL_HOLD']
