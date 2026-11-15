@@ -400,6 +400,12 @@ BEGIN
  IF expected IS NULL THEN
   RAISE EXCEPTION 'V121_QUARANTINE_CHAIN_INCOMPLETE';
  END IF;
+ IF EXISTS(SELECT 1 FROM v121_anchor.quarantine_assessments q
+   WHERE q.organization_id=p_org AND q.assessment_id=p_assessment AND q.investigator_id=p_checker)
+ OR EXISTS(SELECT 1 FROM v121_anchor.quarantine_assessment_reviews rv
+   WHERE rv.organization_id=p_org AND rv.assessment_id=p_assessment AND rv.reviewer_id=p_checker) THEN
+  RAISE EXCEPTION 'V121_QUARANTINE_CHECKER_NOT_INDEPENDENT';
+ END IF;
  INSERT INTO v121_anchor.quarantine_evidence_chains(
   organization_id,event_id,assessment_id,chain_digest,checker_id)
  VALUES(p_org,p_event,p_assessment,expected,p_checker);
