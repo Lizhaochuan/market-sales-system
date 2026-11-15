@@ -236,6 +236,10 @@ test('INTAKE-13 altered head digest is detected; no business rights are returned
   const r=await gate.inspect(scope(n));safe(r);
   assert.equal(r.reason_code,'EVIDENCE_INTAKE_EVENT_UNVERIFIED');
   assert.equal(r.intake_recorded,false);
+  const append=await gate.receive(claim(n,'finance_owner',{
+   submission_id:submission(n+1000)}));safe(append);
+  assert.equal(append.reason_code,'EVIDENCE_INTAKE_PREVIOUS_EVENT_UNVERIFIED');
+  assert.equal((await ledger.head(scope(n))).sequence,1);
  });
 });
 test('INTAKE-14 unknown scope, expired claim and clock rollback cannot claim verified status',async()=>{
