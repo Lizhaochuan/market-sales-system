@@ -6,8 +6,10 @@ import {verifyFixtureNegativeReceiptProof} from '../../src/cross-module-fixture-
 const sha=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const fail=c=>{const e=new Error(c);e.code=c;throw e;};
 const scopeParams=x=>[x.organization_id,x.incident_id];
-export function createIsolatedPostgresRevocationNotices({pool,receiptPool,receiptAttestationKey,receiptProofAuthority,receiptPublicKey,receiptClock,
+export function createIsolatedPostgresRevocationNotices({pool,receiptPool,receiptAttestationKey,receiptAttestationVersion=1,receiptProofAuthority,receiptPublicKey,receiptClock,
  beforeReceiptCommit=async()=>{},afterReceiptCommit=async()=>{},leaseGate}={}){
+ if(!Number.isSafeInteger(receiptAttestationVersion)||receiptAttestationVersion<1)
+  throw TypeError('NOTICE_ATTESTATION_VERSION_INVALID');
  if(!Buffer.isBuffer(receiptAttestationKey)||receiptAttestationKey.length!==32)
   throw TypeError('NOTICE_ATTESTATION_KEY_REQUIRED');
  if(!receiptPool||typeof receiptPool.connect!=='function')
@@ -255,8 +257,8 @@ export function createIsolatedPostgresRevocationNotices({pool,receiptPool,receip
     const digest=sha(payload);
     const serialized=JSON.stringify(payload);
     const attestation=createHmac('sha256',receiptAttestationKey).update(serialized).digest('hex');
-    await c.query('SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)',
-     [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,serialized,attestation]);
+    await c.query('SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text,$10::integer)',
+     [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,serialized,attestation,receiptAttestationVersion]);
     await beforeReceiptCommit({notice_id:input.notice_id,duplicate:false});
     await checkProof(input);
     await checkLease(input);
