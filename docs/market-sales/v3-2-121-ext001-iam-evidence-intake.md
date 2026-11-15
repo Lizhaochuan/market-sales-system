@@ -92,3 +92,11 @@ EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`
 - 任一来源在模拟 SQL 返回后被撤权、固定版本文件被替换、镜像不可用或内容改变时均 fail closed，不返回成功响应。负向测试保留 SQL 已记录合成审计事件的事实，禁止把后核验失败冒充数据库自动回滚。
 - 此检查仍非跨系统原子事务；后核验与最终输出之间也有竞态窗口。没有真实 IAM、真实 WORM 存储或生产撤权证明。成功只表示注入的 CI fixture 一致。
 - EXT-001 继续 UNVERIFIED、production_evidence_collected=false、hold_active=true、release_eligible=false；PR #129 Draft / CI-only，不合并、不部署、不写真实业务。
+
+
+## EXT-001 异步签发的时钟防回退与过期再校验（CI-only）
+
+- 双来源签发入口现在必须传入可多次读取的模拟 clock；初始读取、每轮文件读取、SQL attester 调用前后及最终出参均核查同一时钟不得回退。测试用无时钟、失效及回退值全部 fail closed。
+- 对证据 envelope 和两个来源签署的 manifest 在每轮异步读取后重查有效期。SQL 返回后若来源或证据过期，不得返回合成成功结果；如隔离 SQL 已产生取证行，保留不可修改记录，不虚构回滚。
+- 此时钟是 CI 注入的逻辑值，不是生产可信授时；进程可控时间源与数据库 clock_timestamp() 并非跨系统原子一致。该加固不能解决最终校验之后的撤权/过期竞态，也不提供真实外部 IAM、WORM 或签署认证。
+- EXT-001 保持 UNVERIFIED；证据仍 NOT_COLLECTED / NOT_REVIEWED / NOT_SIGNED。HOLD、release_eligible=false、PR #129 Draft、CI-only、不合并、不部署。
