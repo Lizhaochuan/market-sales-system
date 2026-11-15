@@ -60,8 +60,9 @@ test.before(async()=>{
  await admin.query("CREATE ROLE v106_key_issuer LOGIN PASSWORD 'test_only_key_issuer'");
  await admin.query("CREATE ROLE v106_security_event_writer LOGIN PASSWORD 'test_only_security_events'");
  await admin.query("CREATE ROLE v106_closeout_writer LOGIN PASSWORD 'test_only_closeout'");
+ await admin.query("CREATE ROLE v106_state_reader LOGIN PASSWORD 'test_only_state_reader'");
  await admin.query('CREATE SCHEMA v106_test');
- await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader,v106_key_issuer,v106_security_event_writer,v106_closeout_writer');
+ await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader,v106_key_issuer,v106_security_event_writer,v106_closeout_writer,v106_state_reader');
  await admin.query(`CREATE TABLE v106_test.fixture_incident_gap_manifest_heads(
  organization_id uuid,incident_id uuid,sequence integer,event_digest text,hold_active boolean,
  PRIMARY KEY(organization_id,incident_id))`);
@@ -1200,4 +1201,84 @@ test('transaction rollback, lost connection and concurrent exact retries cannot 
  const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
  assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+});
+
+test('fresh processes rebuild identical committed UAT state and detect corrupted historical versions',async()=>{
+ const failure='00000000-0000-4000-8000-0000000000b1';
+ const sql='SELECT * FROM v106_test.fixture_rebuild_uat_state($1::uuid,$2::uuid)';
+ const openReader=async()=>{
+  const client=new pg.Client({host,database:'v106_isolated',user:'v106_state_reader',password:'test_only_state_reader'});
+  await client.connect();
+  return client;
+ };
+ const first=await openReader();
+ let baseline;
+ try{
+  baseline=(await first.query(sql,[a,failure])).rows[0];
+  assert.deepEqual([baseline.version_count,baseline.latest_version,baseline.latest_accepted_reviews,baseline.history_complete,
+   baseline.reviews_consistent,baseline.domains_held,baseline.emergency_stop_active,baseline.status,
+   baseline.hold_active,baseline.release_eligible],[5,5,0,true,true,3,true,'REBUILT_STILL_HOLD',true,false]);
+  await assert.rejects(first.query('SELECT * FROM v106_test.fixture_uat_remediations'),/permission denied/);
+  await assert.rejects(first.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false'),/permission denied/);
+  await assert.rejects(first.query(sql,[b,failure]),/V121_REBUILD_ROLE_SCOPE_DENIED/);
+ }finally{await first.end();}
+ const second=await openReader();
+ try{
+  const rebuilt=(await second.query(sql,[a,failure])).rows[0];
+  assert.deepEqual(rebuilt,baseline);
+  await assert.rejects(second.query(sql,[a,'00000000-0000-4000-8000-0000000000ee']),/V121_REBUILD_FAILURE_UNKNOWN/);
+ }finally{await second.end();}
+ await assert.rejects(closeoutWriter.query(sql,[a,failure]),/permission denied/);
+ // CI superuser simulates storage damage; audit data stays untouched outside fixture.
+ const versionRow='00000000-0000-4000-8000-0000000000b4';
+ await admin.query('ALTER TABLE v106_test.fixture_uat_remediations DISABLE TRIGGER fixture_uat_remediations_immutable');
+ try{
+  await admin.query('UPDATE v106_test.fixture_uat_remediations SET remediation_version=7 WHERE organization_id=$1 AND remediation_id=$2',[a,versionRow]);
+  const damagedReader=await openReader();
+  try{
+   const damaged=(await damagedReader.query(sql,[a,failure])).rows[0];
+   assert.equal(damaged.history_complete,false);
+   assert.equal(damaged.status,'HISTORY_INCOMPLETE');
+   assert.equal(damaged.release_eligible,false);
+  }finally{await damagedReader.end();}
+ }finally{
+  await admin.query('UPDATE v106_test.fixture_uat_remediations SET remediation_version=3 WHERE organization_id=$1 AND remediation_id=$2',[a,versionRow]);
+  await admin.query('ALTER TABLE v106_test.fixture_uat_remediations ENABLE TRIGGER fixture_uat_remediations_immutable');
+ }
+ const reviewRemediation='00000000-0000-4000-8000-0000000000b4';
+ const original=(await admin.query("SELECT review_evidence_digest FROM v106_test.fixture_uat_remediation_reviews WHERE organization_id=$1 AND remediation_id=$2 AND reviewer_domain='SECURITY'",[a,reviewRemediation])).rows[0].review_evidence_digest;
+ await admin.query('ALTER TABLE v106_test.fixture_uat_remediation_reviews DISABLE TRIGGER fixture_uat_remediation_reviews_immutable');
+ try{
+  await admin.query("UPDATE v106_test.fixture_uat_remediation_reviews SET review_evidence_digest=$3 WHERE organization_id=$1 AND remediation_id=$2 AND reviewer_domain='SECURITY'",[a,reviewRemediation,'e'.repeat(64)]);
+  const reader=await openReader();
+  try{
+   const damaged=(await reader.query(sql,[a,failure])).rows[0];
+   assert.equal(damaged.reviews_consistent,false);
+   assert.equal(damaged.status,'REVIEW_INTEGRITY_INVALID');
+   assert.equal(damaged.release_eligible,false);
+  }finally{await reader.end();}
+ }finally{
+  await admin.query("UPDATE v106_test.fixture_uat_remediation_reviews SET review_evidence_digest=$3 WHERE organization_id=$1 AND remediation_id=$2 AND reviewer_domain='SECURITY'",[a,reviewRemediation,original]);
+  await admin.query('ALTER TABLE v106_test.fixture_uat_remediation_reviews ENABLE TRIGGER fixture_uat_remediation_reviews_immutable');
+ }
+ await admin.query('ALTER TABLE v106_test.fixture_cross_module_holds DISABLE TRIGGER fixture_hold_immutable');
+ try{
+  await admin.query("DELETE FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 AND module_name='ACADEMIC'",[a,incident]);
+  const reader=await openReader();
+  try{
+   const damaged=(await reader.query(sql,[a,failure])).rows[0];
+   assert.equal(damaged.domains_held,2);
+   assert.equal(damaged.status,'CROSS_MODULE_HOLD_INCOMPLETE');
+  }finally{await reader.end();}
+ }finally{
+  await admin.query("INSERT INTO v106_test.fixture_cross_module_holds(organization_id,incident_id,module_name) VALUES($1,$2,'ACADEMIC')",[a,incident]);
+  await admin.query('ALTER TABLE v106_test.fixture_cross_module_holds ENABLE TRIGGER fixture_hold_immutable');
+ }
+ const finalReader=await openReader();
+ try{
+  const restored=(await finalReader.query(sql,[a,failure])).rows[0];
+  assert.deepEqual(restored,baseline);
+  assert.equal(restored.hold_active,true);
+  assert.equal(restored.release_eligible,false);
+ }finally{await finalReader.end();}
 });
