@@ -252,3 +252,6 @@ export function createIsolatedPostgresIncidentGapManifest({
  }
  return Object.freeze({captureAndAppend,capture:captureOnly,head,event});
 }
+
+// V120 reuses the exact V119 row/chain verifier inside the SAME SQL transaction.
+export {capture as captureIsolatedIncidentGapSnapshot};
