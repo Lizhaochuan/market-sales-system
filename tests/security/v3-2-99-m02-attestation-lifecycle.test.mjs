@@ -85,7 +85,9 @@ function fixture(){
  }
  const revoke=(old,actor_id='sales_auditor',
   nonce='v99-revoke-admin-nonce-00001',reason_code='administrative_retraction')=>
-  lifecycle.revoke({reference:ref,...old,reason_code,actor_id,idempotency_key:nonce});
+  lifecycle.revoke({reference:ref,snapshot_digest:old.snapshot_digest,
+   acknowledgement_digest:old.acknowledgement_digest,
+   reason_code,actor_id,idempotency_key:nonce});
  const resign=(old,newer,actor_id='sales_auditor',
   nonce='v99-resign-link-nonce-00001')=>
   lifecycle.recordResign({reference:ref,old_snapshot_digest:old.snapshot_digest,
@@ -93,7 +95,9 @@ function fixture(){
    new_snapshot_digest:newer.snapshot_digest,
    new_acknowledgement_digest:newer.acknowledgement_digest,
    actor_id,idempotency_key:nonce});
- const inspect=x=>lifecycle.inspect({reference:ref,...x});
+ const inspect=x=>lifecycle.inspect({reference:ref,
+  snapshot_digest:x.snapshot_digest,
+  acknowledgement_digest:x.acknowledgement_digest});
  return {lifecycle,attestation,finalReview,ref,scope,sign,revoke,resign,inspect,
   setRevision:x=>revision=x,setTime:x=>time=x,
   setConclusion:x=>conclusionCurrent=x,revokeActor:x=>inactive.add(x)};
