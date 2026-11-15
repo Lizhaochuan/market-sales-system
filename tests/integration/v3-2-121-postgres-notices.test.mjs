@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {createHash,generateKeyPairSync,sign} from 'node:crypto';
+import {createHash,createHmac,randomBytes,generateKeyPairSync,sign} from 'node:crypto';
 import {encodeFixtureReceiptProof} from '../../src/cross-module-fixture-receipt-proof.mjs';
 import {createFixtureLeaseGate,encodeFixtureLease} from '../../src/cross-module-fixture-authority-lease.mjs';
 import pg from 'pg';
@@ -17,6 +17,8 @@ const host=process.env.PGHOST||'127.0.0.1';
 const admin=new pg.Pool({host,database:'v106_isolated',user:'postgres',password:'postgres'});
 const writer=new pg.Pool({host,database:'v106_isolated',user:'v106_writer_a',password:'test_only_a'});
 const receiptWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_receipt_writer_a',password:'test_only_receipt_a'});
+const receiptAttestationKey=randomBytes(32);
+const hmacReceipt=value=>createHmac('sha256',receiptAttestationKey).update(value).digest('hex');
 const keyPair=generateKeyPairSync('ed25519');
 const fixtureLeaseKeys=generateKeyPairSync('ed25519');
 const fixtureSigner='00000000-0000-4000-8000-000000000081';
@@ -66,6 +68,7 @@ test.before(async()=>{
   await admin.query(`CREATE POLICY ${name}_b ON v106_test.${name} FOR SELECT TO v106_writer_b USING(organization_id='${b}'::uuid)`);
  }
  await admin.query(await readFile(new URL('../fixtures/v3-2-121-m02-revocation-notices.sql',import.meta.url),'utf8'));
+ await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,attestation_key) VALUES($1,$2)',[a,receiptAttestationKey]);
  const m={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),status:'FIXTURE_EXPORT'};
  const md=hash(m);
  const r={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),target_manifest_sequence:1,
@@ -77,7 +80,7 @@ test.before(async()=>{
  await admin.query('INSERT INTO v106_test.fixture_manifest_revocation_heads VALUES($1,$2,1,$3,true)',[a,incident,rd]);
  await admin.query('INSERT INTO v106_test.fixture_revocation_recipients VALUES($1,$2,$3),($1,$2,$4)',[a,incident,recipient,extra]);
  input={organization_id:a,incident_id:incident,recipient_id:recipient,export_version:1,manifest_digest:md,revocation_event_digest:rd,epoch:1};
- ledger=createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:proofAuthority});
+ ledger=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:proofAuthority});
  service=createIsolatedRevocationNoticeService({ledger,clock:()=>100});
 });
 test.after(async()=>{await receiptWriter.end();await writer.end();await admin.end();});
@@ -190,8 +193,8 @@ test('definer admission rollback leaves no partial receipt',async()=>{
   receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),
   proof:value.proof,lease:value.lease};
  const json=JSON.stringify(payload),digest=hash(payload);
- const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),digest,json];
- const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text)';
+ const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),digest,json,hmacReceipt(json)];
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)';
  const client=await receiptWriter.connect();
  try{
   await client.query('BEGIN');
@@ -225,7 +228,7 @@ test('invalid signer snapshot blocks both initial receipt and replay',async()=>{
  const data={organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT'};
  const signed=signedReceipt(data);
  assert.equal((await signed).hold_active,true);
- const invalid= createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:3,active:false})});
+ const invalid= createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:3,active:false})});
  const statement={organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',signer_id:'00000000-0000-4000-8000-000000000081',authority_epoch:4,revocation_watermark:2,issued_at_ms:100,expires_at_ms:500};
  const signature_b64=sign(null,encodeFixtureReceiptProof(statement),keyPair.privateKey).toString('base64');
  await assert.rejects(invalid.appendNegativeReceipt({...data,proof:{statement,signature_b64},lease:makeFixtureLease(q.notice_id)}),{code:'FIXTURE_RECEIPT_AUTHORITY_STALE'});
@@ -243,7 +246,7 @@ function fixtureSignedInput(q){
 test('revocation between insert and SQL commit rolls back receipt',async()=>{
  const q=await service.enqueue({...input,epoch:40});
  let active=true;
- const adapter=createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,
+ const adapter=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,
   receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:2,active}),
   beforeReceiptCommit:async()=>{active=false;}});
@@ -254,7 +257,7 @@ test('revocation between insert and SQL commit rolls back receipt',async()=>{
 test('revocation immediately after commit returns denial but retains immutable evidence',async()=>{
  const q=await service.enqueue({...input,epoch:41});
  let active=true;
- const adapter=createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,
+ const adapter=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,
   receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:2,active}),
   afterReceiptCommit:async()=>{active=false;}});
@@ -267,7 +270,7 @@ test('revocation immediately after commit returns denial but retains immutable e
 test('authority unavailable at commit checkpoint is denied without persisted receipt',async()=>{
  const q=await service.enqueue({...input,epoch:42});
  let available=true;
- const adapter=createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,
+ const adapter=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,
   receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:async()=>{
    if(!available)throw Error('fixture authority unavailable');
@@ -284,7 +287,7 @@ test('durable signer watermark blocks old signed proof after adapter restart',as
  const value=fixtureSignedInput(q);
  const elevated={...value.proof.statement,revocation_watermark:3};
  const proof={statement:elevated,signature_b64:sign(null,encodeFixtureReceiptProof(elevated),keyPair.privateKey).toString('base64')};
- const higher=createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,leaseGate:fixtureGate({revocation_watermark:3}),pool:writer,
+ const higher=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate({revocation_watermark:3}),pool:writer,
   receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:3,active:true})});
  const first=await higher.appendNegativeReceipt({...value,proof,lease:makeFixtureLease(value.notice_id,4,3)});
@@ -293,7 +296,7 @@ test('durable signer watermark blocks old signed proof after adapter restart',as
  assert.equal(row.rows[0].revocation_watermark,3);
  const q2=await service.enqueue({...input,epoch:52});
  const old=fixtureSignedInput(q2);
- const restarted=createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,
+ const restarted=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,
   receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:2,active:true})});
  await assert.rejects(restarted.appendNegativeReceipt(old),{code:'NOTICE_SIGNER_WATERMARK_REGRESSION'});
@@ -308,7 +311,7 @@ test('SQL trigger prevents direct watermark regression and tenant deletion',asyn
 });
 
 test('receipt adapter refuses absent lease verifier even with signed proof',async()=>{
- assert.throws(()=>createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,pool:writer,
+ assert.throws(()=>createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,pool:writer,
   receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:proofAuthority}),/LEASE_GATE_REQUIRED/);
 });
@@ -329,7 +332,7 @@ test('leased SQL receipt commits durable sequence and blocks replay after adapte
    receipt_state:'NEGATIVE_RECEIPT',proof,
    lease:{lease,signature_b64:sign(null,encodeFixtureLease(lease),leaseKeys.privateKey).toString('base64')}};
  };
- const adapter=()=>createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,pool:writer,
+ const adapter=()=>createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,pool:writer,
   receiptPublicKey:keyPair.publicKey,receiptClock:()=>now,
   receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:2,active:true}),
   leaseGate:createFixtureLeaseGate({publicKey:leaseKeys.publicKey,clock:()=>now,
@@ -371,7 +374,7 @@ function issuedFixtureReceipt(notice_id,signer_id,sequence,issued_at_ms=100,expi
   lease:{lease,signature_b64:sign(null,encodeFixtureLease(lease),fixtureLeaseKeys.privateKey).toString('base64')}};
 }
 function isolatedLeaseWriter(sequence,now=150,options={}){
- return createIsolatedPostgresRevocationNotices({receiptPool:receiptWriter,pool:writer,receiptPublicKey:keyPair.publicKey,
+ return createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,pool:writer,receiptPublicKey:keyPair.publicKey,
   receiptClock:()=>now,receiptProofAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2}),
   leaseGate:createFixtureLeaseGate({publicKey:fixtureLeaseKeys.publicKey,clock:()=>now,
    loadAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2,lease_sequence:sequence})}),
@@ -438,7 +441,7 @@ test('ordinary writer role cannot INSERT signed receipt evidence directly',async
 });
 test('receipt adapter cannot accept ordinary writer as privileged receipt connection',async()=>{
  const q=await service.enqueue({...input,epoch:82});
- const incorrectlyWired=createIsolatedPostgresRevocationNotices({receiptPool:writer,pool:writer,
+ const incorrectlyWired=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:writer,pool:writer,
   leaseGate:fixtureGate(),receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:proofAuthority});
  await assert.rejects(incorrectlyWired.appendNegativeReceipt(fixtureSignedInput(q)),{code:'NOTICE_SQL_CONTEXT_UNTRUSTED'});
@@ -453,12 +456,38 @@ test('dedicated receipt role cannot INSERT table directly',async()=>{
 });
 test('definer receipt gate rejects mismatched digest and unsigned envelope',async()=>{
  const q=await service.enqueue({...input,epoch:84});
- const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text)';
- const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}'];
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)';
+ const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}',hmacReceipt('{}')];
  await assert.rejects(receiptWriter.query(sql,params),/V121_RECEIPT_GATE_INVALID/);
  const forged={organization_id:a,incident_id:incident,notice_id:q.notice_id,
   receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64)};
- await assert.rejects(receiptWriter.query(sql,[...params.slice(0,6),hash(forged),JSON.stringify(forged)]),/V121_RECEIPT_GATE_ENVELOPE/);
+ await assert.rejects(receiptWriter.query(sql,[...params.slice(0,6),hash(forged),JSON.stringify(forged),hmacReceipt(JSON.stringify(forged))]),/V121_RECEIPT_GATE_ENVELOPE/);
  const after=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
  assert.equal(after.rows[0].n,0);
+});
+
+test('receipt role cannot read attestation secret or forge structurally complete receipt',async()=>{
+ const q=await service.enqueue({...input,epoch:85});
+ await assert.rejects(receiptWriter.query('SELECT attestation_key FROM v106_test.fixture_receipt_attestation_secrets'),/permission denied/);
+ const value=fixtureSignedInput(q);
+ const payload={organization_id:a,incident_id:incident,notice_id:q.notice_id,
+  receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),
+  proof:value.proof,lease:value.lease};
+ const raw=JSON.stringify(payload);
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)';
+ const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),hash(payload),raw,'0'.repeat(64)];
+ await assert.rejects(receiptWriter.query(sql,params),/V121_RECEIPT_ATTESTATION_REJECTED/);
+ const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(count.rows[0].n,0);
+});
+test('wrong MAC fails without storing receipt or signer watermark',async()=>{
+ const q=await service.enqueue({...input,epoch:86});
+ const receipt=issuedFixtureReceipt(q.notice_id,'00000000-0000-4000-8000-000000000086',9);
+ const p={organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,
+  receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),proof:receipt.proof,lease:receipt.lease};
+ const raw=JSON.stringify(p);
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)';
+ await assert.rejects(receiptWriter.query(sql,[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),hash(p),raw,'f'.repeat(64)]),/V121_RECEIPT_ATTESTATION_REJECTED/);
+ const row=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+ assert.equal(row.rows[0].n,0);
 });
