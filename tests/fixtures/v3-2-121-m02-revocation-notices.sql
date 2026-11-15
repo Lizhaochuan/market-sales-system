@@ -288,17 +288,45 @@ CREATE TRIGGER fixture_recovery_immutable BEFORE UPDATE OR DELETE
 
 -- Separate fixture secret held by the test approval verifier, not the issuer role.
 CREATE TABLE v106_test.fixture_recovery_approval_attestation (
- organization_id uuid PRIMARY KEY,
- approval_key bytea NOT NULL CHECK(octet_length(approval_key)=32)
+ organization_id uuid NOT NULL,
+ attestation_version integer NOT NULL CHECK(attestation_version>=1),
+ approval_key bytea NOT NULL CHECK(octet_length(approval_key)=32),
+ active boolean NOT NULL DEFAULT false,
+ PRIMARY KEY(organization_id,attestation_version)
 );
 REVOKE ALL ON v106_test.fixture_recovery_approval_attestation FROM PUBLIC;
+CREATE UNIQUE INDEX fixture_one_active_recovery_approval_key
+ ON v106_test.fixture_recovery_approval_attestation(organization_id) WHERE active IS TRUE;
+CREATE FUNCTION v106_test.fixture_approval_key_no_reactivation() RETURNS trigger
+LANGUAGE plpgsql AS $approval_immutable$
+BEGIN
+ IF NEW.organization_id<>OLD.organization_id OR
+    NEW.attestation_version<>OLD.attestation_version OR
+    NEW.approval_key<>OLD.approval_key OR
+    (OLD.active IS FALSE AND NEW.active IS TRUE) THEN
+  RAISE EXCEPTION 'V121_APPROVAL_KEY_IMMUTABLE';
+ END IF;
+ RETURN NEW;
+END;
+$approval_immutable$;
+CREATE TRIGGER fixture_approval_key_immutable BEFORE UPDATE
+ ON v106_test.fixture_recovery_approval_attestation FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_approval_key_no_reactivation();
+-- Disposable test-only clock. A real trusted service must use its own DB time.
+CREATE TABLE v106_test.fixture_recovery_clock (
+ singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton IS TRUE),
+ now_ms bigint NOT NULL CHECK(now_ms>=1)
+);
+INSERT INTO v106_test.fixture_recovery_clock(singleton,now_ms) VALUES(true,150);
+REVOKE ALL ON v106_test.fixture_recovery_clock FROM PUBLIC;
 
 -- SECURITY DEFINER fixture-only issuance gateway.
 -- MAC is signed by disposable verifier after JS signature checks; DB checks MAC independently.
 CREATE FUNCTION v106_test.fixture_issue_recovery_key(
  p_organization uuid,p_incident uuid,p_request uuid,p_digest char(64),
  p_version integer,p_revocation_digest char(64),
- p_audit_id uuid,p_security_id uuid,p_key bytea,p_approval_mac text)
+ p_audit_id uuid,p_security_id uuid,p_key bytea,p_approval_mac text,
+ p_attestation_version integer,p_issued_at_ms bigint,p_expires_at_ms bigint)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,v106_test AS $issue_gateway$
 DECLARE predecessor record;
@@ -306,6 +334,7 @@ DECLARE audit_event record;
 DECLARE latest integer;
 DECLARE approval_secret bytea;
 DECLARE approval_envelope text;
+DECLARE now_ms bigint;
 BEGIN
  IF session_user <> 'v106_key_issuer' OR
     p_organization <> '11111111-1111-4111-8111-111111111111'::uuid THEN
@@ -336,10 +365,22 @@ BEGIN
   audit_event.event_kind||'|'||audit_event.actor,'UTF8')),'hex') THEN
   RAISE EXCEPTION 'RECOVERY_AUDIT_TAMPERED';
  END IF;
+ IF p_attestation_version IS NULL OR p_attestation_version<1 THEN
+  RAISE EXCEPTION 'V121_APPROVAL_VERSION_INVALID';
+ END IF;
+ SELECT now_ms INTO now_ms FROM v106_test.fixture_recovery_clock WHERE singleton=true;
+ IF now_ms IS NULL OR p_issued_at_ms IS NULL OR p_expires_at_ms IS NULL OR
+   p_issued_at_ms<1 OR p_expires_at_ms<=p_issued_at_ms OR
+   p_expires_at_ms-p_issued_at_ms>30000 OR
+   now_ms<p_issued_at_ms OR now_ms>=p_expires_at_ms THEN
+  RAISE EXCEPTION 'V121_RECOVERY_ATTESTATION_EXPIRED';
+ END IF;
  SELECT approval_key INTO approval_secret
  FROM v106_test.fixture_recovery_approval_attestation
- WHERE organization_id=p_organization;
- approval_envelope:='v121-recovery-attestation-v1|'||
+ WHERE organization_id=p_organization AND attestation_version=p_attestation_version
+  AND active IS TRUE;
+ approval_envelope:='v121-recovery-attestation-v2|'||
+  p_attestation_version::text||'|'||p_issued_at_ms::text||'|'||p_expires_at_ms::text||'|'||
   p_organization::text||'|'||p_incident::text||'|'||p_request::text||'|'||
   trim(p_digest)||'|'||p_version::text||'|'||trim(p_revocation_digest)||'|'||
   p_audit_id::text||'|'||p_security_id::text||'|'||
@@ -369,6 +410,6 @@ BEGIN
 END;
 $issue_gateway$;
 REVOKE ALL ON FUNCTION v106_test.fixture_issue_recovery_key(
- uuid,uuid,uuid,char(64),integer,char(64),uuid,uuid,bytea,text) FROM PUBLIC;
+ uuid,uuid,uuid,char(64),integer,char(64),uuid,uuid,bytea,text,integer,bigint,bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v106_test.fixture_issue_recovery_key(
- uuid,uuid,uuid,char(64),integer,char(64),uuid,uuid,bytea,text) TO v106_key_issuer;
+ uuid,uuid,uuid,char(64),integer,char(64),uuid,uuid,bytea,text,integer,bigint,bigint) TO v106_key_issuer;
