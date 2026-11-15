@@ -1,0 +1,209 @@
+{
+  "schema_version": "v3.2-115-m02-review-invalidation-permanent-hold-v1",
+  "module": "M02",
+  "scope": "CI_ONLY_REVIEW_INVALIDATION_PERMANENT_HOLD",
+  "parent_pr": 121,
+  "parent_head_sha": "4473ad201fed5e2001df49d3169056ee039179fa",
+  "parent_ci": [
+    {
+      "id": 43665601173,
+      "conclusion": "success"
+    },
+    {
+      "id": 43665601194,
+      "conclusion": "success"
+    }
+  ],
+  "implementation": "src/cross-module-reviewer-invalidation-hold.mjs",
+  "integration_tests": "tests/integration/v3-2-115-m02-review-invalidation-hold.test.mjs",
+  "disposable_sql": "tests/fixtures/v3-2-115-m02-review-hold.sql",
+  "disposable_sql_helper": "tests/helpers/v3-2-115-m02-postgres-review-hold.mjs",
+  "disposable_setup": "scripts/v3-2-115-setup-review-hold.mjs",
+  "upstream": {
+    "evidence_intake": "V3.2-112 quarantined untrusted metadata",
+    "pending_assignment": "V3.2-113 immutable original fixture review assignment",
+    "reviewer_lifecycle": "V3.2-114 append-only recusal/replacement fixture events",
+    "signed_status": "Separate pinned fixture Ed25519 reviewer status source",
+    "genuine_business_evidence_verified": false,
+    "reviewer_real_employment_authority": false
+  },
+  "hold_contract": {
+    "no_release_operation_implemented": true,
+    "no_positive_approval_result_implemented": true,
+    "hold_active_on_every_response": true,
+    "hold_status": "HOLD_ACTIVE",
+    "immutable_event_state": "HOLD_PENDING_EXTERNAL_AUTHORITY",
+    "signed_fixture_status_version": "v3.2-115-ci-reviewer-status-v1",
+    "scope": [
+      "organization_id",
+      "incident_id",
+      "student_id"
+    ],
+    "invalidation_triggers": [
+      "EVIDENCE_UPDATED",
+      "REVIEWER_CHANGED",
+      "REVIEWER_UNASSIGNED",
+      "REVIEWER_REVOKED",
+      "SOURCE_PROOF_UNVERIFIED"
+    ],
+    "source_status_invalid_signatures_mapped_to_unverified": true,
+    "no_claim_of_reliable_revocation_when_source_unavailable": true,
+    "recorded_event_contains_only_metadata_and_digest": true,
+    "cause_digest_prevents_duplicate_same_evidence": true,
+    "evidence_chain_and_lifecycle_latest_watermarks_checked": true,
+    "permanent_sql_hold_flag": true,
+    "duplicate_events_are_fail_closed": true,
+    "after_commit_source_revision_change_detection": true,
+    "last_read_after_postcommit_race_still_open": true,
+    "lack_of_record_is_not_release": true
+  },
+  "database": {
+    "engine": "ephemeral PostgreSQL 16",
+    "database": "v106_isolated",
+    "schema": "v106_test",
+    "env_guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "event_table": "fixture_review_hold_events",
+    "head_table": "fixture_review_hold_heads",
+    "tenant_row_level_security": "FORCE RLS",
+    "append_only_events_for_restricted_test_roles": true,
+    "hold_flag_check_constraint": "hold_active IS TRUE",
+    "test_role_hold_flag_update_granted": false,
+    "one_scope_head_and_unique_cause": true,
+    "serializable_transaction": true,
+    "validated_in_transaction": [
+      "V113 immutable assignment digest",
+      "V112 current evidence intake head",
+      "V114 current reviewer lifecycle head",
+      "prior hold event chain digest",
+      "scope and cause digest"
+    ],
+    "real_business_order_payment_lesson_writes": false,
+    "production_migration_created": false,
+    "production_database_connected": false,
+    "production_039_added": false,
+    "enterprise_crash_recovery_verified": false
+  },
+  "cases": [
+    {
+      "id": "HOLD-01",
+      "expected": "No persisted hold yet still cannot authorize business"
+    },
+    {
+      "id": "HOLD-02",
+      "expected": "Verified signed revocation persists HOLD and is permanently active"
+    },
+    {
+      "id": "HOLD-03",
+      "expected": "Identity source outage results in unverified proof hold"
+    },
+    {
+      "id": "HOLD-04",
+      "expected": "Forged signed source, wrong tenant or expiry holds without claiming true revocation"
+    },
+    {
+      "id": "HOLD-05",
+      "expected": "New finance evidence after assignment writes a hold, preserves original reviewer"
+    },
+    {
+      "id": "HOLD-06",
+      "expected": "Existing recusal with no reviewer triggers hold without rewriting original assignment"
+    },
+    {
+      "id": "HOLD-07",
+      "expected": "Replay same revocation does not create duplicate audit event"
+    },
+    {
+      "id": "HOLD-08",
+      "expected": "New independent reason extends immutable hold event hash chain"
+    },
+    {
+      "id": "HOLD-09",
+      "expected": "Precommit fault rolls back both hold event and head"
+    },
+    {
+      "id": "HOLD-10",
+      "expected": "Lost postcommit acknowledgement leaves durable hold but no positive result"
+    },
+    {
+      "id": "HOLD-11",
+      "expected": "Postcommit revocation version change detected; hold preserved"
+    },
+    {
+      "id": "HOLD-12",
+      "expected": "Independent SQL writers with same cause cannot both commit"
+    },
+    {
+      "id": "HOLD-13",
+      "expected": "Wrong tenant SQL test role fails closed without event write"
+    },
+    {
+      "id": "HOLD-14",
+      "expected": "Restricted SQL role cannot release hold or modify events/payment table"
+    },
+    {
+      "id": "HOLD-15",
+      "expected": "Caller-controlled release and malformed scopes rejected"
+    },
+    {
+      "id": "HOLD-16",
+      "expected": "Tampered head digest cannot be used to append or claim approval"
+    },
+    {
+      "id": "HOLD-17",
+      "expected": "Original V112/V113 history remains unchanged"
+    }
+  ],
+  "real_external_approvals": {
+    "sales_owner": "UNASSIGNED",
+    "finance_owner": "UNASSIGNED",
+    "academic_owner": "UNASSIGNED",
+    "security_identity_owner": "UNASSIGNED",
+    "integration_owner": "UNASSIGNED",
+    "database_owner": "UNASSIGNED",
+    "real_independent_identity_reviewer_verified": false,
+    "real_finance_signature_verified": false,
+    "real_academic_signature_verified": false,
+    "real_three_party_acceptance_verified": false,
+    "real_atomic_handoff_receipt_verified": false,
+    "production_release_protocol_implemented": false
+  },
+  "external_contract_status": "proposed-unimplemented",
+  "sixteen_external_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "six_external_authority_requirements": "UNVERIFIED",
+  "post_last_read_identity_revocation_race_closed": false,
+  "hard_denials": {
+    "external_authority_verified": false,
+    "external_reviewer_appointed": false,
+    "external_owner_verified": false,
+    "real_evidence_verified": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "production_integration_allowed": false,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "student_primary": true,
+  "family_only_for_actual_siblings": true,
+  "original_order_payment_saleevent_lesson_compensation_preserved": true,
+  "historical_migration_range_from_upstream_specs": "001-038",
+  "production_migration_039_created": false,
+  "edu_management_system_modified": false,
+  "main_crm_runtime_and_documents_modified": false,
+  "independent_market_sales_documentation": true,
+  "known_gaps": [
+    "Observation is invoked in CI: no production event listener, guaranteed delivery, scheduled polling or real automatic pausing workflow exists",
+    "Fixture reviewer-status signers and original provenance are controlled by test code, not real IAM or HR",
+    "Local SQL head cannot atomically freeze the external sales, finance or academic origin sources",
+    "Source changes can occur after final postcommit observation",
+    "Test role can update mutable latest head and administrators remain in trust base; no independent tamper-proof production audit",
+    "A hold audit row is only a recorded CI fact, not proof that real production workflows have actually stopped",
+    "No real roles or six independent business/identity/transaction approvals verified",
+    "No enterprise PostgreSQL, browser/Chromium or official UAT completed"
+  ],
+  "next_stage": "V3.2-116 isolated outbox delivery and externally authenticated invalidation events; no release"
+}
