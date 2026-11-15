@@ -1830,3 +1830,120 @@ test('concurrent checkpoint signer competition and key revocation serialize with
   await ledger.end();
  }
 });
+
+
+test('attester abuse controls: one active ticket, expiry, service outage and fail-closed replay',async()=>{
+ const failure='00000000-0000-4000-8000-0000000000b1';
+ const signer='00000000-0000-4000-8000-0000000000ac';
+ const remediation12='00000000-0000-4000-8000-0000000000be';
+ const kp=generateKeyPairSync('ed25519');
+ const ledgerAdmin=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
+ const businessReader=new pg.Client({host,database:'v106_isolated',user:'v106_state_reader',password:'test_only_state_reader'});
+ const writer=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_writer',password:'test_only_anchor_writer'});
+ const attester=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_attester',password:'test_only_anchor_attester'});
+ const reader=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_anchor_reader',password:'test_only_anchor_reader'});
+ const admissionSql='SELECT v121_anchor.attest_verified_checkpoint($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::uuid,$6::jsonb,$7::text,$8::char(64))';
+ const appendSql='SELECT v121_anchor.append_checkpoint($1::uuid,$2::uuid,$3::integer,$4::uuid,$5::jsonb,$6::text,$7::char(64),$8::uuid)';
+ const evidence=createHash('sha256').update('v121-attester-timeout-remediation').digest('hex');
+ const note=createHash('sha256').update('v121-attester-timeout-note').digest('hex');
+ try{
+  await Promise.all([businessReader.connect(),writer.connect(),attester.connect(),reader.connect()]);
+  await ledgerAdmin.query(
+   'INSERT INTO v121_anchor.signers(organization_id,signer_id,key_version,public_key_der) VALUES($1,$2,$3,$4)',
+   [a,signer,5,kp.publicKey.export({type:'spki',format:'der'})]
+  );
+  await ledgerAdmin.query(
+   'INSERT INTO v121_anchor.key_events(organization_id,signer_id,event_sequence,event_kind,event_reason_digest) VALUES($1,$2,$3,$4,$5)',
+   [a,signer,1,'REGISTERED',note]
+  );
+  await closeoutWriter.query(
+   'SELECT v106_test.fixture_submit_uat_remediation($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::char(64),$6::uuid,$7::char(64))',
+   [a,failure,remediation12,12,evidence,'00000000-0000-4000-8000-000000000016',note]
+  );
+  const observed=(await businessReader.query('SELECT * FROM v106_test.fixture_observe_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+  await admin.query(
+   'INSERT INTO v106_test.fixture_uat_state_snapshots(organization_id,failure_id,snapshot_sequence,remediation_version,accepted_review_roles,observed_digest) VALUES($1,$2,$3,$4,$5,$6)',
+   [a,failure,9,12,observed.accepted_review_roles,observed.observed_digest]
+  );
+  const rebuilt=(await businessReader.query('SELECT * FROM v106_test.fixture_rebuild_uat_state($1::uuid,$2::uuid)',[a,failure])).rows[0];
+  const status=(await businessReader.query('SELECT * FROM v106_test.fixture_verify_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+  const current={
+   organization_id:a,failure_id:failure,incident_id:rebuilt.incident_scope,event_id:rebuilt.event_scope,
+   snapshot_sequence:status.snapshot_sequence,remediation_version:observed.remediation_version,
+   accepted_review_roles:observed.accepted_review_roles,observed_digest:observed.observed_digest,
+   rebuild_status:observed.rebuild_status,verdict:status.verdict,snapshot_matches:status.snapshot_matches,
+   hold_active:status.hold_active,release_eligible:status.release_eligible
+  };
+  assert.equal(current.snapshot_sequence,9);
+  assert.equal(current.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+  const proof=signFixtureAuditAnchor({
+   organization_id:a,failure_id:failure,incident_id:rebuilt.incident_scope,event_id:rebuilt.event_scope,
+   snapshot_sequence:9,remediation_version:12,accepted_review_roles:observed.accepted_review_roles,
+   observed_digest:observed.observed_digest,signer_id:signer,issued_at_ms:100,expires_at_ms:200
+  },kp.privateKey);
+  const publicKey=(await reader.query(
+   'SELECT public_key_der FROM v121_anchor.signers WHERE organization_id=$1 AND signer_id=$2',[a,signer]
+  )).rows[0].public_key_der;
+  const trusted={publicKeys:new Map([[signer,createPublicKey({key:publicKey,format:'der',type:'spki'})]]),
+   keyStates:new Map([[signer,'REGISTERED']])};
+  const issue=async(verifyClient=attester,anchor=proof)=>
+   issueFixtureVerifiedAnchorTicket({anchor,...trusted,current,nowMs:150,minimumSequence:9,attester:verifyClient});
+  const input=ticket=>[a,failure,9,signer,proof.statement,proof.signature_b64,proof.statement.observed_digest,ticket];
+  // Failed attester process and forged signatures cannot mint admissions.
+  await assert.rejects(issue(null),{code:'V121_ANCHOR_ATTESTER_UNAVAILABLE'});
+  await assert.rejects(issue(undefined,{...proof,signature_b64:'A'.repeat(86)+'=='}),{code:'V121_ANCHOR_SIGNATURE_INVALID'});
+  assert.equal((await reader.query(
+   'SELECT count(*)::int AS n FROM v121_anchor.verified_admissions WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=9',
+   [a,failure])).rows[0].n,0);
+  await assert.rejects(writer.query(appendSql,input(randomUUID())),/V121_ANCHOR_ADMISSION_MISSING/);
+  await assert.rejects(writer.query(admissionSql,
+   [randomUUID(),a,failure,9,signer,proof.statement,proof.signature_b64,proof.statement.observed_digest]),/permission denied/);
+  await assert.rejects(attester.query(appendSql,input(randomUUID())),/permission denied/);
+  await assert.rejects(attester.query('SELECT * FROM v121_anchor.verified_admissions'),/permission denied/);
+  await assert.rejects(attester.query(admissionSql,
+   [randomUUID(),b,failure,9,signer,proof.statement,proof.signature_b64,proof.statement.observed_digest]),
+   /V121_ANCHOR_ATTESTER_ROLE_DENIED/);
+  await assert.rejects(attester.query(admissionSql,
+   [randomUUID(),a,failure,9,signer,{...proof.statement,observed_digest:'f'.repeat(64)},proof.signature_b64,proof.statement.observed_digest]),
+   /V121_ANCHOR_ADMISSION_SCOPE_INVALID/);
+  const firstTicket=await issue();
+  await assert.rejects(issue(),/V121_ANCHOR_ADMISSION_DUPLICATE_ACTIVE/);
+  assert.equal((await reader.query(
+   'SELECT count(*)::int AS n FROM v121_anchor.verified_admissions WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=9',
+   [a,failure])).rows[0].n,1);
+  // CI superuser simulates a ticket whose verified 60-second window elapsed.
+  await ledgerAdmin.query('ALTER TABLE v121_anchor.verified_admissions DISABLE TRIGGER admission_immutable');
+  try{
+   await ledgerAdmin.query(
+    "UPDATE v121_anchor.verified_admissions SET issued_at=statement_timestamp()-interval '120 seconds', expires_at=statement_timestamp()-interval '90 seconds' WHERE organization_id=$1 AND admission_id=$2",
+    [a,firstTicket]
+   );
+  }finally{await ledgerAdmin.query('ALTER TABLE v121_anchor.verified_admissions ENABLE TRIGGER admission_immutable');}
+  await assert.rejects(writer.query(appendSql,input(firstTicket)),/V121_ANCHOR_ADMISSION_EXPIRED/);
+  assert.equal((await reader.query(
+   'SELECT count(*)::int AS n FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=9',
+   [a,failure])).rows[0].n,0);
+  const refreshedTicket=await issue();
+  assert.notEqual(refreshedTicket,firstTicket);
+  // Ticket is bound to exact statement and signature, not just the signer.
+  await assert.rejects(writer.query(appendSql,
+   [a,failure,9,signer,{...proof.statement,observed_digest:'e'.repeat(64)},proof.signature_b64,'e'.repeat(64),refreshedTicket]),
+   /V121_ANCHOR_ADMISSION_MISMATCH/);
+  await writer.query(appendSql,input(refreshedTicket));
+  await assert.rejects(writer.query(appendSql,input(refreshedTicket)),/V121_ANCHOR_CHECKPOINT_ROLLBACK|duplicate key/);
+  assert.equal((await reader.query(
+   'SELECT count(*)::int AS n FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=9',
+   [a,failure])).rows[0].n,1);
+  assert.equal((await reader.query(
+   'SELECT count(*)::int AS n FROM v121_anchor.verified_admissions WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=9',
+   [a,failure])).rows[0].n,2);
+  const holds=(await admin.query(
+   'SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',
+   [a,incident])).rows;
+  assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
+   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+ }finally{
+  await Promise.allSettled([businessReader.end(),writer.end(),attester.end(),reader.end()]);
+  await ledgerAdmin.end();
+ }
+});
