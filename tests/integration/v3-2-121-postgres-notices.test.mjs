@@ -1282,3 +1282,78 @@ test('fresh processes rebuild identical committed UAT state and detect corrupted
   assert.equal(restored.release_eligible,false);
  }finally{await finalReader.end();}
 });
+
+
+test('snapshot verification compares restart rebuild to immutable baselines and fails closed on stale or drifted state',async()=>{
+ const failure='00000000-0000-4000-8000-0000000000b1';
+ const newest='00000000-0000-4000-8000-0000000000b7';
+ const next='00000000-0000-4000-8000-0000000000b8';
+ const reader=new pg.Client({host,database:'v106_isolated',user:'v106_state_reader',password:'test_only_state_reader'});
+ await reader.connect();
+ const observe=async()=>(await reader.query('SELECT * FROM v106_test.fixture_observe_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+ const verify=async()=>(await reader.query('SELECT * FROM v106_test.fixture_verify_uat_snapshot($1::uuid,$2::uuid)',[a,failure])).rows[0];
+ const snapshotSql='INSERT INTO v106_test.fixture_uat_state_snapshots(organization_id,failure_id,snapshot_sequence,remediation_version,accepted_review_roles,observed_digest) VALUES($1,$2,$3,$4,$5,$6)';
+ const recordSnapshot=async seq=>{
+  const observed=await observe();
+  assert.equal(observed.rebuild_status,'REBUILT_STILL_HOLD');
+  await admin.query(snapshotSql,[a,failure,seq,observed.remediation_version,observed.accepted_review_roles,observed.observed_digest]);
+  return observed;
+ };
+ try{
+  const absent=await verify();
+  assert.equal(absent.verdict,'SNAPSHOT_MISSING');
+  assert.equal(absent.snapshot_matches,false);
+  assert.equal(absent.release_eligible,false);
+  const initial=await recordSnapshot(1);
+  assert.equal(initial.remediation_version,5);
+  let verified=await verify();
+  assert.deepEqual([verified.snapshot_sequence,verified.snapshot_matches,verified.verdict,verified.hold_active,verified.release_eligible],
+   [1,true,'SNAPSHOT_MATCH_STILL_HOLD',true,false]);
+  await assert.rejects(admin.query(snapshotSql,[a,failure,3,initial.remediation_version,initial.accepted_review_roles,initial.observed_digest]),/V121_SNAPSHOT_SEQUENCE_NOT_NEXT/);
+  await assert.rejects(admin.query('UPDATE v106_test.fixture_uat_state_snapshots SET observed_digest=$1 WHERE organization_id=$2 AND failure_id=$3',['a'.repeat(64),a,failure]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+  await assert.rejects(reader.query('SELECT * FROM v106_test.fixture_uat_state_snapshots'),/permission denied/);
+  await assert.rejects(closeoutWriter.query('SELECT * FROM v106_test.fixture_verify_uat_snapshot($1::uuid,$2::uuid)',[a,failure]),/permission denied/);
+  await assert.rejects(reader.query('SELECT * FROM v106_test.fixture_verify_uat_snapshot($1::uuid,$2::uuid)',[b,failure]),/V121_SNAPSHOT_READER_SCOPE_DENIED/);
+  // Historical versions unchanged, but adding an accepted current review changes the fingerprint.
+  const newestEvidence=(await admin.query('SELECT new_evidence_digest FROM v106_test.fixture_uat_remediations WHERE organization_id=$1 AND remediation_id=$2',[a,newest])).rows[0].new_evidence_digest;
+  await closeoutWriter.query('SELECT v106_test.fixture_record_uat_remediation_review($1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::char(64))',
+   [a,newest,'00000000-0000-4000-8000-0000000000d7','SECURITY','ACCEPTED_FOR_REVIEW',newestEvidence]);
+  verified=await verify();
+  assert.equal(verified.verdict,'SNAPSHOT_MISMATCH');
+  assert.equal(verified.snapshot_matches,false);
+  await recordSnapshot(2);
+  assert.equal((await verify()).verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+  // An additional committed remediation makes the last snapshot obsolete.
+  const nextEvidence=createHash('sha256').update('fixture-snapshot-version-6-evidence').digest('hex');
+  const note=createHash('sha256').update('fixture-snapshot-version-6-note').digest('hex');
+  const submit='SELECT v106_test.fixture_submit_uat_remediation($1::uuid,$2::uuid,$3::uuid,$4::integer,$5::char(64),$6::uuid,$7::char(64)) AS status';
+  assert.equal((await closeoutWriter.query(submit,[a,failure,next,6,nextEvidence,'00000000-0000-4000-8000-000000000016',note])).rows[0].status,'RECORDED');
+  verified=await verify();
+  assert.deepEqual([verified.saved_version,verified.current_version,verified.verdict,verified.snapshot_matches],[5,6,'SNAPSHOT_STALE',false]);
+  const refreshed=await recordSnapshot(3);
+  assert.equal(refreshed.remediation_version,6);
+  assert.equal((await verify()).verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+  // Simulate privileged alteration to a historical note. The snapshot fingerprint
+  // detects it even though the prior rebuild's version count remains valid.
+  await admin.query('ALTER TABLE v106_test.fixture_uat_remediations DISABLE TRIGGER fixture_uat_remediations_immutable');
+  try{
+   await admin.query('UPDATE v106_test.fixture_uat_remediations SET remediation_note_digest=$3 WHERE organization_id=$1 AND remediation_id=$2',[a,next,'f'.repeat(64)]);
+   const changed=await verify();
+   assert.equal(changed.verdict,'SNAPSHOT_MISMATCH');
+   assert.equal(changed.snapshot_matches,false);
+   assert.equal(changed.release_eligible,false);
+  }finally{
+   await admin.query('UPDATE v106_test.fixture_uat_remediations SET remediation_note_digest=$3 WHERE organization_id=$1 AND remediation_id=$2',[a,next,note]);
+   await admin.query('ALTER TABLE v106_test.fixture_uat_remediations ENABLE TRIGGER fixture_uat_remediations_immutable');
+  }
+  const final=await verify();
+  assert.equal(final.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
+  assert.equal(final.release_eligible,false);
+  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_uat_state_snapshots WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0].n,3);
+  await assert.rejects(admin.query('DELETE FROM v106_test.fixture_uat_state_snapshots WHERE organization_id=$1 AND failure_id=$2',[a,failure]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+  await assert.rejects(admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),/V121_SECURITY_ALERT_UNRESOLVED/);
+  const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
+  assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
+   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+ }finally{await reader.end();}
+});
