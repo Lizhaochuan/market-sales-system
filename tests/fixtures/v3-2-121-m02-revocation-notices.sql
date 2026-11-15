@@ -493,3 +493,78 @@ $cross_module_hold_guard$;
 CREATE TRIGGER fixture_hold_immutable BEFORE UPDATE OR DELETE
  ON v106_test.fixture_cross_module_holds FOR EACH ROW
  EXECUTE FUNCTION v106_test.fixture_hold_no_mutation();
+
+-- CI-only authenticated external-event inbox; no network integration or real SIEM.
+CREATE TABLE v106_test.fixture_external_security_keys (
+ organization_id uuid PRIMARY KEY,
+ event_key bytea NOT NULL CHECK(octet_length(event_key)=32)
+);
+REVOKE ALL ON v106_test.fixture_external_security_keys FROM PUBLIC;
+CREATE TABLE v106_test.fixture_external_security_events (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ event_id uuid NOT NULL,
+ source text NOT NULL CHECK(source='FIXTURE_INDEPENDENT_MONITOR'),
+ event_kind text NOT NULL CHECK(event_kind IN
+ ('SIGNER_COMPROMISE','APPROVAL_ANOMALY','AUDIT_INTEGRITY_MISMATCH')),
+ issued_at_ms bigint NOT NULL,
+ event_digest char(64) NOT NULL,
+ received_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(organization_id,event_id)
+);
+REVOKE ALL ON v106_test.fixture_external_security_events FROM PUBLIC;
+CREATE TRIGGER fixture_external_event_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_external_security_events FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+
+CREATE FUNCTION v106_test.fixture_accept_external_security_event(
+ p_organization uuid,p_incident uuid,p_event_id uuid,p_source text,
+ p_kind text,p_issued_at_ms bigint,p_mac text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $external_gate$
+DECLARE secret bytea;
+DECLARE fixture_now_ms bigint;
+DECLARE envelope text;
+BEGIN
+ IF session_user<>'v106_security_event_writer' OR
+    p_organization<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_SECURITY_EVENT_ROLE_SCOPE';
+ END IF;
+ IF p_source IS DISTINCT FROM 'FIXTURE_INDEPENDENT_MONITOR' OR
+    p_kind IS NULL OR p_kind NOT IN
+    ('SIGNER_COMPROMISE','APPROVAL_ANOMALY','AUDIT_INTEGRITY_MISMATCH') THEN
+  RAISE EXCEPTION 'V121_SECURITY_EVENT_KIND_INVALID';
+ END IF;
+ SELECT c.now_ms INTO fixture_now_ms
+ FROM v106_test.fixture_recovery_clock c WHERE c.singleton=true;
+ IF fixture_now_ms IS NULL OR p_issued_at_ms IS NULL OR
+    p_issued_at_ms<fixture_now_ms-30000 OR p_issued_at_ms>fixture_now_ms+1000 THEN
+  RAISE EXCEPTION 'V121_SECURITY_EVENT_EXPIRED';
+ END IF;
+ SELECT event_key INTO secret FROM v106_test.fixture_external_security_keys
+ WHERE organization_id=p_organization;
+ envelope:='v121-security-event-v1|'||p_organization::text||'|'||
+  p_incident::text||'|'||p_event_id::text||'|'||p_source||'|'||
+  p_kind||'|'||p_issued_at_ms::text;
+ IF secret IS NULL OR p_mac IS NULL OR p_mac !~ '^[a-f0-9]{64}$' OR
+  p_mac<>encode(public.hmac(convert_to(envelope,'UTF8'),secret,'sha256'),'hex') THEN
+  RAISE EXCEPTION 'V121_SECURITY_EVENT_AUTH_REJECTED';
+ END IF;
+ -- Only registered incidents may be stopped; never silently accept an unknown scope.
+ IF NOT EXISTS(SELECT 1 FROM v106_test.fixture_recovery_emergency_stops
+  WHERE organization_id=p_organization AND incident_id=p_incident) THEN
+  RAISE EXCEPTION 'V121_SECURITY_EVENT_UNKNOWN_INCIDENT';
+ END IF;
+ INSERT INTO v106_test.fixture_external_security_events
+  (organization_id,incident_id,event_id,source,event_kind,issued_at_ms,event_digest)
+ VALUES(p_organization,p_incident,p_event_id,p_source,p_kind,p_issued_at_ms,
+  encode(sha256(convert_to(envelope,'UTF8')),'hex'));
+ UPDATE v106_test.fixture_recovery_emergency_stops
+  SET issuance_blocked=true
+ WHERE organization_id=p_organization AND incident_id=p_incident;
+END;
+$external_gate$;
+REVOKE ALL ON FUNCTION v106_test.fixture_accept_external_security_event(
+ uuid,uuid,uuid,text,text,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_accept_external_security_event(
+ uuid,uuid,uuid,text,text,bigint,text) TO v106_security_event_writer;
