@@ -213,13 +213,15 @@ test('remote recheck is mandatory before attestation, with no SQL call on invali
  const receiptId='00000000-0000-4000-8000-0000000000e6';
  const attester={query:async()=>{
   issued++;
-  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+  return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};
  }};
  const r=await issueFixtureExt001FromTwoSources({...x.options,receiptId,attester});
  assert.equal(issued,1);
  assert.equal(r.independent_read_rounds,4);
  assert.equal(r.post_attestation_source_rechecked,true);
  assert.equal(r.source_checked_in_fixture,true);
+ assert.equal(r.source_version_bound_in_fixture,true);
+ assert.match(r.source_binding_digest,/^[a-f0-9]{64}$/);
  assert.deepEqual(x.calls(),[8,8]);
  assert.equal(r.release_authorized,false);
  assert.equal(r.production_evidence_collected,false);
@@ -257,7 +259,7 @@ test('revocation during fixture remote reads rejects admission without issuing a
  let issued=0,reads=0;
  const attester={query:async()=>{
   issued++;
-  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+  return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};
  }};
  await rejects(()=>issueFixtureExt001FromTwoSources({
   ...x.options,
@@ -283,7 +285,7 @@ test('revoking source after SQL fixture attestation fails closed without erasing
   admitted++;
   committed++;
   x.sourceKeys.set(id.audit,{...x.sourceKeys.get(id.audit),status:'REVOKED'});
-  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+  return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};
  }};
  await rejects(()=>issueFixtureExt001FromTwoSources({
   ...x.options,receiptId,attester
@@ -299,7 +301,7 @@ test('substituting pinned bytes after SQL fixture attestation fails closed',asyn
  const attester={query:async()=>{
   admitted++;
   substitute=true;
-  return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+  return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};
  }};
  await rejects(()=>issueFixtureExt001FromTwoSources({
   ...x.options,receiptId,attester,
@@ -315,7 +317,7 @@ test('SQL attestation must not accept missing clock, expired proof or clock roll
  const receiptId='00000000-0000-4000-8000-0000000000e6';
  const x=setup();
  let calls=0;
- const attester={query:async()=>{calls++;return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};}};
+ const attester={query:async()=>{calls++;return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};}};
  await rejects(()=>issueFixtureExt001FromTwoSources({
   ...x.options,clock:undefined,receiptId,attester
  }),'V121_IAM_SOURCE_CLOCK_REQUIRED');
@@ -329,7 +331,7 @@ test('SQL attestation must not accept missing clock, expired proof or clock roll
   attester:{query:async()=>{
    calls++;
    current=200_000;
-   return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+   return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};
   }}
  }),'V121_IAM_EVIDENCE_STALE');
  assert.equal(calls,1,'fixture SQL may have committed before expiry is detected');
@@ -342,7 +344,7 @@ test('SQL attestation must not accept missing clock, expired proof or clock roll
   attester:{query:async()=>{
    calls++;
    at=119_000;
-   return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};
+   return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};
   }}
  }),'V121_IAM_SOURCE_CLOCK_ROLLBACK_OR_INVALID');
  assert.equal(calls,2);
@@ -362,7 +364,7 @@ test('source reading that outlasts the manifest expiry does not reach SQL',async
   },
   auditReader:async rec=>({...await x.auditReader(rec),observed_at_ms:196_000}),
   receiptId:'00000000-0000-4000-8000-0000000000e6',
-  attester:{query:async()=>{issued++;return {rows:[{verdict:'ATTESTED_SYNTHETIC_STILL_HOLD'}]};}}
+  attester:{query:async()=>{issued++;return {rows:[{verdict:'ATTESTED_SOURCE_PROVENANCE_STILL_HOLD'}]};}}
  }),'V121_IAM_SOURCE_MANIFEST_INVALID');
  assert.equal(issued,0);
 });
