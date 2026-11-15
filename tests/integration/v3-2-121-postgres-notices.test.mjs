@@ -508,7 +508,6 @@ test('HMAC key rotation revokes old version and permits explicit new version',as
  const base=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),digest,raw];
  await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=1',[a]);
  await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,2,$2,true)',[a,newKey]);
- try{
   await assert.rejects(receiptWriter.query(sql,[...base,oldMac,1]),/V121_RECEIPT_ATTESTATION_REJECTED/);
   await assert.rejects(receiptWriter.query(sql,[...base,oldMac,2]),/V121_RECEIPT_ATTESTATION_REJECTED/);
   const q2=await service.enqueue({...input,epoch:91});
@@ -526,11 +525,8 @@ test('HMAC key rotation revokes old version and permits explicit new version',as
   assert.equal(after.duplicate,false);
   const r=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
   assert.equal(r.rows[0].n,0);
- }finally{
-  // CI fixture can restore the old key only for legacy tests; no production key reactivation.
-  await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true WHERE organization_id=$1 AND key_version=1',[a]);
-  await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=2',[a]);
- }
+  await assert.rejects(admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true WHERE organization_id=$1 AND key_version=1',[a]),/V121_ATTESTATION_KEY_IMMUTABLE/);
+  await assert.rejects(admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,3,$2,true)',[a,randomBytes(32)]),/duplicate key/);
 });
 test('invalid key versions and unauthorized secret updates are rejected',async()=>{
  const q=await service.enqueue({...input,epoch:92});
