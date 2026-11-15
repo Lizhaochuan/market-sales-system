@@ -2252,3 +2252,169 @@ test('quarantine evidence chain binds original event, latest investigation and t
   await ledger.end();
  }
 });
+
+
+test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation, expiry, reissue and concurrent version conflicts',async()=>{
+ const audit=new pg.Pool({host,database:'v121_anchor_isolated',user:'postgres',password:'postgres'});
+ const writerA=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_intake_writer',password:'test_only_iam_intake_writer'});
+ const writerB=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_intake_writer',password:'test_only_iam_intake_writer'});
+ const readOnly=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_intake_reader',password:'test_only_iam_intake_reader'});
+ const revoker=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_revoker',password:'test_only_iam_revoker'});
+ const receiptSql='SELECT v121_anchor.fixture_register_iam_evidence($1::uuid,$2::integer,$3::uuid,$4::char(64),$5::char(64),$6::char(64),$7::uuid,$8::uuid,$9::timestamptz) AS verdict';
+ const statusSql='SELECT * FROM v121_anchor.fixture_iam_evidence_status($1::uuid,$2::integer)';
+ const revokeSql='SELECT v121_anchor.fixture_revoke_iam_evidence($1::uuid,$2::integer,$3::uuid,$4::char(64))';
+ const issuerId='00000000-0000-4000-8000-0000000000c1';
+ const reviewerId='00000000-0000-4000-8000-0000000000c3';
+ const issuerKeyId='00000000-0000-4000-8000-0000000000c2';
+ const reviewerKeyId='00000000-0000-4000-8000-0000000000c4';
+ const issuerKeys=generateKeyPairSync('ed25519'),reviewerKeys=generateKeyPairSync('ed25519');
+ const trustedKeys=new Map([
+  [issuerKeyId,{status:'ACTIVE',domain:'SECURITY',principal_id:issuerId,publicKey:issuerKeys.publicKey}],
+  [reviewerKeyId,{status:'ACTIVE',domain:'AUDIT',principal_id:reviewerId,publicKey:reviewerKeys.publicKey}]
+ ]);
+ const now=Date.now();
+ const expiresAt=now+1_800_000;
+ const make=revision=>{
+  const body={
+   schema_version:'v3.2-121-ext001-evidence-v1',
+   scope:'CI_FIXTURE_ONLY',gap_id:'EXT-001',organization_id:a,
+   revision_id:randomUUID(),collected_at_ms:now-60_000,valid_until_ms:expiresAt,
+   producer:{principal_id:issuerId,key_id:issuerKeyId,domain:'SECURITY'},
+   artifacts:[
+    {id:'EXT-001-E1',kind:'IAM_ROLE_INVENTORY',
+     uri:'fixture://ext001/synthetic/iam-inventory',
+     sha256:createHash('sha256').update('fixture-iam-roles-'+revision).digest('hex'),
+     source:'CI_SYNTHETIC',classification:'SYNTHETIC',
+     captured_at_ms:now-90_000,expires_at_ms:expiresAt},
+    {id:'EXT-001-E2',kind:'RBAC_NEGATIVE_TESTS',
+     uri:'fixture://ext001/synthetic/denial-tests',
+     sha256:createHash('sha256').update('fixture-iam-negatives-'+revision).digest('hex'),
+     source:'CI_SYNTHETIC',classification:'SYNTHETIC',
+     captured_at_ms:now-89_000,expires_at_ms:expiresAt}
+   ],
+   role_inventory:REQUIRED_IAM_ROLES.map(role=>{
+    const human=['SALES','FINANCE','ACADEMIC','DEPLOYMENT'].includes(role);
+    return {role,principal_class:human?'HUMAN':'SERVICE',
+     authentication:human?'MFA':'WORKLOAD_IDENTITY',
+     organization_id:a,least_privilege_asserted:true};
+   }),
+   denial_matrix:REQUIRED_DENIAL_CASES.map(item=>({
+    case:item,result:'DENIED_IN_FIXTURE',artifact_id:'EXT-001-E2'
+   }))
+  };
+  const envelope=signFixtureExt001Envelope(body,{
+   issuerPrivateKey:issuerKeys.privateKey,reviewerPrivateKey:reviewerKeys.privateKey,
+   reviewerId,reviewerKeyId,reviewedAtMs:now-30_000
+  });
+  const fingerprint=fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs:now});
+  return {envelope,fingerprint,receiptId:randomUUID()};
+ };
+ const params=(revision,proof)=>[a,revision,proof.receiptId,
+  proof.fingerprint.evidence_digest,proof.fingerprint.evidence_e1_digest,
+  proof.fingerprint.evidence_e2_digest,
+  proof.fingerprint.issuer_id,proof.fingerprint.reviewer_id,
+  new Date(proof.fingerprint.valid_until_ms)];
+ const status=async revision=>(await readOnly.query(statusSql,[a,revision])).rows[0];
+ try{
+  await audit.query(await readFile(new URL('../fixtures/v3-2-121-ext001-iam-evidence-ledger.sql',import.meta.url),'utf8'));
+  await Promise.all([writerA.connect(),writerB.connect(),readOnly.connect(),revoker.connect()]);
+  assert.deepEqual([ (await status(1)).receipt_status,(await status(1)).history_count ],
+   ['RECEIPT_NOT_FOUND',0]);
+  const p1=make(1);
+  assert.equal((await writerA.query(receiptSql,params(1,p1))).rows[0].verdict,
+   'REGISTERED_SYNTHETIC_STILL_HOLD');
+  assert.equal((await writerB.query(receiptSql,params(1,p1))).rows[0].verdict,
+   'EXACT_RETRY_SYNTHETIC_STILL_HOLD');
+  assert.equal((await status(1)).receipt_status,'VALID_SYNTHETIC_STILL_HOLD');
+  const fakeBody=structuredClone(p1.envelope);
+  fakeBody.body.artifacts[0].sha256='f'.repeat(64);
+  assert.throws(()=>fingerprintFixtureExt001ForIntake(fakeBody,{trustedKeys,nowMs:now}),
+   {code:'V121_IAM_EVIDENCE_REVIEW_INVALID'});
+  await assert.rejects(writerA.query(receiptSql,params(1,{...p1,receiptId:randomUUID()})),
+   /V121_IAM_REVISION_CONFLICT/);
+  await assert.rejects(writerA.query(receiptSql,params(3,make(3))),
+   /V121_IAM_REVISION_NOT_NEXT/);
+  await assert.rejects(writerA.query(receiptSql,[b,...params(2,make(2)).slice(1)]),
+   /V121_IAM_WRITER_SCOPE_DENIED/);
+  await assert.rejects(writerA.query('SELECT * FROM v121_anchor.fixture_iam_evidence_receipts'),
+   /permission denied/);
+  await assert.rejects(readOnly.query(receiptSql,params(2,make(2))),
+   /permission denied/);
+  await assert.rejects(writerA.query(revokeSql,[a,1,randomUUID(),p1.fingerprint.evidence_digest]),
+   /permission denied/);
+  const p2=make(2);
+  assert.equal((await writerA.query(receiptSql,params(2,p2))).rows[0].verdict,
+   'REGISTERED_SYNTHETIC_STILL_HOLD');
+  assert.equal((await status(1)).receipt_status,'RECEIPT_SUPERSEDED_STILL_HOLD');
+  await assert.rejects(writerA.query(receiptSql,params(1,p1)),
+   /V121_IAM_REVISION_SUPERSEDED/);
+  const reason=createHash('sha256').update('EXT-001 isolated evidence revoked for independent revalidation').digest('hex');
+  const revokeEvent=randomUUID();
+  await assert.rejects(revoker.query(revokeSql,[b,2,revokeEvent,reason]),
+   /V121_IAM_REVOKER_SCOPE_DENIED/);
+  await assert.rejects(revoker.query(revokeSql,[a,3,revokeEvent,reason]),
+   /V121_IAM_REVISION_UNKNOWN/);
+  await revoker.query(revokeSql,[a,2,revokeEvent,reason]);
+  assert.equal((await status(2)).receipt_status,'RECEIPT_REVOKED_STILL_HOLD');
+  await assert.rejects(writerB.query(receiptSql,params(2,p2)),
+   /V121_IAM_REVISION_REVOKED/);
+  await assert.rejects(revoker.query(revokeSql,[a,2,randomUUID(),reason]),
+   /V121_IAM_REVISION_ALREADY_REVOKED/);
+  const p3=make(3);
+  assert.equal((await writerA.query(receiptSql,params(3,p3))).rows[0].verdict,
+   'REGISTERED_SYNTHETIC_STILL_HOLD');
+  await writerA.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+  try{
+   await assert.rejects(writerA.query(receiptSql,params(4,make(4))),
+    /V121_IAM_ISOLATION_UNSAFE/);
+  }finally{await writerA.query('ROLLBACK');}
+  // Controlled privileged test-only time travel: no real production timestamps
+  // or user data are modified. Existing immutable trigger is restored.
+  await audit.query('ALTER TABLE v121_anchor.fixture_iam_evidence_receipts DISABLE TRIGGER fixture_iam_receipts_immutable');
+  try{
+   await audit.query("UPDATE v121_anchor.fixture_iam_evidence_receipts SET recorded_at=clock_timestamp()-interval '3 hours', expires_at=clock_timestamp()-interval '2 hours' WHERE organization_id=$1 AND gap_id='EXT-001' AND revision_no=3",[a]);
+  }finally{
+   await audit.query('ALTER TABLE v121_anchor.fixture_iam_evidence_receipts ENABLE TRIGGER fixture_iam_receipts_immutable');
+  }
+  assert.equal((await status(3)).receipt_status,'RECEIPT_EXPIRED_STILL_HOLD');
+  await assert.rejects(writerB.query(receiptSql,params(3,p3)),
+   /V121_IAM_REVISION_EXPIRED/);
+  const p4=make(4);
+  await writerA.query(receiptSql,params(4,p4));
+  assert.equal((await status(3)).receipt_status,'RECEIPT_SUPERSEDED_STILL_HOLD');
+  assert.equal((await status(4)).receipt_status,'VALID_SYNTHETIC_STILL_HOLD');
+  const p5a=make('5a'),p5b=make('5b');
+  const race=await Promise.allSettled([
+   writerA.query(receiptSql,params(5,p5a)),
+   writerB.query(receiptSql,params(5,p5b))
+  ]);
+  assert.deepEqual(race.map(x=>x.status).sort(),['fulfilled','rejected']);
+  assert.match(race.find(x=>x.status==='rejected').reason.message,/V121_IAM_REVISION_CONFLICT/);
+  assert.equal((await status(5)).receipt_status,'VALID_SYNTHETIC_STILL_HOLD');
+  assert.equal((await status(5)).history_count,5);
+  // The reader is restarted to prove receipt history survives connections.
+  await readOnly.end();
+  const again=new pg.Client({host,database:'v121_anchor_isolated',user:'v121_iam_intake_reader',password:'test_only_iam_intake_reader'});
+  try{
+   await again.connect();
+   const d=(await again.query(statusSql,[a,5])).rows[0];
+   assert.deepEqual([d.receipt_status,d.latest_revision,d.history_count,d.hold_active,d.release_eligible],
+    ['VALID_SYNTHETIC_STILL_HOLD',5,5,true,false]);
+   await assert.rejects(again.query(statusSql,[b,5]),/V121_IAM_READER_SCOPE_DENIED/);
+  }finally{await again.end();}
+  await assert.rejects(audit.query('UPDATE v121_anchor.fixture_iam_evidence_receipts SET envelope_digest=$1 WHERE organization_id=$2 AND revision_no=1',['a'.repeat(64),a]),
+   /V121_ANCHOR_LEDGER_IMMUTABLE/);
+  await assert.rejects(audit.query('DELETE FROM v121_anchor.fixture_iam_evidence_revocations WHERE organization_id=$1 AND revision_no=2',[a]),
+   /V121_ANCHOR_LEDGER_IMMUTABLE/);
+  const count=(await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_evidence_receipts WHERE organization_id=$1',[a])).rows[0].n;
+  const revoked=(await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_evidence_revocations WHERE organization_id=$1',[a])).rows[0].n;
+  assert.deepEqual([count,revoked],[5,1]);
+  const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
+  assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),
+   [['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+  assert.equal((await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0].issuance_blocked,true);
+ }finally{
+  await Promise.allSettled([writerA.end(),writerB.end(),readOnly.end(),revoker.end()]);
+  await audit.end();
+ }
+});
