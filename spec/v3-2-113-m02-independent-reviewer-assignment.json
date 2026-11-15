@@ -1,0 +1,192 @@
+{
+  "schema_version": "v3.2-113-m02-independent-reviewer-assignment-v1",
+  "module": "M02",
+  "parent_pr": 119,
+  "parent_sha": "b540e11d1d05f87da2a4ca72601b8ea634a220f4",
+  "parent_ci_runs": [
+    43664482100,
+    43664482069
+  ],
+  "scope": "CI_ONLY_SIX_ROLE_EVIDENCE_COMPLETENESS_AND_FIXTURE_REVIEW_ASSIGNMENT",
+  "files": {
+    "source": "src/cross-module-independent-reviewer-assignment.mjs",
+    "integration_test": "tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs",
+    "sql_fixture": "tests/fixtures/v3-2-113-m02-reviewer-assignment.sql",
+    "sql_adapter": "tests/helpers/v3-2-113-m02-postgres-reviewer-assignments.mjs",
+    "sql_setup": "scripts/v3-2-113-setup-reviewer-assignments.mjs",
+    "parent_intake": "src/cross-module-evidence-intake-quarantine.mjs",
+    "parent_sql_intake": "tests/helpers/v3-2-112-m02-evidence-intake-ledger.mjs"
+  },
+  "submitted_roles": [
+    "sales_owner",
+    "finance_owner",
+    "academic_owner",
+    "security_identity_owner",
+    "integration_owner",
+    "database_owner"
+  ],
+  "completeness_contract": {
+    "source": "V112 append-only event chain and untrusted original claim digests",
+    "six_latest_role_claims_required": true,
+    "claim_expiry_checked_against_fixture_clock": true,
+    "digest_chain_checked_full_to_head": true,
+    "max_fixture_chain_length": 64,
+    "same_student_and_optional_family_required": true,
+    "same_original_history_digest_required": true,
+    "same_claimed_V110_notice_digest_required": true,
+    "true_V110_receipt_validation_implemented": false,
+    "signed_real_business_evidence_verified": false,
+    "external_evidence_provenance_verified": false,
+    "claimed_approval_allowed": "UNVERIFIED_SUBMISSION",
+    "submissions_incomplete": "BLOCKED_REVIEW_EVIDENCE_SLOTS_INCOMPLETE",
+    "no_raw_student_payment_or_lesson_files_stored": true
+  },
+  "reviewer_contract": {
+    "pinned_independent_fixture_signer": "Ed25519 generated for isolated test only",
+    "signed_fixture_version": "v3.2-113-ci-reviewer-attestation-v1",
+    "authorized_reviewer_role": "independent_evidence_reviewer",
+    "reviewer_must_differ_from_all_claimed_owners_and_submitters": true,
+    "all_six_claimed_owner_ids_distinct": true,
+    "all_six_claimed_submitter_ids_distinct": true,
+    "source_role_revocation_checks_twice": true,
+    "source_role_revocation_status_is_unsigned_fixture": true,
+    "reviewer_attestation_checked_before_and_after_db_commit": true,
+    "actual_human_appointment_verified": false,
+    "real_organization_identity_verified": false,
+    "real_signatory_authority_verified": false,
+    "commit_to_external_business_transaction": false
+  },
+  "sql": {
+    "database": "v106_isolated",
+    "image": "postgres:16",
+    "schema": "v106_test",
+    "table": "fixture_reviewer_assignments",
+    "guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "scope_key": [
+      "organization_id",
+      "incident_id",
+      "student_id"
+    ],
+    "isolation": "SERIALIZABLE",
+    "conflict_control": "scope advisory lock plus primary key; no overwrite",
+    "role_permissions": "SELECT and INSERT only, no UPDATE or DELETE",
+    "tenant_guard": "FORCE RLS with two isolated mock organization roles",
+    "assignment_status": "PENDING_REAL_OWNER_CONFIRMATION",
+    "historical_event_modification_forbidden": true,
+    "production_migration_created": false,
+    "production_connection_created": false,
+    "production_table_changed": false,
+    "enterprise_database_uat": false
+  },
+  "scenarios": [
+    {
+      "id": "REVIEW-01",
+      "goal": "six-role complete fixture records SQL pending review only"
+    },
+    {
+      "id": "REVIEW-02",
+      "goal": "missing one role blocks assignment"
+    },
+    {
+      "id": "REVIEW-03",
+      "goal": "candidate owner or submitter cannot review own or other domain"
+    },
+    {
+      "id": "REVIEW-04",
+      "goal": "signed mock reviewer expired forged inactive or cross-tenant is rejected"
+    },
+    {
+      "id": "REVIEW-05",
+      "goal": "fixture source revision and revocation cannot be stale"
+    },
+    {
+      "id": "REVIEW-06",
+      "goal": "expired and tampered metadata or missing notice digest rejected"
+    },
+    {
+      "id": "REVIEW-07",
+      "goal": "family or historic source digest mismatch rejected"
+    },
+    {
+      "id": "REVIEW-08",
+      "goal": "V112 event head tampering prevents assignment"
+    },
+    {
+      "id": "REVIEW-09",
+      "goal": "incoming evidence after SQL assignment invalidates fixture review"
+    },
+    {
+      "id": "REVIEW-10",
+      "goal": "reviewer or source revocation after SQL write blocks current status"
+    },
+    {
+      "id": "REVIEW-11",
+      "goal": "precommit failure rolls back reviewer record"
+    },
+    {
+      "id": "REVIEW-12",
+      "goal": "competing SQL reviewer inserts cannot both succeed"
+    },
+    {
+      "id": "REVIEW-13",
+      "goal": "wrong tenant SQL role denied"
+    },
+    {
+      "id": "REVIEW-14",
+      "goal": "immutable reviewer record and protected payment table"
+    },
+    {
+      "id": "REVIEW-15",
+      "goal": "replay does not promote approval"
+    },
+    {
+      "id": "REVIEW-16",
+      "goal": "optional sibling family still needs student-first handling"
+    },
+    {
+      "id": "REVIEW-17",
+      "goal": "malformed or caller-approved scope rejected"
+    }
+  ],
+  "known_gaps": [
+    "Fixture reviewer signature proves no actual employee appointment or employer authority",
+    "V112 intake claims and evidence payloads are untrusted, only matching SHA-256 metadata",
+    "Matching V110 notice digest is self-declared metadata, not independently authenticated V110 receipt",
+    "Fixture source-revocation status is unsigned and cannot prove production revocation",
+    "Source updates after final check can invalidate assignment and leave pending SQL audit record",
+    "No independent real business UAT, signed financial/academic original ledger truth, atomic handoff or authorization",
+    "Temporary GitHub Actions PostgreSQL does not establish enterprise production DB and IAM acceptance"
+  ],
+  "all_real_owners_unassigned": true,
+  "verified_external_reviewers": 0,
+  "verified_external_owners": 0,
+  "verified_finance_signatures": 0,
+  "verified_academic_signatures": 0,
+  "real_external_contract_status": "proposed-unimplemented",
+  "sixteen_external_admissions": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "six_external_authority_conditions": "UNVERIFIED",
+  "hard_denials": {
+    "external_authority_verified": false,
+    "external_reviewer_appointed": false,
+    "external_owner_verified": false,
+    "real_evidence_verified": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "production_integration_allowed": false,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "student_primary": true,
+  "family_only_for_actual_siblings": true,
+  "original_orders_payments_saleevent_lessons_compensations_immutable": true,
+  "no_production_migration_039": true,
+  "historical_migration_range_from_previous_specs": "001-038",
+  "edu_management_system_unchanged": true,
+  "market_sales_documentation_separate": true,
+  "next_stage": "V3.2-114 independent real evidence source provenance contract and reviewer recusal/reassignment audit; maintain no external authority"
+}
