@@ -2328,7 +2328,10 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   proof.fingerprint.reviewer_signature_digest,new Date(proof.fingerprint.valid_until_ms)];
  const attest=async(revision,proof)=>issueFixtureExt001VerifiedProvenance({
   envelope:proof.envelope,artifactBytes:proof.artifactBytes,trustedKeys,
-  nowMs:now,revisionNo:revision,receiptId:proof.receiptId,attester
+  nowMs:now,revisionNo:revision,receiptId:proof.receiptId,
+  // Historical pre-cutover fixtures only: legacy core is inaccessible
+  // to ordinary IAM attester, and admin seeds history in isolation.
+  attester:audit
  });
  const status=async revision=>(await readOnly.query(statusSql,[a,revision])).rows[0];
  try{
@@ -2339,6 +2342,8 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   assert.deepEqual([ (await status(1)).receipt_status,(await status(1)).history_count ],
    ['RECEIPT_NOT_FOUND',0]);
   const p1=make(1);
+  await assert.rejects(attester.query(attestSql,provenanceParams(1,p1)),
+   /permission denied/);
   await assert.rejects(writerA.query(receiptSql,params(1,p1)),
    /V121_IAM_PROVENANCE_MISSING_OR_MISMATCH/);
   await assert.rejects(writerA.query(attestSql,provenanceParams(1,p1)),/permission denied/);
@@ -2521,6 +2526,30 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    /permission denied/);
   await assert.rejects(attester.query('UPDATE v121_anchor.fixture_iam_source_auth_keys SET active=false'),
    /permission denied/);
+  // Retiring the active key invalidates a valid pre-revocation MAC,
+  // including a byte-exact retry of an immutable source-binding row.
+  const oldMaterial=encodeFixtureExt001SourceAuthorization(
+   {...p6.fingerprint,receipt_id:p6.receiptId},sourceResult.source_binding_digest,1);
+  const oldMac=createHmac('sha256',sourceAuthKey).update(oldMaterial).digest('hex');
+  await audit.query('UPDATE v121_anchor.fixture_iam_source_auth_keys SET active=false WHERE organization_id=$1 AND key_version=1',[a]);
+  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,1,oldMac]),
+   /V121_IAM_SOURCE_AUTH_DENIED/);
+  await assert.rejects(audit.query('UPDATE v121_anchor.fixture_iam_source_auth_keys SET active=true WHERE organization_id=$1 AND key_version=1',[a]),
+   /V121_IAM_SOURCE_KEY_IMMUTABLE/);
+  await assert.rejects(audit.query('UPDATE v121_anchor.fixture_iam_source_auth_keys SET auth_key=$1 WHERE organization_id=$2 AND key_version=1',[randomBytes(32),a]),
+   /V121_IAM_SOURCE_KEY_IMMUTABLE/);
+  const nextSourceKey=randomBytes(32);
+  await audit.query('INSERT INTO v121_anchor.fixture_iam_source_auth_keys(organization_id,key_version,auth_key,active) VALUES($1,2,$2,true)',[a,nextSourceKey]);
+  await assert.rejects(audit.query('INSERT INTO v121_anchor.fixture_iam_source_auth_keys(organization_id,key_version,auth_key,active) VALUES($1,3,$2,true)',[a,randomBytes(32)]),
+   /duplicate key/);
+  const rotatedMaterial=encodeFixtureExt001SourceAuthorization(
+   {...p6.fingerprint,receipt_id:p6.receiptId},sourceResult.source_binding_digest,2);
+  const rotatedMac=createHmac('sha256',nextSourceKey).update(rotatedMaterial).digest('hex');
+  assert.equal((await attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,2,rotatedMac])).rows[0].verdict,
+   'EXACT_SOURCE_PROVENANCE_RETRY_STILL_HOLD');
+  await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,1,rotatedMac]),
+   /V121_IAM_SOURCE_AUTH_DENIED/);
+  assert.equal((await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_bindings WHERE organization_id=$1',[a])).rows[0].n,1);
   await assert.rejects(writerA.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,1,forgedMac]),
    /permission denied/);
   await assert.rejects(writerA.query('SELECT * FROM v121_anchor.fixture_iam_source_bindings'),
