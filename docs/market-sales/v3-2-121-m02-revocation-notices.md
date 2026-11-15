@@ -131,3 +131,10 @@
 - 数据库受控回执函数现在校验当前活动认证密钥版本的 `KEY_ISSUED` 审计记录：要求记录存在、事件类型正确、SHA-256 元数据摘要与其租户/版本/角色一致，否则拒绝新写入并回滚水位。测试用超级管理员临时绕过模拟审计篡改，验证 fail closed，再恢复原始摘要，HOLD 仍为 true。
 - 此校验只验证当前活动密钥对应的发行元数据，而不是完整事件历史、外部锚定或双人审批。数据库超级用户仍可同时篡改元数据及其摘要，也能控制模拟时钟/数据库；不能声称独立抗管理员篡改或已实施真实审批。
 - 后续阻断：需要独立外部 append-only 审计锚、最小权限双批准者的真实授权签署机制、密钥事故工单与 UAT；未完成之前始终 CI-only / Draft / HOLD / 不合并 / 不部署。
+
+## V121 独立双人审批与模拟外部审计锚契约（standalone fixture）
+- 新增 `src/cross-module-fixture-dual-approval-anchor.mjs`：恢复请求必须绑定机构、异常、唯一请求 ID、新密钥版本（至少 2）、密钥发行审计摘要及最长 30 秒时窗。两个不同审批人分别以临时 Ed25519 密钥签署同一规范化请求摘要，角色分别为 `SECURITY_REVIEW` 与 `AUDIT_REVIEW`；重复身份、缺少角色、替换签名、修改机构/异常/版本/审计摘要一律拒绝。
+- 只读 `readAudit` 和 `readAnchor` 分别校验模拟 SQL 发行审计元数据以及**模拟独立归档**返回的请求/审计双摘要；来源必须明确标注 `FIXTURE_SEPARATE_ARCHIVE`，不可用、摘要不一致或缺失时拒绝。回放集当前仅驻留进程内，不支持重启后可靠防重放，不能替代事务型持久去重。
+- 所有通过返回 `external_anchor_verified=false`、`real_person_approval=false`、`hold_active=true`、`release_eligible=false`、`merge_authorized=false` 和 `deploy_authorized=false`，不触发密钥变更或解除隔离。
+- CI 新增 7 项契约测试，验证双人独立签署、作用域防篡改、超时、审计/归档故障以及进程内重放。
+- **明确未完成**：真实 IAM 身份绑定、组织级双人职责隔离、可信外部 WORM 存储、签名密钥托管、持久化审批消费与事务原子性、正式 UAT。本契约尚未连接隔离 SQL 密钥轮换函数，更没有运行真实审批；不可把 standalone fixture 测试理解为生产恢复授权。
