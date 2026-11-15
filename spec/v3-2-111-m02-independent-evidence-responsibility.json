@@ -1,0 +1,189 @@
+{
+  "schema_version": "v3.2-111-m02-independent-evidence-responsibility-v1",
+  "parent_pr": 117,
+  "parent_sha": "9cce8aa257e4f195bb7a340e3fc7a15ae39520d6",
+  "parent_ci": [
+    43663447889,
+    43663447763
+  ],
+  "scope": "CI_ONLY_INDEPENDENT_SIGNER_EVIDENCE_PROTOCOL_REVIEW",
+  "module": "M02",
+  "production_runtime_wired": false,
+  "production_database_touched": false,
+  "implementation": "src/cross-module-independent-evidence-review.mjs",
+  "tests": "tests/security/v3-2-111-m02-independent-evidence-review.test.mjs",
+  "upstream_negative_receipt": {
+    "source": "src/cross-module-lease-loss-negative-receipt.mjs",
+    "expected_reason": "BLOCKED_CI_LEASE_LOSS_AND_NEGATIVE_RECEIPT",
+    "allowed_disposition": "blocked",
+    "uncertain_means": "FAIL_CLOSED",
+    "external_authority": false,
+    "inspect_may_write_audit_notice_and_revoke_lease": true,
+    "must_recheck_sql_notification_head_and_lease_state": true
+  },
+  "evidence_contract": {
+    "schema": "v3.2-111-ci-independent-evidence-v1",
+    "signer_crypto": "Ed25519 temporary test keys independently pinned by domain",
+    "domains": [
+      "sales",
+      "finance",
+      "academic"
+    ],
+    "signer_key_sharing_prohibited": true,
+    "signer_id_sharing_prohibited": true,
+    "signed_properties": [
+      "schema_version",
+      "organization_id",
+      "incident_id",
+      "student_id",
+      "family_id",
+      "domain",
+      "evidence_type",
+      "signer_id",
+      "source_revision",
+      "revocation_sequence",
+      "notification_sequence",
+      "notification_digest",
+      "original_history_digest",
+      "evidence_digest",
+      "issued_at_ms",
+      "expires_at_ms",
+      "fixture_only"
+    ],
+    "student_primary": true,
+    "family_optional": true,
+    "shared_history_digest_required": true,
+    "exact_scope_required": true,
+    "negative_receipt_binding_required": true,
+    "two_revocation_reads_required": true,
+    "real_authority_check_implemented": false,
+    "trusted_production_revocation_register_implemented": false,
+    "proof_of_real_order_payment_and_lesson_data": false
+  },
+  "responsibility_matrix": [
+    {
+      "domain": "sales",
+      "owner_role": "sales_owner",
+      "assigned_person": "UNASSIGNED",
+      "signed_evidence": "student_attribution_and_historical_order_context",
+      "required_real_sources": [
+        "student identity and assignment correction incident",
+        "immutable original order/SaleEvent audit and historical association",
+        "independent source version and revocation lineage"
+      ],
+      "may_sign_finance_or_academic": false
+    },
+    {
+      "domain": "finance",
+      "owner_role": "finance_owner",
+      "assigned_person": "UNASSIGNED",
+      "signed_evidence": "independent_original_order_and_payment_reconciliation",
+      "required_real_sources": [
+        "immutable order/receipt/payment ledger identity and original ownership",
+        "independent financial signatory authority and staff role revocation",
+        "discrepancy and compensating-entry reconciliation"
+      ],
+      "may_sign_finance_or_academic": true,
+      "may_sign_academic": false
+    },
+    {
+      "domain": "academic",
+      "owner_role": "academic_owner",
+      "assigned_person": "UNASSIGNED",
+      "signed_evidence": "independent_lesson_entitlement_and_fulfilment_reconciliation",
+      "required_real_sources": [
+        "student lesson entitlement and fulfillment historical snapshot",
+        "independent academic signatory authority and role revocation",
+        "lesson and credit-adjustment reconciliation"
+      ],
+      "may_sign_finance_or_academic": true,
+      "may_sign_finance": false
+    },
+    {
+      "domain": "identity",
+      "owner_role": "security_identity_owner",
+      "assigned_person": "UNASSIGNED",
+      "signed_evidence": "signed organization-role key binding and durable revocation source",
+      "required_real_sources": [
+        "staff identity / active role / organization scope",
+        "key rotation and trusted governance roots",
+        "authenticated revocation propagation and audit"
+      ],
+      "current_implementation": "CI unsigned fixture revocation reader only"
+    },
+    {
+      "domain": "integration",
+      "owner_role": "integration_owner",
+      "assigned_person": "UNASSIGNED",
+      "signed_evidence": "source-side atomic barrier and transactionally bound cross-module receipt",
+      "required_real_sources": [
+        "trusted version vector and source-side revocation barrier",
+        "signed multi-party acceptance decision and commit receipt",
+        "recovery / uncertainty / compensation protocol"
+      ],
+      "current_implementation": "NOT_IMPLEMENTED"
+    },
+    {
+      "domain": "audit",
+      "owner_role": "database_owner",
+      "assigned_person": "UNASSIGNED",
+      "signed_evidence": "durable tenant-safe notice and checkpoint proof",
+      "required_real_sources": [
+        "privileged audit writer separated from business writers",
+        "tamper-resistant source provenance and DB audit retention",
+        "PostgreSQL enterprise security and crash recovery UAT"
+      ],
+      "current_implementation": "Temporary CI PostgreSQL only"
+    }
+  ],
+  "downstream_gaps": [
+    "V110 negative receipt only binds organization and incident, not student identity directly; V111 binds student through independent CI evidence, not a proven real transaction",
+    "No actual enterprise external organization trust roots or signatory appointments",
+    "Revocation reads are unsigned CI fixtures and cannot prove real staff revocation in finance or academic systems",
+    "Same signed original_history_digest across three fixtures does not prove true, immutable, independently sourced order/payment/lesson records",
+    "No real atomic source barrier at final business action; after-last-read revocation race remains",
+    "No positive authorization or cross-system atomic handoff receipt exists",
+    "No production key custody, end-to-end cross-system UAT or enterprise database crash-recovery proof"
+  ],
+  "evidence_tests": [
+    "REV-01",
+    "REV-02",
+    "REV-03",
+    "REV-04",
+    "REV-05",
+    "REV-06",
+    "REV-07",
+    "REV-08",
+    "REV-09",
+    "REV-10",
+    "REV-11",
+    "REV-12",
+    "REV-13"
+  ],
+  "external_contract_status": "proposed-unimplemented",
+  "admission_16": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "six_external_authority_categories": "UNVERIFIED",
+  "real_finance_signatures_verified": false,
+  "real_academic_signatures_verified": false,
+  "real_sales_authority_verified": false,
+  "real_atomic_handoff_verified": false,
+  "real_immutable_business_history_verified": false,
+  "real_revocation_propagation_verified": false,
+  "post_last_read_race_closed": false,
+  "finance_authorized": false,
+  "academic_authorized": false,
+  "handoff_allowed": false,
+  "compensation_write_allowed": false,
+  "release_eligible": false,
+  "hold_active": true,
+  "external_authority_verified": false,
+  "production_integration_allowed": false,
+  "merge_authorized": false,
+  "deploy_authorized": false,
+  "original_orders_payments_saleevent_lessons_compensation_preserved": true,
+  "history_migration_range_per_existing_specs": "001-038",
+  "production_migration_039_created": false,
+  "edu_management_system_changed": false,
+  "next_stage": "V3.2-112: owner assignment/evidence intake protocol and read-only integration gap review, no production authority"
+}
