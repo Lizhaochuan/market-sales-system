@@ -93,3 +93,9 @@
 - 添加三个 PostgreSQL 16 集成用例：两个独立 adapter 并发写同一签署者不同 lease_sequence；较高水位必须持久保留，随后旧租约不得重放；模拟租约失效时拒绝写入，新签发且更高 sequence 的有效租约允许独立的新负向记录（仍永久 HOLD）；COMMIT 前故障必须同时回滚回执与租约水位。
 - SQL 的 SERIALIZABLE 与 signer 行锁提供测试库内的单调顺序，跨进程可见；并发用例允许低序号先提交或被后提交的高序号阻断，但必须保持最终高水位与旧令牌隔离。
 - **限制**：当前故障恢复只测试同一一次性数据库和模拟时钟/身份来源；没有真实身份签发服务、持久网络队列、业务 UAT 或跨系统原子撤权。无权解除隔离、合并或部署。
+
+## V121 ordinary-writer INSERT removal (disposable SQL)
+- `v106_writer_a` / `v106_writer_b` 不再拥有 `fixture_revocation_negative_receipts` 的直接 INSERT；由隔离环境专属 `v106_receipt_writer_a` 角色连接写入。SQL adapter 必须明确提供独立 `receiptPool`，并验证数据库角色后才执行已通过模拟签名和租约检查的回执写入。
+- 普通角色仍有 SELECT 以执行只读报告；新增直接 INSERT 权限拒绝和使用普通角色冒充回执连接的测试。
+- 注意：**专属回执角色拥有直接 INSERT 权限，绕过 adapter 使用其凭据仍可写入模拟表。** 本轮属于数据库角色权限收敛，不代表数据库原生验证 Ed25519 签名，不能声称全面根除数据库直写。后续仍需权限更小的安全执行入口、可信验证证据/签名校验以及权限审计。
+- 仅测试数据库使用的模拟凭据，不可作为生产 IAM、投递确认或解除 HOLD 的依据。PR 保持 Draft，不合并不部署。
