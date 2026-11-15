@@ -19,7 +19,7 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
  }
  async function source(c,scope){
   const p=scopeParams(scope);
-  const mh=await c.query('SELECT sequence,event_digest,hold_active FROM v106_test.fixture_incident_gap_manifest_heads WHERE organization_id=$1 AND incident_id=$2 FOR SHARE',p);
+  const mh=await c.query('SELECT sequence,event_digest,hold_active FROM v106_test.fixture_incident_gap_manifest_heads WHERE organization_id=$1 AND incident_id=$2 ',p);
   if(mh.rowCount!==1||mh.rows[0].hold_active!==true)fail('NOTICE_MANIFEST_HEAD_ABSENT');
   const m=await c.query('SELECT event_payload,event_digest FROM v106_test.fixture_incident_gap_manifest_events WHERE organization_id=$1 AND incident_id=$2 AND sequence=$3', [...p,scope.export_version]);
   if(m.rowCount!==1)fail('NOTICE_MANIFEST_VERSION_ABSENT');
@@ -28,7 +28,7 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
     manifest.scope?.organization_id!==scope.organization_id||
     manifest.scope?.incident_id!==scope.incident_id||
     manifest.sequence!==scope.export_version)fail('NOTICE_MANIFEST_TAMPERED');
-  const rh=await c.query('SELECT sequence,event_digest,hold_active FROM v106_test.fixture_manifest_revocation_heads WHERE organization_id=$1 AND incident_id=$2 FOR SHARE',p);
+  const rh=await c.query('SELECT sequence,event_digest,hold_active FROM v106_test.fixture_manifest_revocation_heads WHERE organization_id=$1 AND incident_id=$2 ',p);
   if(rh.rowCount!==1||rh.rows[0].hold_active!==true)fail('NOTICE_REVOCATION_HEAD_ABSENT');
   const rev=await c.query('SELECT sequence,event_payload,event_digest FROM v106_test.fixture_manifest_revocation_events WHERE organization_id=$1 AND incident_id=$2 AND event_digest=$3 ORDER BY sequence', [...p,scope.revocation_event_digest]);
   if(rev.rowCount!==1)fail('NOTICE_REVOCATION_EVENT_ABSENT');
