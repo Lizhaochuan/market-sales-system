@@ -220,7 +220,7 @@ test('invalid signer snapshot blocks both initial receipt and replay',async()=>{
  const invalid= createIsolatedPostgresRevocationNotices({leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:3,active:false})});
  const statement={organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',signer_id:'00000000-0000-4000-8000-000000000081',authority_epoch:4,revocation_watermark:2,issued_at_ms:100,expires_at_ms:500};
  const signature_b64=sign(null,encodeFixtureReceiptProof(statement),keyPair.privateKey).toString('base64');
- await assert.rejects(invalid.appendNegativeReceipt({...data,proof:{statement,signature_b64}}),{code:'FIXTURE_RECEIPT_AUTHORITY_STALE'});
+ await assert.rejects(invalid.appendNegativeReceipt({...data,proof:{statement,signature_b64},lease:makeFixtureLease(q.notice_id)}),{code:'FIXTURE_RECEIPT_AUTHORITY_STALE'});
 });
 
 function fixtureSignedInput(q){
