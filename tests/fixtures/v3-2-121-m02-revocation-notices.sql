@@ -256,3 +256,32 @@ REVOKE ALL ON FUNCTION v106_test.fixture_append_negative_receipt(
  uuid,uuid,char(64),integer,text,char(64),char(64),text,text,integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v106_test.fixture_append_negative_receipt(
  uuid,uuid,char(64),integer,text,char(64),char(64),text,text,integer) TO v106_receipt_writer_a;
+
+-- Durable fixture consumption: unique requests and one recovery for each new key version.
+-- Only fixture DB owner writes; no receipt, auditor or ordinary writer role gets INSERT.
+CREATE TABLE v106_test.fixture_recovery_consumptions (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ request_id uuid NOT NULL,
+ request_digest char(64) NOT NULL,
+ key_version integer NOT NULL CHECK(key_version>=2),
+ revocation_audit_digest char(64) NOT NULL,
+ approver_audit_id uuid NOT NULL,
+ approver_security_id uuid NOT NULL,
+ anchor_source text NOT NULL CHECK(anchor_source='FIXTURE_SEPARATE_ARCHIVE'),
+ hold_active boolean NOT NULL DEFAULT true CHECK(hold_active IS TRUE),
+ consumed_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(organization_id,request_id),
+ UNIQUE(organization_id,key_version),
+ CHECK(approver_audit_id<>approver_security_id)
+);
+REVOKE ALL ON v106_test.fixture_recovery_consumptions FROM PUBLIC;
+CREATE FUNCTION v106_test.fixture_recovery_no_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $recovery_immutable$
+BEGIN
+ RAISE EXCEPTION 'V121_RECOVERY_CONSUMPTION_IMMUTABLE';
+END;
+$recovery_immutable$;
+CREATE TRIGGER fixture_recovery_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_recovery_consumptions FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_recovery_no_mutation();
