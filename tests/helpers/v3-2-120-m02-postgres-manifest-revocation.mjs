@@ -18,9 +18,9 @@ const scoped=x=>exact(x,SCOPE)&&SCOPE.every(k=>typeof x[k]==='string'&&UUID.test
 const params=x=>SCOPE.map(k=>x[k].toLowerCase());
 const fault=c=>{const e=new Error(c);e.code=c;throw e;};
 const intSeq=x=>Number.isSafeInteger(x)&&x>=1&&x<=128;
-async function loadV119History(c,scope){
+async function loadV119History(c,scope,lock=true){
  const h=await c.query(
-  'SELECT sequence,event_digest,student_count,source_snapshot_digest,hold_active FROM v106_test.fixture_incident_gap_manifest_heads WHERE organization_id=$1 AND incident_id=$2 FOR SHARE',
+  'SELECT sequence,event_digest,student_count,source_snapshot_digest,hold_active FROM v106_test.fixture_incident_gap_manifest_heads WHERE organization_id=$1 AND incident_id=$2'+(lock?' FOR SHARE':''),
   params(scope));
  if(h.rowCount!==1||h.rows[0].hold_active!==true)
   fault('EXPORT_REVOCATION_TARGET_HISTORY_MISSING');
@@ -147,7 +147,7 @@ export function createIsolatedPostgresManifestRevocation({
   const c=await connect();let began=false;
   try{
    await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');began=true;
-   const latest=await loadV119History(c,scope);
+   const latest=await loadV119History(c,scope,false);
    const summary=await captureIsolatedIncidentGapSnapshot(
     c,scope,t,receiptOverdueMs,maxStudents);
    await c.query('COMMIT');began=false;
