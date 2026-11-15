@@ -29,3 +29,10 @@
 
 ## 下一验收门
 新增只追加式的模拟负向回执及单调状态水位，覆盖过期、乱序、撤销后重放与跨租户访问；补充 SQL 故障回滚和可信模拟接收人集快照一致性。完整外部责任人认证及真实接收确认仍属阻断项；不得将本 PR 标成可合并。
+
+## V121 negative-only receipt extension (CI-only)
+- 增加一次性 PostgreSQL `fixture_revocation_negative_receipts`，仅限受限租户角色追加写入；FORCE RLS、禁止受限角色 UPDATE/DELETE、强制 `hold_active=true`。
+- `appendNegativeReceipt` 采用 SERIALIZABLE 与通知级作用域锁；根据已入队通知核对 V119/V120 来源，仅接受 `NEGATIVE_RECEIPT` 与 `COPY_NOT_RETRACTABLE`。序号必须连续，前摘要必须匹配；同序号同状态重试幂等，冲突状态或插队均拒绝。
+- 回读覆盖报告会验证模拟负向回执链，取同一接收人的最高通知 epoch；同一 epoch 重复记录被拒绝。不能将任何模拟负向回执视为真实接收确认或解除 HOLD。
+- SQL 测试新增回执顺序、重放、伪造正向 ACK、跨租户 RLS、篡改、不可改写及永久隔离断言。本地 fixture 接收人登记仍不等于真实持有人权威清单；没有对真实外部系统发送或接收任何消息。
+- 尚未实现真实投递/回执证书、过期签名校验、事务性接收人全集快照以及消息网络重试 worker。SQL 当前只保障隔离测试表内的一致性；不得合并、部署或声称真实撤权成功。
