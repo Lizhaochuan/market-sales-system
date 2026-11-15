@@ -10,7 +10,7 @@ import {signFixtureAuditAnchor,verifyFixtureAuditAnchor,verifyFixtureActiveAudit
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
-import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake,verifyFixtureExt001BytesAndFingerprint} from '../../src/cross-module-v121-iam-evidence.mjs';
+import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake,verifyFixtureExt001BytesAndFingerprint,issueFixtureExt001VerifiedProvenance} from '../../src/cross-module-v121-iam-evidence.mjs';
 const hash=o=>createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const a='11111111-1111-4111-8111-111111111111';
 const b='22222222-2222-4222-8222-222222222222';
@@ -2325,7 +2325,10 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   proof.fingerprint.evidence_e2_digest,proof.fingerprint.issuer_id,
   proof.fingerprint.reviewer_id,proof.fingerprint.issuer_signature_digest,
   proof.fingerprint.reviewer_signature_digest,new Date(proof.fingerprint.valid_until_ms)];
- const attest=async(revision,proof)=>attester.query(attestSql,provenanceParams(revision,proof));
+ const attest=async(revision,proof)=>issueFixtureExt001VerifiedProvenance({
+  envelope:proof.envelope,artifactBytes:proof.artifactBytes,trustedKeys,
+  nowMs:now,revisionNo:revision,receiptId:proof.receiptId,attester
+ });
  const status=async revision=>(await readOnly.query(statusSql,[a,revision])).rows[0];
  try{
   await audit.query(await readFile(new URL('../fixtures/v3-2-121-ext001-iam-evidence-ledger.sql',import.meta.url),'utf8'));
@@ -2337,8 +2340,14 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    /V121_IAM_PROVENANCE_MISSING_OR_MISMATCH/);
   await assert.rejects(writerA.query(attestSql,provenanceParams(1,p1)),/permission denied/);
   await assert.rejects(attester.query(receiptSql,params(1,p1)),/permission denied/);
-  assert.equal((await attest(1,p1)).rows[0].verdict,'ATTESTED_SYNTHETIC_STILL_HOLD');
-  assert.equal((await attest(1,p1)).rows[0].verdict,'EXACT_PROVENANCE_RETRY_STILL_HOLD');
+  assert.equal((await attest(1,p1)).verdict,'ATTESTED_SYNTHETIC_STILL_HOLD');
+  assert.equal((await attest(1,p1)).verdict,'EXACT_PROVENANCE_RETRY_STILL_HOLD');
+  await assert.rejects(attest(2,p1),{code:'V121_IAM_PROVENANCE_SIGNED_REVISION_MISMATCH'});
+  await assert.rejects(attest(1,{...p1,artifactBytes:new Map([
+   ['EXT-001-E1',Buffer.from('files changed after review')],
+   ['EXT-001-E2',p1.artifactBytes.get('EXT-001-E2')]
+  ])}),{code:'V121_IAM_FILE_DIGEST_MISMATCH'});
+
   assert.equal((await writerA.query(receiptSql,params(1,p1))).rows[0].verdict,
    'REGISTERED_SYNTHETIC_STILL_HOLD');
   assert.equal((await writerB.query(receiptSql,params(1,p1))).rows[0].verdict,
