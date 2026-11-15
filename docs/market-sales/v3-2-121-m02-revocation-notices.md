@@ -281,3 +281,11 @@
 - 所有准入签发及检查点写入，在签发者/快照锁之前统一取得同机构的 `v121-attester-safety` 事务锁。任一全机构安全隔离事件（或适用的失败项隔离事件）存在时，数据库返回 `V121_ATTESTER_QUARANTINED`；即使准入凭证先前有效、尚未过期、签名正确也不能消费。这在单个模拟 PostgreSQL 审计数据库内给隔离记录与写入建立确定性先后顺序。
 - PostgreSQL 负向验收模拟：验签账号被滥用直接向 SQL 追加**密码学签名错误但字段合法的凭证**；独立诊断识别 `ATTESTER_SIGNATURE_INVALID`，安全账号提交机构级隔离，未消费的真实凭证和伪造凭证此后都被拒绝，新的 attester 凭证申请也被拒绝。历史凭证及已落地锚点只读保留，不消除原有安全审计证据，三个模块 HOLD 与事故 STOP 始终有效。
 - **实际风险边界**：本轮属于可疑签发的**事后检测与停止扩散机制**，不是阻止拥有 attester 凭据者第一次伪签发的可信硬件边界。模拟检测器需独立运行并由独立安全身份提交隔离事件；若监控与安全凭据同时被攻破或检测存在时间延迟，恶意锚点可能先于隔离提交。生产仍需外部安全监控、不可绕过的验签与凭据认证、独立审核、取证和正式释放隔离流程。当前一律 CI-only、Draft、不合并、不部署，`hold_active=true`、`release_eligible=false`。
+
+## V121 安全隔离事件误报调查与独立双域复核（CI-only）
+- 在独立隔离审计数据库中新增追加式 `quarantine_assessments` 和 `quarantine_assessment_reviews`：一个原始隔离事件可以有依次递增的调查版本，每个版本固定调查人、调查证据摘要和 `INCONCLUSIVE` / `CONFIRMED_COMPROMISE` / `FALSE_POSITIVE_CANDIDATE` 结论；原始隔离事件、调查历史及审核历史均不可覆盖或删除。
+- 独立 `v121_anchor_investigator` 只能通过受限入口提交下一版调查；`v121_anchor_security_reviewer` 和 `v121_anchor_audit_reviewer` 分别只能提交 SECURITY / AUDIT 职责审核，审核人不能是原调查人，也不能在同一版本中冒用两种职责。每条审核必须绑定对应调查版本的证据摘要。
+- 调查提交和双域审核对同一机构+隔离事件使用事务级锁，审核获得锁后重新验证当前最新调查版本，拒绝 `V121_QUARANTINE_ASSESSMENT_SUPERSEDED`。只统计当前最新版本的独立复核通过意见，**旧调查版本的两份认可不能自动沿用**。原始事件与调查不可跨机构读写，测试角色限定隔离租户范围。
+- `quarantine_review_diagnostics` 输出当前最新调查版本、结论、双方认可数量与固定 `QUARANTINE_RETAINED`。**即使最新调查为 `FALSE_POSITIVE_CANDIDATE` 且 SECURITY、AUDIT 双方均认可，也依旧保持原始隔离、所有历史记录、`quarantine_active=true`、`hold_active=true` 和 `release_eligible=false`**。本轮没有创建任何恢复凭据、撤销隔离、跳过签名验真或改变生产资金订单的路径。
+- CI 覆盖无原始事件、跨租户尝试、错误复核职责、调查人自审、重复审核、跨职责重用审核人、错误证据摘要、旧版复核失效及两次调查后重建最新诊断。原始隔离事件、CRM 三模块 HOLD 和事故 STOP 全程保留。
+- **限制**：这是隔离 PostgreSQL 中的工作流边界测试，尚无真实安全调查的证据采集、独立身份认证、法律合规调查确认或生产隔离解除机制。误报候选仅是待调查结论，**不是恢复批准**。继续 Draft / CI-only / 不合并 / 不部署。
