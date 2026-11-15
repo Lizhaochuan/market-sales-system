@@ -276,10 +276,10 @@ test('durable signer watermark blocks old signed proof after adapter restart',as
  const value=fixtureSignedInput(q);
  const elevated={...value.proof.statement,revocation_watermark:3};
  const proof={statement:elevated,signature_b64:sign(null,encodeFixtureReceiptProof(elevated),keyPair.privateKey).toString('base64')};
- const higher=createIsolatedPostgresRevocationNotices({leaseGate:fixtureGate(),pool:writer,
+ const higher=createIsolatedPostgresRevocationNotices({leaseGate:fixtureGate({revocation_watermark:3}),pool:writer,
   receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
   receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:3,active:true})});
- const first=await higher.appendNegativeReceipt({...value,proof});
+ const first=await higher.appendNegativeReceipt({...value,proof,lease:makeFixtureLease(value.notice_id,4,3)});
  assert.equal(first.hold_active,true);
  const row=await writer.query('SELECT revocation_watermark FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',[a,incident,elevated.signer_id]);
  assert.equal(row.rows[0].revocation_watermark,3);
@@ -299,6 +299,11 @@ test('SQL trigger prevents direct watermark regression and tenant deletion',asyn
  assert.equal(other.rows[0].n,0);
 });
 
+test('receipt adapter refuses absent lease verifier even with signed proof',async()=>{
+ assert.throws(()=>createIsolatedPostgresRevocationNotices({pool:writer,
+  receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
+  receiptProofAuthority:proofAuthority}),/LEASE_GATE_REQUIRED/);
+});
 test('leased SQL receipt commits durable sequence and blocks replay after adapter restart',async()=>{
  const leaseKeys=generateKeyPairSync('ed25519');
  const signerId='00000000-0000-4000-8000-000000000082';
