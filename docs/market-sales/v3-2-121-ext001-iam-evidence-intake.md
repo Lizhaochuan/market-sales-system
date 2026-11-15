@@ -61,3 +61,17 @@ CI 用 `tests/contracts/v3-2-121-iam-evidence.test.mjs` 测试完整合成 E1/E2
 **证据源边界：** 当前 Buffer 是 CI 合成文件，不是从生产 IAM 或外部档案系统下载的真实证据。SHA-256 校验能证明**提交给验证器的那些字节**与原签名声明一致；如果同一受信验签账号遭入侵、文件没有从可信源获取，或签发后外部仓库内容被替换而未重新取回校验，数据库本身无法感知此事。生产必须进一步使用不可变内容寻址存储、受控对象版本 ID、独立真实 IAM 导出源、可信时间与安全审核身份，并在关键读取环节重新获取和核对字节。本轮不声称这些外部能力已具备。
 
 本轮仍只编制测试与接收规则。EXT-001 保持 `UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`；没有将合成证明写入生产验收矩阵。继续 PR #129 Draft，所有跨模块 HOLD 和禁止合并/部署约束不变。
+
+## EXT-001 外部存储版本和独立审计镜像重读（CI 模拟）
+
+新增 `src/cross-module-v121-iam-source-version.mjs` 的独立来源校验协议；此处的“来源”仅为两个被注入的**隔离测试读取器**，不连接真实云存储、IAM、Google Drive 或对象档案系统。
+
+1. **锁定对象身份**：来源清单绑定机构、证据包 `revision_no` / `revision_id`、完整 SECURITY/AUDIT 双签名包 SHA-256、E1/E2 的 `fixture://` 引用、不可重复的对象版本 ID、递增 generation 和文件 SHA-256。不能只用可变的“文件路径”代替对象版本。
+2. **两类独立来源证明**：主存储 `FIXTURE_PRIMARY_STORE` 和审计镜像 `FIXTURE_AUDIT_MIRROR` 各使用不同模拟身份的 Ed25519 密钥对来源清单签名，密钥不得复用 SECURITY/AUDIT 证据提交者身份。可信公钥与活动状态由模拟校验入口显式提供。来源清单的有效期不得超过原审核证据，过期不得使用。
+3. **重读当前内容**：两个读取器必须分别从相同的固定对象引用读取**当前版本**，核对版本 ID、generation、来源类型、声明的内容哈希、实际 Buffer 字节哈希、模拟不可变锁状态和观测时间（窗口最长 30 秒）。主存储和审计镜像结果必须一致，而且连续完成**两轮重新读取**。任意读取失败、版本更新、文件被替换、镜像未更新、锁状态异常或观测时间过旧均 fail-closed。
+4. **签发前二次保护**：`issueFixtureExt001FromTwoSources` 只有在双来源重读和签名验真完成后，才把最新核验过的两个 Buffer 交给 `issueFixtureExt001VerifiedProvenance`，由其再次校验文件与 SECURITY/AUDIT 证据签名，申请隔离 PostgreSQL 的来源凭证。来源异常时不得调用数据库 attester。
+5. **边界与后续真实交接**：模拟读取器由测试用代码提供，签名身份也来自临时密钥，**不代表生产来源已认证**；对签名者的相互独立性、云版本不可变锁、可信时间戳与主存储—审计系统的真正故障独立仍需要正式验证。此前的隔离验签入口仍存在，生产版本必须通过独立 IAM 权限禁止绕开完整来源校验。外部真实证据还必须使用受信对象存储、内容寻址索引、访问授权及只读审核日志，严格遵守隐私与数据最少化原则。
+
+`tests/contracts/v3-2-121-iam-source-version.test.mjs` 覆盖有效对象签名、版本切换、相同路径文件字节替换、审计镜像落后、不可变锁缺失、已撤销来源密钥、旧审核沿用、新版证据与旧清单冲突、来源不可用和失效时绝不签发。所有成功结果仍固定 `production_source_authenticated=false`、`production_evidence_collected=false`、`release_authorized=false`、`hold_active=true`、`release_eligible=false`。
+
+EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`；PR #129 保持 Draft、CI-only，不允许合并、部署或使用真实学生/订单/资金/履约数据测试。
