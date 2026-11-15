@@ -4,6 +4,8 @@ import {readFile} from 'node:fs/promises';
 import {createHash,createHmac,randomBytes,generateKeyPairSync,sign} from 'node:crypto';
 import {encodeFixtureReceiptProof} from '../../src/cross-module-fixture-receipt-proof.mjs';
 import {createFixtureLeaseGate,encodeFixtureLease} from '../../src/cross-module-fixture-authority-lease.mjs';
+import {createFixtureRecoveryGate,encodeFixtureRecoveryRequest,encodeFixtureRecoveryApproval} from '../../src/cross-module-fixture-dual-approval-anchor.mjs';
+import {createFixtureRecoveryIssuance} from '../helpers/v3-2-121-fixture-recovery-issuance.mjs';
 import pg from 'pg';
 import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-postgres-revocation-notices.mjs';
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
@@ -636,4 +638,85 @@ test('corrupt active key issuance audit fails closed without changing HOLD recei
  }
  const result=await adapter.appendNegativeReceipt(receipt);
  assert.equal(result.hold_active,true);
+});
+
+const recoveryApproverIds={
+ AUDIT_REVIEW:'00000000-0000-4000-8000-0000000000d1',
+ SECURITY_REVIEW:'00000000-0000-4000-8000-0000000000e2'
+};
+const recoveryApproverKeys=Object.fromEntries(Object.keys(recoveryApproverIds).map(x=>[x,generateKeyPairSync('ed25519')]));
+async function recoveryInputs(version,id){
+ const event=await admin.query('SELECT event_digest FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1 AND key_version=$2 AND event_kind=$3',[a,version-1,'KEY_REVOKED']);
+ assert.equal(event.rowCount,1);
+ const request={organization_id:a,incident_id:incident,
+  request_id:id,key_version:version,audit_digest:event.rows[0].event_digest,
+  issued_at_ms:100,expires_at_ms:200};
+ const d=createHash('sha256').update(encodeFixtureRecoveryRequest(request)).digest('hex');
+ const approvals=Object.keys(recoveryApproverIds).map(role=>{
+  const basic={approver_id:recoveryApproverIds[role],role,request_digest:d};
+  return {...basic,signature_b64:sign(null,encodeFixtureRecoveryApproval(basic),recoveryApproverKeys[role].privateKey).toString('base64')};
+ });
+ return {request,approvals};
+}
+function freshRecoveryIssuer({fault,anchorOk=true}={}){
+ const gate=createFixtureRecoveryGate({
+  approverKeys:Object.fromEntries(Object.keys(recoveryApproverIds).map(role=>[role,
+   {approver_id:recoveryApproverIds[role],publicKey:recoveryApproverKeys[role].publicKey}])),
+  clock:()=>150,
+  readAudit:async r=>{
+   const event=await admin.query('SELECT event_kind,key_version,event_digest FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1 AND key_version=$2 AND event_kind=$3',[r.organization_id,r.key_version-1,'KEY_REVOKED']);
+   return event.rowCount===1?{organization_id:r.organization_id,...event.rows[0]}:null;
+  },
+  readAnchor:async e=>({request_digest:e.request_digest,audit_digest:e.audit_digest,
+   anchored:anchorOk,source:'FIXTURE_SEPARATE_ARCHIVE'})
+ });
+ return createFixtureRecoveryIssuance({adminPool:admin,recoveryGate:gate,
+  beforeKeyInsert:fault|| (async()=>{})});
+}
+test('two-person recovery issuance and durable replay fencing across adapter instances',async()=>{
+ await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=3',[a]);
+ const input4=await recoveryInputs(4,'00000000-0000-4000-8000-0000000000f4');
+ const key4=randomBytes(32);
+ await assert.rejects(freshRecoveryIssuer().issue({...input4,approvals:input4.approvals.slice(0,1),attestationKey:key4}),
+  {code:'RECOVERY_TWO_PERSON_REQUIRED'});
+ await assert.rejects(freshRecoveryIssuer({anchorOk:false}).issue({...input4,attestationKey:key4}),
+  {code:'RECOVERY_ANCHOR_UNVERIFIED'});
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=4')).rows[0].n,0);
+ const good=await freshRecoveryIssuer().issue({...input4,attestationKey:key4});
+ assert.equal(good.fixture_key_issued,true);
+ assert.equal(good.hold_active,true);
+ assert.equal(good.release_eligible,false);
+ const rows=await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE organization_id=$1 AND request_id=$2',[a,input4.request.request_id]);
+ assert.equal(rows.rows[0].n,1);
+ await assert.rejects(freshRecoveryIssuer().issue({...input4,attestationKey:randomBytes(32)}),
+  {code:'RECOVERY_ALREADY_CONSUMED'});
+ await assert.rejects(receiptWriter.query('INSERT INTO v106_test.fixture_recovery_consumptions(organization_id,incident_id,request_id,request_digest,key_version,revocation_audit_digest,approver_audit_id,approver_security_id,anchor_source) VALUES($1,$2,$3,$4,4,$5,$6,$7,$8)',[
+  a,incident,'00000000-0000-4000-8000-0000000000ee','a'.repeat(64),input4.request.audit_digest,
+  recoveryApproverIds.AUDIT_REVIEW,recoveryApproverIds.SECURITY_REVIEW,'FIXTURE_SEPARATE_ARCHIVE']),/permission denied/);
+});
+test('two independent issuance instances cannot both consume one recovery approval',async()=>{
+ await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=4',[a]);
+ const input5=await recoveryInputs(5,'00000000-0000-4000-8000-0000000000f5');
+ const outcomes=await Promise.allSettled([
+  freshRecoveryIssuer().issue({...input5,attestationKey:randomBytes(32)}),
+  freshRecoveryIssuer().issue({...input5,attestationKey:randomBytes(32)})
+ ]);
+ assert.equal(outcomes.filter(x=>x.status==='fulfilled').length,1);
+ assert.equal(outcomes.filter(x=>x.status==='rejected').length,1);
+ assert.ok(['23505','40001','RECOVERY_ALREADY_CONSUMED','RECOVERY_VERSION_NOT_NEXT'].includes(outcomes.find(x=>x.status==='rejected').reason.code));
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=5')).rows[0].n,1);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=5 AND active=true')).rows[0].n,1);
+});
+test('recovery fault rolls back durable approval consumption and key issuance together',async()=>{
+ await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=5',[a]);
+ const input6=await recoveryInputs(6,'00000000-0000-4000-8000-0000000000f6');
+ const key6=randomBytes(32);
+ await assert.rejects(freshRecoveryIssuer({fault:async()=>{throw Error('simulated key provisioning outage');}})
+  .issue({...input6,attestationKey:key6}),/simulated key provisioning outage/);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=6')).rows[0].n,0);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=6')).rows[0].n,0);
+ const retry=await freshRecoveryIssuer().issue({...input6,attestationKey:key6});
+ assert.equal(retry.hold_active,true);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=6')).rows[0].n,1);
+ await assert.rejects(admin.query('DELETE FROM v106_test.fixture_recovery_consumptions WHERE key_version=6'),/V121_RECOVERY_CONSUMPTION_IMMUTABLE/);
 });
