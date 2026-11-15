@@ -1,0 +1,22 @@
+name: V3.2-99 isolated administrative receipt lifecycle
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-attestation-lifecycle.mjs'
+      - 'tests/security/v3-2-99-m02-attestation-lifecycle.test.mjs'
+      - '.github/workflows/v3-2-99-attestation-lifecycle.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-revocation-resign:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check isolated acknowledgement lifecycle syntax
+        run: node --check src/cross-module-attestation-lifecycle.mjs
+      - name: Verify revocation, fresh re-sign and upstream snapshot tests
+        run: node --test tests/security/v3-2-99-m02-attestation-lifecycle.test.mjs tests/security/v3-2-98-m02-final-review-attestation.test.mjs tests/security/v3-2-97-m02-final-review-snapshot.test.mjs
