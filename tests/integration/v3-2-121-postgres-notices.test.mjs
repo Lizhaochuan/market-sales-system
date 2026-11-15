@@ -77,6 +77,8 @@ test.before(async()=>{
  await admin.query(await readFile(new URL('../fixtures/v3-2-121-m02-revocation-notices.sql',import.meta.url),'utf8'));
  await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,1,$2,true)',[a,receiptAttestationKey]);
  await admin.query('INSERT INTO v106_test.fixture_recovery_approval_attestation(organization_id,attestation_version,approval_key,active) VALUES($1,1,$2,true)',[a,approvalAttestationKey]);
+ await admin.query('INSERT INTO v106_test.fixture_recovery_emergency_stops(organization_id,incident_id,issuance_blocked) VALUES($1,$2,false)',[a,incident]);
+ await admin.query('INSERT INTO v106_test.fixture_cross_module_holds(organization_id,incident_id,module_name) SELECT $1,$2,unnest($3::text[])',[a,incident,['SALES','FINANCE','ACADEMIC']]);
  const m={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),status:'FIXTURE_EXPORT'};
  const md=hash(m);
  const r={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),target_manifest_sequence:1,
@@ -795,4 +797,47 @@ test('issuer cannot manipulate approval key rotation or the isolated DB clock',a
  await assert.rejects(issuerWriter.query('UPDATE v106_test.fixture_recovery_approval_attestation SET active=true'),/permission denied/);
  await assert.rejects(issuerWriter.query('SELECT * FROM v106_test.fixture_recovery_clock'),/permission denied/);
  await assert.rejects(issuerWriter.query('UPDATE v106_test.fixture_recovery_clock SET now_ms=150'),/permission denied/);
+});
+
+test('compromised approval signer cannot bypass independent incident stop; sales finance and academic remain HOLD',async()=>{
+ const approvals=await admin.query('SELECT approval_key FROM v106_test.fixture_recovery_approval_attestation WHERE organization_id=$1 AND attestation_version=2 AND active=true',[a]);
+ assert.equal(approvals.rowCount,1);
+ const approvalKey=approvals.rows[0].approval_key;
+ await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=8',[a]);
+ const request=await recoveryInputs(9,'00000000-0000-4000-8000-0000000000a9');
+ const requestDigest=createHash('sha256').update(encodeFixtureRecoveryRequest(request.request)).digest('hex');
+ const auditId=request.approvals.find(x=>x.role==='AUDIT_REVIEW').approver_id;
+ const securityId=request.approvals.find(x=>x.role==='SECURITY_REVIEW').approver_id;
+ const key=randomBytes(32);
+ const envelope=['v121-recovery-attestation-v2',2,100,200,a,incident,request.request.request_id,requestDigest,
+  9,request.request.audit_digest,auditId,securityId,createHash('sha256').update(key).digest('hex')].join('|');
+ const mac=createHmac('sha256',approvalKey).update(envelope).digest('hex');
+ const sql='SELECT v106_test.fixture_issue_recovery_key($1::uuid,$2::uuid,$3::uuid,$4::char(64),$5::integer,$6::char(64),$7::uuid,$8::uuid,$9::bytea,$10::text,$11::integer,$12::bigint,$13::bigint)';
+ const args=[a,incident,request.request.request_id,requestDigest,9,request.request.audit_digest,auditId,securityId,key,mac,2,100,200];
+ // Independently activated by incident owner; issuance role cannot disable the stop.
+ await admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=true WHERE organization_id=$1 AND incident_id=$2',[a,incident]);
+ await assert.rejects(issuerWriter.query(sql,args),/V121_ISSUANCE_EMERGENCY_STOP/);
+ await assert.rejects(freshRecoveryIssuer({approvalKey,approvalVersion:2}).issue({
+  ...request,attestationKey:key}),{code:'V121_ISSUANCE_EMERGENCY_STOP'});
+ await assert.rejects(issuerWriter.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false'),/permission denied/);
+ await assert.rejects(receiptWriter.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false'),/permission denied/);
+ const rows=await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident]);
+ assert.deepEqual(rows.rows.map(r=>[r.module_name,r.hold_active,r.release_eligible]),[
+  ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+ await assert.rejects(admin.query('UPDATE v106_test.fixture_cross_module_holds SET hold_active=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),/V121_CROSS_MODULE_HOLD_IMMUTABLE|check constraint/);
+ await assert.rejects(issuerWriter.query('SELECT * FROM v106_test.fixture_cross_module_holds'),/permission denied/);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=9')).rows[0].n,0);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=9')).rows[0].n,0);
+});
+test('missing independent incident stop record fails closed despite otherwise valid recovery',async()=>{
+ await admin.query('DELETE FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident]);
+ const req=await recoveryInputs(9,'00000000-0000-4000-8000-0000000000b9');
+ const approval=await admin.query('SELECT approval_key FROM v106_test.fixture_recovery_approval_attestation WHERE organization_id=$1 AND attestation_version=2',[a]);
+ try{
+  await assert.rejects(freshRecoveryIssuer({approvalKey:approval.rows[0].approval_key,approvalVersion:2})
+   .issue({...req,attestationKey:randomBytes(32)}),{code:'V121_ISSUANCE_EMERGENCY_STOP'});
+ }finally{
+  await admin.query('INSERT INTO v106_test.fixture_recovery_emergency_stops(organization_id,incident_id,issuance_blocked) VALUES($1,$2,true)',[a,incident]);
+ }
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=9')).rows[0].n,0);
 });
