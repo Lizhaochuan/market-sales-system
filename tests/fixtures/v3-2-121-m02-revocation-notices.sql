@@ -114,14 +114,13 @@ CREATE POLICY v121_wm_b ON v106_test.fixture_signer_watermarks FOR ALL TO v106_w
  USING(organization_id='22222222-2222-4222-8222-222222222222'::uuid)
  WITH CHECK(organization_id='22222222-2222-4222-8222-222222222222'::uuid);
 
--- Test-only MAC admission gate. Does NOT independently verify Ed25519 signatures.
--- Secret provisioned by fixture owner and never SELECT-granted to receipt roles.
+-- Test-only MAC admission gate, not an independent Ed25519 or IAM verifier.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE v106_test.fixture_receipt_attestation_secrets (
- organization_id uuid PRIMARY KEY, attestation_key bytea NOT NULL CHECK(octet_length(attestation_key)=32)
+ organization_id uuid PRIMARY KEY,
+ attestation_key bytea NOT NULL CHECK(octet_length(attestation_key)=32)
 );
 REVOKE ALL ON v106_test.fixture_receipt_attestation_secrets FROM PUBLIC;
--- SECURITY DEFINER owns table insertion; session_user and scope are checked explicitly.
 CREATE FUNCTION v106_test.fixture_append_negative_receipt(
  p_organization uuid,p_incident uuid,p_notice char(64),p_sequence integer,
  p_state text,p_previous char(64),p_digest char(64),p_payload text,p_attestation text)
@@ -139,8 +138,10 @@ BEGIN
     p_digest <> encode(sha256(convert_to(p_payload,'UTF8')),'hex') THEN
   RAISE EXCEPTION 'V121_RECEIPT_GATE_INVALID';
  END IF;
- BEGIN item:=p_payload::jsonb;
- EXCEPTION WHEN others THEN RAISE EXCEPTION 'V121_RECEIPT_GATE_INVALID_JSON';
+ BEGIN
+  item:=p_payload::jsonb;
+ EXCEPTION WHEN others THEN
+  RAISE EXCEPTION 'V121_RECEIPT_GATE_INVALID_JSON';
  END;
  IF jsonb_typeof(item) <> 'object' OR
     item->>'organization_id' <> p_organization::text OR
@@ -159,17 +160,7 @@ BEGIN
  SELECT attestation_key INTO secret FROM v106_test.fixture_receipt_attestation_secrets
  WHERE organization_id=p_organization;
  IF secret IS NULL OR p_attestation IS NULL OR
-    p_attestation !~ '^[a-f0-9]{64}
- (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,
-  previous_digest,receipt_digest,receipt_payload)
- VALUES(p_organization,p_incident,p_notice,p_sequence,p_state,
-        p_previous,p_digest,p_payload);
-END; $receipt_gate$;
-REVOKE ALL ON FUNCTION v106_test.fixture_append_negative_receipt(
- uuid,uuid,char(64),integer,text,char(64),char(64),text,text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION v106_test.fixture_append_negative_receipt(
- uuid,uuid,char(64),integer,text,char(64),char(64),text,text) TO v106_receipt_writer_a;
- OR
+    p_attestation !~ '^[a-f0-9]{64}$' OR
     p_attestation <> encode(public.hmac(convert_to(p_payload,'UTF8'),secret,'sha256'),'hex') THEN
   RAISE EXCEPTION 'V121_RECEIPT_ATTESTATION_REJECTED';
  END IF;
@@ -178,7 +169,8 @@ GRANT EXECUTE ON FUNCTION v106_test.fixture_append_negative_receipt(
   previous_digest,receipt_digest,receipt_payload)
  VALUES(p_organization,p_incident,p_notice,p_sequence,p_state,
         p_previous,p_digest,p_payload);
-END; $receipt_gate$;
+END;
+$receipt_gate$;
 REVOKE ALL ON FUNCTION v106_test.fixture_append_negative_receipt(
  uuid,uuid,char(64),integer,text,char(64),char(64),text,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v106_test.fixture_append_negative_receipt(
