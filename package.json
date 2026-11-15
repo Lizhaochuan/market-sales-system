@@ -7,6 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "setup:workspace": "node scripts/setup-isolated-workspace.mjs",
+    "test:workspace": "node --test tests/core/isolated-workspace.test.mjs",
     "start:isolated": "node src/server.mjs",
     "test:contracts": "node --test tests/contracts/contracts.test.mjs",
     "test:core": "node --test tests/core/core-api.test.mjs",
@@ -21,3 +23,4 @@
     "@playwright/test": "1.56.1"
   }
 }
+

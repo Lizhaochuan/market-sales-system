@@ -1173,6 +1173,7 @@ async function refresh(){
   }
   render();
   await refreshIdentity();
+  window.dispatchEvent(new Event('isolated-session-change'));
 }
 function setView(view){
   state.view=view;
@@ -1184,6 +1185,7 @@ function setView(view){
   if(view==='audit')$('audit-list').replaceChildren();
 }
 function logout(notice=true){
+  window.dispatchEvent(new Event('isolated-session-clear'));
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
   state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
   state.campaignDrafts=[];state.campaignLoadError=false;
@@ -1849,3 +1851,4 @@ fetch('/api/v1/health',{cache:'no-store'}).then(r=>r.json()).then(r=>{
     $('external-login-form').querySelector('h2').textContent='严格员工测试模式登录';
   }
 }).catch(()=>{});
+

@@ -11,6 +11,9 @@ if(process.env.MS_STAGE!=='isolated-test'){
 const secret=process.env.AUTH_HMAC_SECRET;
 if(!secret||secret.length<32)throw new Error('Set a strong isolated-test-only AUTH_HMAC_SECRET');
 const strictStaffMode=process.env.MS_STRICT_STAFF_MODE==='1';
+const workspaceEnabled=process.env.MS_ENABLE_ISOLATED_WORKSPACE==='1';
+if(workspaceEnabled&&strictStaffMode)
+ throw new Error('Use separate disposable demo and strict employee services; planning workspace cannot bypass strict mode');
 if(!strictStaffMode&&!process.env.DATABASE_URL)
   throw new Error('DATABASE_URL required for the legacy isolated demonstration');
 // Strict mode never constructs a connection to the old broader business DB.
@@ -19,6 +22,12 @@ const pool=strictStaffMode?
   new pg.Pool({connectionString:process.env.DATABASE_URL,max:8});
 if(!strictStaffMode&&process.env.MS_REQUIRE_RESTRICTED_DB==='1')
   await assertRestrictedRuntime(pool);
+if(workspaceEnabled){
+ const check=await pool.query("SELECT current_database() AS db,to_regclass('ms_workspace.history') AS fixture");
+ if(!['ms_test','ms_workspace_test'].includes(check.rows[0]?.db)||!check.rows[0]?.fixture){
+  await pool.end();throw new Error('Planning workspace requires the dedicated disposable test database and fixture');
+ }
+}
 // This adapter verifies external OIDC access-token signatures, but is not a
 // production identity deployment. Configuration must be supplied as one unit.
 const oidcVars=['OIDC_ISSUER','OIDC_AUDIENCE','OIDC_JWKS_JSON'];
@@ -56,6 +65,7 @@ if(strictStaffMode){
   }
 }
 const server=createApp(pool,{
+  workspaceEnabled,
   secret,issuer:process.env.AUTH_ISSUER||'market-sales-test-issuer',
   devLoginSecret:strictStaffMode?undefined:process.env.DEV_LOGIN_SECRET,
   externalIdentity,
@@ -71,3 +81,4 @@ server.listen(port,'127.0.0.1',()=>{console.log('Market-sales isolated backend l
 const shutdown=async()=>{server.close();if(!strictStaffMode)await pool.end();if(strictPools)await strictPools.close();if(identityDirectoryPool)await identityDirectoryPool.end();};
 process.on('SIGINT',shutdown);
 process.on('SIGTERM',shutdown);
+

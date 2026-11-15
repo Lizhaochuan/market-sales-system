@@ -9,6 +9,7 @@ import { migratedLegacyReads, readLegacyViaStaffPool } from './scoped-legacy-rea
 import { migratedLegacyWrites, writeLegacyViaStaffPool } from './scoped-legacy-write-adapter.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
 import {buildIsolatedChannelCatalog} from './marketing-channel-catalog.mjs';
+import {workspaceOperation} from './isolated-business-workspace.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY=/^[a-zA-Z0-9_-]{16,128}$/;
@@ -58,6 +59,8 @@ async function getContact(c,ctx,id) {
   return x;
 }
 const routeDefs=[
+  ['GET',/^\/api\/v1\/isolated-workspace\/([a-z-]+(?:\/[a-z0-9-]+){0,2})$/,'workspace'],
+  ['POST',/^\/api\/v1\/isolated-workspace\/([a-z-]+(?:\/[a-z0-9-]+){0,2})$/,'workspace'],
   ['POST',/^\/api\/v1\/students$/,'createStudent'],
   ['GET',/^\/api\/v1\/students$/,'listStudents'],
   ['GET',/^\/api\/v1\/contacts$/,'listContacts'],
@@ -154,6 +157,7 @@ const routeDefs=[
 ];
 async function handle(c,ctx,op,p,body,requestUrl) {
   const org=ctx.user.organization_id,actor=ctx.user.id;
+  if(op==='workspace')return workspaceOperation(c,ctx,{method:body===null?'GET':'POST',parts:p[0].split('/'),body});
   if(op.startsWith('identity'))return identityOperation(c,ctx,op,p,body);
   switch(op){
     case 'getMe': {
@@ -538,9 +542,11 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false,workspaceEnabled=false}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
+  if(workspaceEnabled&&(strictStaffMode||scopedReadPools!==undefined||scopedWritePools!==undefined))
+    throw new Error('Fictional planning workspace requires a separate disposable demo; scoped/strict pools cannot be used');
   // Explicit opt-in migration: legacy demo behavior is unchanged unless
   // dedicated employee pools have been configured by the trusted server.
   // Providing an empty Map deliberately denies ALL migrated reads.
@@ -571,11 +577,12 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         return;
       }
       if(url.pathname==='/api/v1/health'&&req.method==='GET'){
-        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode}},requestId);return;
+        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode,isolated_workspace:workspaceEnabled}},requestId);return;
       }
       const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
         .find(x=>x.method===req.method&&x.match);
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
+      if(route.op==='workspace'&&!workspaceEnabled)fail(404,'NOT_FOUND','该隔离业务工作台未启用');
       // Channel maintenance is CI-only and requires approved strict staff logins.
       // Never run this through the broad tenant-level demo connection.
       if(!strictStaffMode&&['listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates','listCampaignCompensationResponsibilityMatrix','listCampaignCompensationEvidenceApprovalGates','listCampaignCompensationPacketFreezeGates','appendCampaignFinanceEscalationFollowup','reportCampaignFinanceIncident','triageCampaignFinanceIncident','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft'].includes(route.op))
@@ -700,3 +707,4 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
     } finally{if(c)c.release();}
   });
 }
+
