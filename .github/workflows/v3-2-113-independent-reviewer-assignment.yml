@@ -1,0 +1,70 @@
+name: V3.2-113 independent reviewer and six-role completeness
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-independent-reviewer-assignment.mjs'
+      - 'tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs'
+      - 'tests/helpers/v3-2-113-m02-postgres-reviewer-assignments.mjs'
+      - 'tests/fixtures/v3-2-113-m02-reviewer-assignment.sql'
+      - 'scripts/v3-2-113-setup-reviewer-assignments.mjs'
+      - 'spec/v3-2-113-m02-independent-reviewer-assignment.json'
+      - 'docs/V3.2-113_M02_INDEPENDENT_REVIEWER_ASSIGNMENT.md'
+      - '.github/workflows/v3-2-113-independent-reviewer-assignment.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-reviewer-assignment:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install temporary CI dependencies without altering lock files
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Verify new review and SQL syntax
+        run: |
+          node --check src/cross-module-independent-reviewer-assignment.mjs
+          node --check tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs
+          node --check tests/helpers/v3-2-113-m02-postgres-reviewer-assignments.mjs
+          node --check scripts/v3-2-113-setup-reviewer-assignments.mjs
+      - name: Initialize ephemeral V106 V109 V110 V112 and V113 audit fixtures
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+          node scripts/v3-2-112-setup-evidence-intake-sql.mjs
+          node scripts/v3-2-113-setup-reviewer-assignments.mjs
+      - name: Test V113 six-domain intake completeness, conflict and reviewer SQL
+        run: node --test tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs
+      - name: Regress V112 disposable evidence intake and V111 signer independence
+        run: node --test tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs tests/security/v3-2-111-m02-independent-evidence-review.test.mjs
+      - name: Regress V110 negative receipt and V109 lease revocation
+        run: node --test tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs
+      - name: Regress V108 V107 and V106 source and PostgreSQL protections
+        run: node --test tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Assert external reviewer owner and business authority remain absent
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-113-m02-independent-reviewer-assignment.json'));const d=s.hard_denials;if(s.parent_pr!==119||s.scenarios.length!==17||s.submitted_roles.length!==6||s.all_real_owners_unassigned!==true||s.verified_external_reviewers!==0||s.verified_external_owners!==0||s.reviewer_contract.actual_human_appointment_verified!==false||s.sql.production_migration_created!==false||s.real_external_contract_status!=='proposed-unimplemented'||Object.entries(d).some(([k,v])=>k==='hold_active'?v!==true:v!==false))process.exit(1)"
+      - name: Recheck V105 external admission evidence blockers
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Repeat eighteen V82 through V99 isolated safety suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
