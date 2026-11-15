@@ -176,6 +176,14 @@ test('source and audit witnesses cannot impersonate each other or reuse earlier 
  await rejects(()=>verifyFixtureExt001SourceVersion({
   ...x.options,sourceProof:mutate(m=>{m.objects[0].object_ref=m.objects[1].object_ref;})
  }),'V121_IAM_SOURCE_MANIFEST_INVALID');
+ // Different E1/E2 object refs cannot alias one pinned version identity.
+ // The manifest is signed again, so rejection proves a semantic check,
+ // rather than a generic signature mismatch.
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,sourceProof:mutate(m=>{
+   m.objects[1].object_version_id=m.objects[0].object_version_id;
+  })
+ }),'V121_IAM_SOURCE_MANIFEST_INVALID');
  const forged=structuredClone(x.options.sourceProof);
  forged.manifest.objects[0].object_version_id='fixture-v9-attacker';
  await rejects(()=>verifyFixtureExt001SourceVersion({...x.options,sourceProof:forged}),
