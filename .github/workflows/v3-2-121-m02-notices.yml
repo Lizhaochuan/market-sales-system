@@ -7,15 +7,38 @@ on:
     paths:
       - 'src/cross-module-revocation-notice-contract.mjs'
       - 'tests/contracts/v3-2-121-revocation-notices.test.mjs'
+      - 'tests/integration/v3-2-121-postgres-notices.test.mjs'
+      - 'tests/helpers/v3-2-121-m02-postgres-revocation-notices.mjs'
+      - 'tests/fixtures/v3-2-121-m02-revocation-notices.sql'
       - '.github/workflows/v3-2-121-m02-notices.yml'
 jobs:
-  notice-unit:
+  notice-unit-and-postgres:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      PGHOST: 127.0.0.1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+      - run: npm ci
       - run: node --test tests/contracts/v3-2-121-revocation-notices.test.mjs
+      - run: node --test tests/integration/v3-2-121-postgres-notices.test.mjs
