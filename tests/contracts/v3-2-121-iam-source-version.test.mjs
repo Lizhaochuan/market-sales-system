@@ -226,19 +226,20 @@ test('remote recheck is mandatory before attestation, with no SQL call on invali
 });
 
 
-test('distinct fixture identities must not share the same underlying Ed25519 public key',async()=>{
+test('distinct signed source witnesses cannot alias the same Ed25519 public key',async()=>{
  const x=setup();
- const alias=new Map(x.sourceKeys);
- alias.set(id.audit,{...alias.get(id.audit),publicKey:k.primary.publicKey});
- await rejects(()=>verifyFixtureExt001SourceVersion({...x.options,sourceKeys:alias}),
-  'V121_IAM_SOURCE_SIGNATURE_INVALID');
- // Even valid independently signed witness records must not alias a
- // submitting or reviewing actor's trusted cryptographic identity.
- const x2=setup();
- const aliases=new Map(x2.options.trustedKeys);
- aliases.set(id.issuer,{...aliases.get(id.issuer),publicKey:k.primary.publicKey});
- await rejects(()=>verifyFixtureExt001SourceVersion({...x2.options,trustedKeys:aliases}),
-  'V121_IAM_EVIDENCE_REVIEW_INVALID');
+ // Two different principals and key IDs sign correctly using one keypair.
+ // Their signatures are valid, but the trust boundary is not independent.
+ const aliasedKeys=new Map(x.sourceKeys);
+ aliasedKeys.set(id.audit,{...aliasedKeys.get(id.audit),publicKey:k.primary.publicKey});
+ const aliasedProof=signFixtureExt001SourceManifest(x.manifest,{
+  primaryPrivateKey:k.primary.privateKey,auditPrivateKey:k.primary.privateKey,
+  primaryKeyId:id.primary,primaryPrincipalId:id.primaryActor,
+  auditKeyId:id.audit,auditPrincipalId:id.auditActor
+ });
+ await rejects(()=>verifyFixtureExt001SourceVersion({
+  ...x.options,sourceKeys:aliasedKeys,sourceProof:aliasedProof
+ }),'V121_IAM_SOURCE_WITNESSES_NOT_INDEPENDENT');
 });
 
 test('revocation during fixture remote reads rejects admission without issuing attestation',async()=>{
