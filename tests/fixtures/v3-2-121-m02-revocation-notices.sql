@@ -1019,7 +1019,7 @@ RETURNS TABLE(
  history_complete boolean, reviews_consistent boolean, domains_held integer,
  emergency_stop_active boolean, status text, hold_active boolean,
  release_eligible boolean
-) LANGUAGE plpgsql SECURITY DEFINER
+) LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path=pg_catalog,v106_test AS $rebuild$
 DECLARE
  min_version integer;
@@ -1099,4 +1099,155 @@ END;
 $rebuild$;
 REVOKE ALL ON FUNCTION v106_test.fixture_rebuild_uat_state(uuid,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v106_test.fixture_rebuild_uat_state(uuid,uuid)
+ TO v106_state_reader;
+
+
+-- Append-only CI snapshot baseline; snapshot capture is fixture-admin-owned,
+-- NOT proof that any independent production backup or external audit exists.
+CREATE TABLE v106_test.fixture_uat_state_snapshots (
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ snapshot_sequence integer NOT NULL CHECK(snapshot_sequence>=1),
+ remediation_version integer NOT NULL CHECK(remediation_version>=1),
+ accepted_review_roles integer NOT NULL CHECK(accepted_review_roles>=0),
+ observed_digest char(64) NOT NULL CHECK(observed_digest ~ '^[a-f0-9]{64}$'),
+ hold_active boolean NOT NULL DEFAULT true CHECK(hold_active IS TRUE),
+ release_eligible boolean NOT NULL DEFAULT false CHECK(release_eligible IS FALSE),
+ captured_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+ PRIMARY KEY(organization_id,failure_id,snapshot_sequence),
+ FOREIGN KEY(organization_id,failure_id)
+  REFERENCES v106_test.fixture_uat_failures(organization_id,failure_id)
+);
+REVOKE ALL ON v106_test.fixture_uat_state_snapshots FROM PUBLIC;
+CREATE FUNCTION v106_test.fixture_require_snapshot_sequence() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $snapshot_sequence$
+DECLARE last_sequence integer;
+BEGIN
+ PERFORM pg_advisory_xact_lock(hashtextextended(
+  'v121-snapshot|'||NEW.organization_id::text||'|'||NEW.failure_id::text,0));
+ SELECT COALESCE(MAX(snapshot_sequence),0) INTO last_sequence
+ FROM v106_test.fixture_uat_state_snapshots
+ WHERE organization_id=NEW.organization_id AND failure_id=NEW.failure_id;
+ IF NEW.snapshot_sequence<>last_sequence+1 THEN
+  RAISE EXCEPTION 'V121_SNAPSHOT_SEQUENCE_NOT_NEXT';
+ END IF;
+ RETURN NEW;
+END;
+$snapshot_sequence$;
+CREATE TRIGGER fixture_snapshot_sequence_before_insert BEFORE INSERT
+ ON v106_test.fixture_uat_state_snapshots FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_require_snapshot_sequence();
+CREATE TRIGGER fixture_snapshot_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_uat_state_snapshots FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+
+-- Observe committed history with deterministic ordering and domain separation.
+-- Same read role as the cold-start reconstruction; no business state mutations.
+CREATE FUNCTION v106_test.fixture_observe_uat_snapshot(p_org uuid,p_failure uuid)
+RETURNS TABLE(rebuild_status text,remediation_version integer,
+ accepted_review_roles integer,observed_digest text,
+ hold_active boolean,release_eligible boolean)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $observe_snapshot$
+DECLARE rebuilt record;
+DECLARE failure record;
+DECLARE versions text;
+DECLARE reviews text;
+DECLARE holds text;
+DECLARE canonical text;
+BEGIN
+ IF session_user<>'v106_state_reader' OR
+  p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_SNAPSHOT_READER_SCOPE_DENIED';
+ END IF;
+ SELECT * INTO rebuilt FROM v106_test.fixture_rebuild_uat_state(p_org,p_failure);
+ SELECT f.incident_id,f.event_id,f.evidence_kind,f.failed_evidence_digest,
+  f.failed_by,f.failure_reason INTO failure
+ FROM v106_test.fixture_uat_failures f
+ WHERE f.organization_id=p_org AND f.failure_id=p_failure;
+ SELECT COALESCE(string_agg(
+  r.remediation_version::text||':'||r.remediation_id::text||':'||
+  trim(r.new_evidence_digest)||':'||r.remediated_by::text||':'||
+  trim(r.remediation_note_digest),'|' ORDER BY r.remediation_version),'')
+ INTO versions FROM v106_test.fixture_uat_remediations r
+ WHERE r.organization_id=p_org AND r.failure_id=p_failure;
+ SELECT COALESCE(string_agg(
+  r.remediation_version::text||':'||rv.reviewer_domain||':'||
+  rv.reviewer_id::text||':'||rv.decision||':'||
+  trim(rv.review_evidence_digest),'|' ORDER BY r.remediation_version,rv.reviewer_domain),'')
+ INTO reviews
+ FROM v106_test.fixture_uat_remediations r
+ JOIN v106_test.fixture_uat_remediation_reviews rv
+  ON rv.organization_id=r.organization_id AND rv.remediation_id=r.remediation_id
+ WHERE r.organization_id=p_org AND r.failure_id=p_failure;
+ SELECT COALESCE(string_agg(
+  h.module_name||':'||h.hold_active::text||':'||h.release_eligible::text||':'||
+  h.release_reason,'|' ORDER BY h.module_name),'')
+ INTO holds FROM v106_test.fixture_cross_module_holds h
+ WHERE h.organization_id=p_org AND h.incident_id=failure.incident_id;
+ canonical:='v121-uat-snapshot-v1|'||p_org::text||'|'||p_failure::text||'|'||
+  failure.incident_id::text||'|'||failure.event_id::text||'|'||
+  failure.evidence_kind||'|'||trim(failure.failed_evidence_digest)||'|'||
+  failure.failed_by::text||'|'||failure.failure_reason||'|'||
+  rebuilt.status||'|'||COALESCE(rebuilt.latest_version,0)::text||'|'||
+  rebuilt.latest_accepted_reviews::text||'|'||
+  rebuilt.domains_held::text||'|'||rebuilt.emergency_stop_active::text||'|'||
+  versions||'|'||reviews||'|'||holds;
+ rebuild_status:=rebuilt.status;
+ remediation_version:=rebuilt.latest_version;
+ accepted_review_roles:=rebuilt.latest_accepted_reviews;
+ observed_digest:=encode(sha256(convert_to(canonical,'UTF8')),'hex');
+ hold_active:=true;
+ release_eligible:=false;
+ RETURN NEXT;
+END;
+$observe_snapshot$;
+REVOKE ALL ON FUNCTION v106_test.fixture_observe_uat_snapshot(uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_observe_uat_snapshot(uuid,uuid)
+ TO v106_state_reader;
+
+-- Snapshot and rebuilt state are compared, never used to grant release.
+CREATE FUNCTION v106_test.fixture_verify_uat_snapshot(p_org uuid,p_failure uuid)
+RETURNS TABLE(snapshot_sequence integer,saved_version integer,current_version integer,
+ snapshot_matches boolean,verdict text,hold_active boolean,release_eligible boolean)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $verify_snapshot$
+DECLARE saved record;
+DECLARE current_state record;
+BEGIN
+ IF session_user<>'v106_state_reader' OR
+  p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_SNAPSHOT_READER_SCOPE_DENIED';
+ END IF;
+ SELECT * INTO current_state FROM v106_test.fixture_observe_uat_snapshot(p_org,p_failure);
+ SELECT * INTO saved FROM v106_test.fixture_uat_state_snapshots s
+ WHERE s.organization_id=p_org AND s.failure_id=p_failure
+ ORDER BY s.snapshot_sequence DESC LIMIT 1;
+ snapshot_sequence:=saved.snapshot_sequence;
+ saved_version:=saved.remediation_version;
+ current_version:=current_state.remediation_version;
+ snapshot_matches:=false;
+ IF current_state.rebuild_status<>'REBUILT_STILL_HOLD' THEN
+  verdict:='REBUILD_INVALID';
+ ELSIF saved.snapshot_sequence IS NULL THEN
+  verdict:='SNAPSHOT_MISSING';
+ ELSIF saved.remediation_version<current_state.remediation_version THEN
+  verdict:='SNAPSHOT_STALE';
+ ELSIF saved.remediation_version<>current_state.remediation_version THEN
+  verdict:='SNAPSHOT_VERSION_CONFLICT';
+ ELSIF saved.observed_digest<>current_state.observed_digest OR
+       saved.accepted_review_roles<>current_state.accepted_review_roles THEN
+  verdict:='SNAPSHOT_MISMATCH';
+ ELSE
+  snapshot_matches:=true;
+  verdict:='SNAPSHOT_MATCH_STILL_HOLD';
+ END IF;
+ hold_active:=true;
+ release_eligible:=false;
+ RETURN NEXT;
+END;
+$verify_snapshot$;
+REVOKE ALL ON FUNCTION v106_test.fixture_verify_uat_snapshot(uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_verify_uat_snapshot(uuid,uuid)
  TO v106_state_reader;
