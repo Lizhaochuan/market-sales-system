@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {createHash,createHmac,randomBytes,generateKeyPairSync,sign} from 'node:crypto';
+import {createHash,createHmac,randomBytes,generateKeyPairSync,sign,createPublicKey} from 'node:crypto';
 import {encodeFixtureReceiptProof} from '../../src/cross-module-fixture-receipt-proof.mjs';
 import {createFixtureLeaseGate,encodeFixtureLease} from '../../src/cross-module-fixture-authority-lease.mjs';
 import {createFixtureRecoveryGate,encodeFixtureRecoveryRequest,encodeFixtureRecoveryApproval} from '../../src/cross-module-fixture-dual-approval-anchor.mjs';
@@ -1483,8 +1483,8 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
  const signer1='00000000-0000-4000-8000-0000000000a8';
  const signer2='00000000-0000-4000-8000-0000000000a9';
  const keys1=generateKeyPairSync('ed25519'),keys2=generateKeyPairSync('ed25519');
- const keys=new Map([[signer1,keys1.publicKey],[signer2,keys2.publicKey]]);
- const state=new Map([[signer1,'REGISTERED'],[signer2,'REGISTERED']]);
+ let keys=new Map();
+ let state=new Map();
  await admin.query("CREATE ROLE v121_anchor_reader LOGIN PASSWORD 'test_only_anchor_reader'");
  await admin.query("CREATE ROLE v121_anchor_writer LOGIN PASSWORD 'test_only_anchor_writer'");
  await admin.query('CREATE DATABASE v121_anchor_isolated');
@@ -1529,6 +1529,15 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
     [a,signer,version,pair.publicKey.export({type:'spki',format:'der'})]);
    await appendEvent(signer,1,'REGISTERED');
   };
+  const loadPersistentTrust=async()=>{
+   const result=await anchorReader.query(
+    "SELECT s.signer_id,s.public_key_der,e.event_kind FROM v121_anchor.signers s LEFT JOIN LATERAL (SELECT event_kind FROM v121_anchor.key_events WHERE organization_id=s.organization_id AND signer_id=s.signer_id ORDER BY event_sequence DESC LIMIT 1) e ON TRUE WHERE s.organization_id=$1",
+    [a]);
+   keys=new Map(result.rows.map(row=>[row.signer_id,createPublicKey({
+    key:row.public_key_der,format:'der',type:'spki'
+   })]));
+   state=new Map(result.rows.map(row=>[row.signer_id,row.event_kind]));
+  };
   const readPersisted=async(seq)=>{
    const row=(await anchorReader.query(
     'SELECT signed_statement,signature_b64,snapshot_sequence FROM v121_anchor.checkpoints WHERE organization_id=$1 AND failure_id=$2 AND snapshot_sequence=$3',
@@ -1545,6 +1554,7 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
      anchor.statement,anchor.signature_b64,anchor.statement.observed_digest]);
   };
   await register(signer1,1,keys1);
+  await loadPersistentTrust();
   const first=await readLocal();
   assert.equal(first.snapshot_sequence,4);
   assert.equal(first.verdict,'SNAPSHOT_MATCH_STILL_HOLD');
@@ -1566,10 +1576,12 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
    const persistedKey=(await restartedReader.query('SELECT public_key_der FROM v121_anchor.signers WHERE organization_id=$1 AND signer_id=$2',[a,signer1])).rows[0].public_key_der;
    assert.ok(Buffer.from(persistedKey).equals(keys1.publicKey.export({type:'spki',format:'der'})));
    assert.deepEqual({statement:saved.signed_statement,signature_b64:saved.signature_b64},proof1);
+   await loadPersistentTrust();
+   assert.equal(state.get(signer1),'REGISTERED');
   }
   await register(signer2,2,keys2);
   await appendEvent(signer1,2,'RETIRED');
-  state.set(signer1,'RETIRED');
+  await loadPersistentTrust();
   assert.throws(()=>verifyFixtureActiveAuditAnchor({
    anchor:proof1,publicKeys:keys,keyStates:state,current:first,nowMs:150,minimumSequence:4
   }),{code:'V121_ANCHOR_KEY_RETIRED'});
@@ -1596,7 +1608,7 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
    anchor:proof1,publicKeys:keys,keyStates:state,current:first,nowMs:150,minimumSequence:seq
   }),{code:'V121_ANCHOR_KEY_RETIRED'});
   await appendEvent(signer1,3,'REVOKED');
-  state.set(signer1,'REVOKED');
+  await loadPersistentTrust();
   assert.equal(inspectFixtureArchivedAuditAnchor({anchor:proof1,publicKeys:keys,keyStates:state}).status,'REVOKED_HISTORICAL_ONLY');
   assert.throws(()=>verifyFixtureActiveAuditAnchor({
    anchor:proof1,publicKeys:keys,keyStates:state,current:first,nowMs:150,minimumSequence:seq
@@ -1631,7 +1643,7 @@ test('durable separate-database anchor ledger, key rotation, revocation and hist
    anchor:proof2,publicKeys:keys,keyStates:state,current:await readLocal(),nowMs:150,minimumSequence:seq
   }).status,'ANCHOR_MATCH_STILL_HOLD');
   await appendEvent(signer2,2,'REVOKED');
-  state.set(signer2,'REVOKED');
+  await loadPersistentTrust();
   assert.equal(inspectFixtureArchivedAuditAnchor({anchor:proof2,publicKeys:keys,keyStates:state}).status,'REVOKED_HISTORICAL_ONLY');
   assert.throws(()=>verifyFixtureActiveAuditAnchor({
    anchor:proof2,publicKeys:keys,keyStates:state,current:latest,nowMs:150,minimumSequence:seq
