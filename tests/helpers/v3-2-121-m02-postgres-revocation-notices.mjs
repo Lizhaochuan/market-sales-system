@@ -50,7 +50,7 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
  async function read(scope,callback){
   const c=await connect();let started=false;
   try{
-   await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');started=true;
+   await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ');started=true;
    const output=await callback(c);
    await c.query('COMMIT');started=false;return output;
   }catch(e){if(started)await c.query('ROLLBACK').catch(()=>{});throw e;
@@ -74,7 +74,8 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
   });
  });}
  async function appendNotice(input){
-  const notice_id=deriveFixtureRevocationNoticeId(input);
+  const noticeInput=Object.fromEntries(['organization_id','incident_id','export_version','manifest_digest','revocation_event_digest','recipient_id','epoch'].map(k=>[k,input[k]]));
+  const notice_id=deriveFixtureRevocationNoticeId(noticeInput);
   for(let attempt=0;attempt<4;attempt++){
    const c=await connect();let started=false;
    try{
