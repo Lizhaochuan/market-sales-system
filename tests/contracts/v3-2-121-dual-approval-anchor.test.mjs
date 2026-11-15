@@ -24,7 +24,7 @@ function gate(overrides={}){
  {approver_id:ids[role],publicKey:keys[role].publicKey}])),clock:()=>150,
  readAudit:async r=>({organization_id:r.organization_id,key_version:r.key_version,
   event_kind:'KEY_ISSUED',event_digest:r.audit_digest}),
- readAnchor:async r=>({...r,anchored:true,source:'FIXTURE_SEPARATE_ARCHIVE'}),
+ readAnchor:async r=>({request_digest:r.request_digest,audit_digest:r.audit_digest,anchored:true,source:'FIXTURE_SEPARATE_ARCHIVE'}),
  ...overrides});
 }
 test('two distinct Ed25519 reviewers and fixture anchor only prove HOLD',async()=>{
@@ -58,7 +58,7 @@ test('invalid or missing audit and unavailable archive fail closed',async()=>{
  {code:'RECOVERY_AUDIT_MISMATCH'});
  await assert.rejects(gate({readAnchor:async()=>{throw Error('fixture archive offline');}}).verifyRecovery({request,approvals:approvals()}),
  /fixture archive offline/);
- await assert.rejects(gate({readAnchor:async r=>({...r,anchored:false,source:'FIXTURE_SEPARATE_ARCHIVE'})}).verifyRecovery({request,approvals:approvals()}),
+ await assert.rejects(gate({readAnchor:async r=>({request_digest:r.request_digest,audit_digest:r.audit_digest,anchored:false,source:'FIXTURE_SEPARATE_ARCHIVE'})}).verifyRecovery({request,approvals:approvals()}),
  {code:'RECOVERY_ANCHOR_UNVERIFIED'});
 });
 test('expired request fails even with two valid signers',async()=>{
