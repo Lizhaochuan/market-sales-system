@@ -4,7 +4,7 @@ import {generateKeyPairSync,createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {
  REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,
- signFixtureExt001Envelope,verifyFixtureExt001Envelope
+ signFixtureExt001Envelope,verifyFixtureExt001Envelope,verifyFixtureExt001BytesAndFingerprint
 } from '../../src/cross-module-v121-iam-evidence.mjs';
 import {validateFixtureV121Handover}
  from '../../src/cross-module-v121-production-handover.mjs';
@@ -19,7 +19,7 @@ const reviewerKeys=generateKeyPairSync('ed25519');
 const digest=x=>createHash('sha256').update(x).digest('hex');
 const safeBody=()=>({
  schema_version:'v3.2-121-ext001-evidence-v1',
- scope:'CI_FIXTURE_ONLY',gap_id:'EXT-001',organization_id:org,
+ scope:'CI_FIXTURE_ONLY',gap_id:'EXT-001',organization_id:org,revision_no:1,
  revision_id:'00000000-0000-4000-8000-0000000000c5',
  collected_at_ms:100_000,valid_until_ms:200_000,
  producer:{principal_id:issuerId,key_id:issuerKey,domain:'SECURITY'},
@@ -146,4 +146,53 @@ test('a valid simulated receipt cannot fill actual external readiness evidence o
  assert.deepEqual(ext.evidence_artifact_refs,[]);
  assert.equal(ext.independent_review_status,'NOT_REVIEWED');
  assert.equal(ext.manual_signoff_status,'NOT_SIGNED');
+});
+
+
+test('signed revision and actual E1/E2 bytes must match before isolated provenance admission',()=>{
+ const e1=Buffer.from('synthetic role inventory version one');
+ const e2=Buffer.from('synthetic RBAC denial tests version one');
+ const bytes=()=>new Map([['EXT-001-E1',Buffer.from(e1)],['EXT-001-E2',Buffer.from(e2)]]);
+ const env=signBody(safeBody());
+ const opts={trustedKeys:trusted(),nowMs:120_000};
+ const result=verifyFixtureExt001BytesAndFingerprint(env,{...opts,artifactBytes:bytes()});
+ assert.equal(result.revision_no,1);
+ assert.equal(result.revision_id,env.body.revision_id);
+ assert.equal(result.file_bytes_verified_in_fixture,true);
+ assert.match(result.issuer_signature_digest,/^[a-f0-9]{64}$/);
+ assert.match(result.reviewer_signature_digest,/^[a-f0-9]{64}$/);
+ assert.equal(result.production_evidence_collected,false);
+ assert.equal(result.hold_active,true);
+ assert.equal(result.release_eligible,false);
+ const switched=bytes();
+ switched.set('EXT-001-E1',Buffer.from('synthetic role inventory version TWO'));
+ assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(env,{...opts,artifactBytes:switched}),
+  {code:'V121_IAM_FILE_DIGEST_MISMATCH'});
+ const swapped=bytes();
+ swapped.set('EXT-001-E1',e2);
+ swapped.set('EXT-001-E2',e1);
+ assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(env,{...opts,artifactBytes:swapped}),
+  {code:'V121_IAM_FILE_DIGEST_MISMATCH'});
+ assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(env,{...opts,artifactBytes:new Map([['EXT-001-E1',e1]])}),
+  {code:'V121_IAM_FILE_BYTES_MISSING'});
+ assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(env,{...opts,artifactBytes:new Map([['EXT-001-E1',e1],['EXT-001-E2','not raw bytes']])}),
+  {code:'V121_IAM_FILE_BYTES_INVALID'});
+ assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(env,{...opts,artifactBytes:new Map([['EXT-001-E1',e1],['EXT-001-E2',Buffer.alloc(0)]])}),
+  {code:'V121_IAM_FILE_BYTES_INVALID'});
+ assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(env,{...opts,artifactBytes:new Map([['EXT-001-E1',e1],['EXT-001-E2',Buffer.alloc(1_048_577)]])}),
+  {code:'V121_IAM_FILE_BYTES_INVALID'});
+ const forged=structuredClone(env);
+ forged.body.revision_no=2;
+ assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(forged,{...opts,artifactBytes:bytes()}),
+  {code:'V121_IAM_EVIDENCE_REVIEW_INVALID'});
+ const oldReview=signBody(safeBody());
+ const updated=safeBody();
+ updated.revision_no=2;
+ updated.artifacts[0].sha256=digest('synthetic changed E1 file');
+ const newIssuer=signBody(updated);
+ assert.notEqual(newIssuer.reviewer.body_digest,oldReview.reviewer.body_digest);
+ assert.notEqual(newIssuer.issuer_signature_b64,oldReview.issuer_signature_b64);
+ const mixed={...newIssuer,reviewer:oldReview.reviewer};
+ assert.throws(()=>verifyFixtureExt001BytesAndFingerprint(mixed,{...opts,artifactBytes:bytes()}),
+  {code:'V121_IAM_EVIDENCE_REVIEW_INVALID'});
 });
