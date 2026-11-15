@@ -2,12 +2,27 @@
 // This is not a network sender or evidence of real-world acknowledgement.
 import {createHash} from 'node:crypto';
 import {deriveFixtureRevocationNoticeId} from '../../src/cross-module-revocation-notice-contract.mjs';
+import {verifyFixtureNegativeReceiptProof} from '../../src/cross-module-fixture-receipt-proof.mjs';
 const sha=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const fail=c=>{const e=new Error(c);e.code=c;throw e;};
 const scopeParams=x=>[x.organization_id,x.incident_id];
-export function createIsolatedPostgresRevocationNotices({pool}={}){
+export function createIsolatedPostgresRevocationNotices({pool,receiptProofAuthority,receiptPublicKey,receiptClock}={}){
  if(process.env.V106_ISOLATED_PG!=='YES_TEST_ONLY'||!pool?.connect)
   throw TypeError('V121 requires disposable PostgreSQL');
+ async function checkProof(input){
+  const proof=input?.proof;
+  if(!proof||Object.keys(proof).sort().join('|')!=='signature_b64|statement')
+   fail('NOTICE_SIGNED_PROOF_REQUIRED');
+  const st=proof.statement;
+  if(!st||st.organization_id!==input.organization_id||
+   st.incident_id!==input.incident_id||st.notice_id!==input.notice_id||
+   st.receipt_sequence!==input.receipt_sequence||
+   st.receipt_state!==input.receipt_state)
+   fail('NOTICE_SIGNED_PROOF_SCOPE_MISMATCH');
+  return verifyFixtureNegativeReceiptProof({
+   statement:st,signature_b64:proof.signature_b64,publicKey:receiptPublicKey,
+   clock:receiptClock,authority:receiptProofAuthority});
+ }
  async function connect(){
   const c=await pool.connect();
   try{
@@ -93,6 +108,7 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
        value.previous_digest!==previous||h.previous_digest!==previous||
        !['NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE'].includes(h.receipt_state)||
        sha(value)!==h.receipt_digest)fail('NOTICE_RECEIPT_TAMPERED');
+    try{await checkProof({...value,proof:value.proof});}catch{fail('NOTICE_RECEIPT_PROOF_RECHECK_FAILED');}
     previous=h.receipt_digest;
    }
    results.push({recipient_id:x.recipient_id,epoch:x.epoch,
@@ -145,12 +161,13 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
  }
  async function appendNegativeReceipt(input){
   if(!input||Object.keys(input).sort().join('|')!==
-    ['incident_id','notice_id','organization_id','receipt_sequence','receipt_state'].sort().join('|')||
+    ['incident_id','notice_id','organization_id','receipt_sequence','receipt_state','proof'].sort().join('|')||
     typeof input.notice_id!=='string'||!/^[a-f0-9]{64}$/.test(input.notice_id)||
     !Number.isSafeInteger(input.receipt_sequence)||input.receipt_sequence<1||
     input.receipt_sequence>128||
     !['NEGATIVE_RECEIPT','COPY_NOT_RETRACTABLE'].includes(input.receipt_state))
    fail('NOTICE_RECEIPT_INPUT_INVALID');
+  await checkProof(input);
   for(let attempt=0;attempt<4;attempt++){
    const c=await connect();let started=false;
    try{
@@ -161,6 +178,7 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
      [...scopeParams(input),input.notice_id]);
     if(notice.rowCount!==1)fail('NOTICE_RECEIPT_TARGET_ABSENT');
     await source(c,{...input,...notice.rows[0]});
+    await checkProof(input);
     const rows=await c.query('SELECT receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload FROM v106_test.fixture_revocation_negative_receipts WHERE organization_id=$1 AND incident_id=$2 AND notice_id=$3 ORDER BY receipt_sequence',
      [...scopeParams(input),input.notice_id]);
     let previous='0'.repeat(64);
@@ -171,22 +189,26 @@ export function createIsolatedPostgresRevocationNotices({pool}={}){
         event.notice_id!==input.notice_id||event.previous_digest!==previous||
         row.previous_digest!==previous||event.receipt_state!==row.receipt_state||
         sha(event)!==row.receipt_digest)fail('NOTICE_RECEIPT_TAMPERED');
+     await checkProof({...event,proof:event.proof});
      previous=row.receipt_digest;
     }
     if(input.receipt_sequence<=rows.rowCount){
      const row=rows.rows[input.receipt_sequence-1];
      if(row.receipt_state!==input.receipt_state)fail('NOTICE_RECEIPT_REPLAY_CONFLICT');
+     let saved;try{saved=JSON.parse(row.receipt_payload);}catch{fail('NOTICE_RECEIPT_TAMPERED');}
+     if(JSON.stringify(saved.proof)!==JSON.stringify(input.proof))fail('NOTICE_RECEIPT_REPLAY_CONFLICT');
      await c.query('COMMIT');started=false;
      return {receipt_digest:row.receipt_digest,duplicate:true,hold_active:true};
     }
     if(input.receipt_sequence!==rows.rowCount+1)fail('NOTICE_RECEIPT_OUT_OF_ORDER');
     const payload={organization_id:input.organization_id,incident_id:input.incident_id,
      notice_id:input.notice_id,receipt_sequence:input.receipt_sequence,
-     receipt_state:input.receipt_state,previous_digest:previous};
+     receipt_state:input.receipt_state,previous_digest:previous,proof:input.proof};
     const digest=sha(payload);
     await c.query('INSERT INTO v106_test.fixture_revocation_negative_receipts (organization_id,incident_id,notice_id,receipt_sequence,receipt_state,previous_digest,receipt_digest,receipt_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
      [...scopeParams(input),input.notice_id,input.receipt_sequence,input.receipt_state,previous,digest,JSON.stringify(payload)]);
     await c.query('COMMIT');started=false;
+    await checkProof(input);
     return {receipt_digest:digest,duplicate:false,hold_active:true};
    }catch(e){
     if(started)await c.query('ROLLBACK').catch(()=>{});
