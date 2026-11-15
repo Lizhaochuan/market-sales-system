@@ -692,6 +692,19 @@ test('two-person recovery issuance and durable replay fencing across adapter ins
  await assert.rejects(freshRecoveryIssuer({anchorOk:false}).issue({...input4,attestationKey:key4}),
   {code:'RECOVERY_ANCHOR_UNVERIFIED'});
  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=4')).rows[0].n,0);
+ // Simulate privileged corruption of one domain HOLD projection; SQL admission must fail closed.
+ await admin.query('ALTER TABLE v106_test.fixture_cross_module_holds DISABLE TRIGGER fixture_hold_immutable');
+ try{
+  await admin.query("DELETE FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 AND module_name='FINANCE'",[a,incident]);
+ }finally{
+  await admin.query('ALTER TABLE v106_test.fixture_cross_module_holds ENABLE TRIGGER fixture_hold_immutable');
+ }
+ try{
+  await assert.rejects(freshRecoveryIssuer().issue({...input4,attestationKey:key4}),{code:'V121_CROSS_MODULE_HOLD_INCOMPLETE'});
+  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_recovery_consumptions WHERE key_version=4')).rows[0].n,0);
+ }finally{
+  await admin.query("INSERT INTO v106_test.fixture_cross_module_holds(organization_id,incident_id,module_name) VALUES($1,$2,'FINANCE')",[a,incident]);
+ }
  const good=await freshRecoveryIssuer().issue({...input4,attestationKey:key4});
  assert.equal(good.fixture_key_issued,true);
  assert.equal(good.hold_active,true);
@@ -900,6 +913,10 @@ test('independently authenticated security event atomically blocks issuance and 
  const old=await admin.query('SELECT approval_key FROM v106_test.fixture_recovery_approval_attestation WHERE organization_id=$1 AND attestation_version=2',[a]);
  await assert.rejects(freshRecoveryIssuer({approvalKey:old.rows[0].approval_key,approvalVersion:2})
   .issue({...approvals,attestationKey:randomBytes(32)}),{code:'V121_ISSUANCE_EMERGENCY_STOP'});
+ await assert.rejects(
+  admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),
+  /V121_SECURITY_ALERT_UNRESOLVED/);
+ assert.equal((await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0].issuance_blocked,true);
  const holds=await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident]);
  assert.deepEqual(holds.rows.map(r=>[r.module_name,r.hold_active,r.release_eligible]),[
   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
