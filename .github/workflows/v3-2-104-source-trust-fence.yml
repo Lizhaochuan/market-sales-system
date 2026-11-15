@@ -1,0 +1,33 @@
+name: V3.2-104 isolated trust roster and checkpoint fence
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-source-trust-fence.mjs'
+      - 'tests/security/v3-2-104-m02-source-trust-fence.test.mjs'
+      - 'docs/V3.2-104_M02_SOURCE_TRUST_FENCE.md'
+      - 'spec/v3-2-104-m02-source-trust-fence.json'
+      - '.github/workflows/v3-2-104-source-trust-fence.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-governance-and-fence:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate isolated source contract syntax
+        run: |
+          node --check src/cross-module-source-trust-fence.mjs
+          node --check tests/security/v3-2-104-m02-source-trust-fence.test.mjs
+      - name: Simulate governance, key lifecycle, restart replay and atomic checkpoint
+        run: node --test tests/security/v3-2-104-m02-source-trust-fence.test.mjs tests/security/v3-2-103-m02-trust-boundary-fault-drill.test.mjs tests/security/v3-2-102-m02-signed-source-contract.test.mjs
+      - name: Check contract forbids production or real authority
+        run: |
+          node --input-type=module -e "import {readFileSync} from 'node:fs';const m=JSON.parse(readFileSync('spec/v3-2-104-m02-source-trust-fence.json'));if(m.parent_pr!==110||m.production_database_test_plan.length!==8||m.adapters.checkpointStore.implemented_in_production!==false||m.adapters.checkpointStore.sql_migration_created!==false||m.finance_authorized!==false||m.academic_authorized!==false||m.handoff_allowed!==false||m.compensation_write_allowed!==false||m.release_eligible!==false||m.hold_active!==true||m.merge_authorized!==false||m.deploy_authorized!==false||m.external_contract_status!=='proposed-unimplemented')process.exit(1)"
+      - name: Repeat eighteen-stage isolated safety regression
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
+      - name: Revalidate original stage inventory
+        run: node --test tests/security/v3-2-100-m02-integration-review.test.mjs
