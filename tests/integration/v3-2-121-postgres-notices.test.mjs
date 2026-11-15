@@ -20,9 +20,11 @@ const admin=new pg.Pool({host,database:'v106_isolated',user:'postgres',password:
 const writer=new pg.Pool({host,database:'v106_isolated',user:'v106_writer_a',password:'test_only_a'});
 const receiptWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_receipt_writer_a',password:'test_only_receipt_a'});
 const issuerWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_key_issuer',password:'test_only_key_issuer'});
+const securityEventWriter=new pg.Pool({host,database:'v106_isolated',user:'v106_security_event_writer',password:'test_only_security_events'});
 const auditReader=new pg.Pool({host,database:'v106_isolated',user:'v106_audit_reader',password:'test_only_auditor'});
 const receiptAttestationKey=randomBytes(32);
 const approvalAttestationKey=randomBytes(32);
+const securityEventKey=randomBytes(32);
 const hmacReceipt=value=>createHmac('sha256',receiptAttestationKey).update(value).digest('hex');
 const keyPair=generateKeyPairSync('ed25519');
 const fixtureLeaseKeys=generateKeyPairSync('ed25519');
@@ -53,8 +55,9 @@ test.before(async()=>{
  await admin.query('GRANT v106_writer_a TO v106_receipt_writer_a');
  await admin.query("CREATE ROLE v106_audit_reader LOGIN PASSWORD 'test_only_auditor'");
  await admin.query("CREATE ROLE v106_key_issuer LOGIN PASSWORD 'test_only_key_issuer'");
+ await admin.query("CREATE ROLE v106_security_event_writer LOGIN PASSWORD 'test_only_security_events'");
  await admin.query('CREATE SCHEMA v106_test');
- await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader,v106_key_issuer');
+ await admin.query('GRANT USAGE ON SCHEMA v106_test TO v106_writer_a,v106_writer_b,v106_audit_reader,v106_key_issuer,v106_security_event_writer');
  await admin.query(`CREATE TABLE v106_test.fixture_incident_gap_manifest_heads(
  organization_id uuid,incident_id uuid,sequence integer,event_digest text,hold_active boolean,
  PRIMARY KEY(organization_id,incident_id))`);
@@ -78,6 +81,7 @@ test.before(async()=>{
  await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,1,$2,true)',[a,receiptAttestationKey]);
  await admin.query('INSERT INTO v106_test.fixture_recovery_approval_attestation(organization_id,attestation_version,approval_key,active) VALUES($1,1,$2,true)',[a,approvalAttestationKey]);
  await admin.query('INSERT INTO v106_test.fixture_recovery_emergency_stops(organization_id,incident_id,issuance_blocked) VALUES($1,$2,false)',[a,incident]);
+ await admin.query('INSERT INTO v106_test.fixture_external_security_keys(organization_id,event_key) VALUES($1,$2)',[a,securityEventKey]);
  await admin.query('INSERT INTO v106_test.fixture_cross_module_holds(organization_id,incident_id,module_name) SELECT $1,$2,unnest($3::text[])',[a,incident,['SALES','FINANCE','ACADEMIC']]);
  const m={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),status:'FIXTURE_EXPORT'};
  const md=hash(m);
@@ -93,7 +97,7 @@ test.before(async()=>{
  ledger=createIsolatedPostgresRevocationNotices({receiptAttestationKey,receiptPool:receiptWriter,leaseGate:fixtureGate(),pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,receiptProofAuthority:proofAuthority});
  service=createIsolatedRevocationNoticeService({ledger,clock:()=>100});
 });
-test.after(async()=>{await issuerWriter.end();await auditReader.end();await receiptWriter.end();await writer.end();await admin.end();});
+test.after(async()=>{await securityEventWriter.end();await issuerWriter.end();await auditReader.end();await receiptWriter.end();await writer.end();await admin.end();});
 test('SQL source binding and durable enqueue + replay',async()=>{
  const first=await service.enqueue(input);
  assert.equal(first.notice_accepted,true,JSON.stringify(first));
@@ -864,4 +868,39 @@ test('approval-key revocation automatically trips emergency stop and immutable s
  assert.deepEqual(rows.rows.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[
   ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
  assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_attestation_secrets WHERE key_version=9')).rows[0].n,0);
+});
+
+test('independently authenticated security event atomically blocks issuance and stays immutable',async()=>{
+ const source='FIXTURE_INDEPENDENT_MONITOR';
+ const kind='SIGNER_COMPROMISE';
+ const eventId='00000000-0000-4000-8000-0000000000e9';
+ const timestamp=150;
+ const sql='SELECT v106_test.fixture_accept_external_security_event($1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::bigint,$7::text)';
+ const args=[a,incident,eventId,source,kind,timestamp];
+ const mac=parts=>createHmac('sha256',securityEventKey).update(
+  ['v121-security-event-v1',...parts].join('|')).digest('hex');
+ const valid=mac(args);
+ await admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]);
+ await assert.rejects(securityEventWriter.query(sql,[...args,'0'.repeat(64)]),/V121_SECURITY_EVENT_AUTH_REJECTED/);
+ await assert.rejects(securityEventWriter.query(sql,[...args.slice(0,4),'APPROVAL_ANOMALY',timestamp,valid]),/V121_SECURITY_EVENT_AUTH_REJECTED/);
+ await assert.rejects(securityEventWriter.query(sql,[...args.slice(0,5),-30000,valid]),/V121_SECURITY_EVENT_EXPIRED/);
+ assert.equal((await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0].issuance_blocked,false);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_external_security_events WHERE organization_id=$1',[a])).rows[0].n,0);
+ await securityEventWriter.query(sql,[...args,valid]);
+ assert.equal((await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0].issuance_blocked,true);
+ await assert.rejects(securityEventWriter.query(sql,[...args,valid]),/duplicate key/);
+ const rows=await admin.query('SELECT event_kind,event_digest FROM v106_test.fixture_external_security_events WHERE organization_id=$1 AND event_id=$2',[a,eventId]);
+ assert.equal(rows.rows[0].event_kind,kind);
+ assert.equal(rows.rows[0].event_digest,createHash('sha256').update(['v121-security-event-v1',...args].join('|')).digest('hex'));
+ await assert.rejects(securityEventWriter.query('SELECT * FROM v106_test.fixture_external_security_keys'),/permission denied/);
+ await assert.rejects(securityEventWriter.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false'),/permission denied/);
+ await assert.rejects(issuerWriter.query(sql,[...args,valid]),/permission denied/);
+ await assert.rejects(admin.query('DELETE FROM v106_test.fixture_external_security_events WHERE event_id=$1',[eventId]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+ const approvals=await recoveryInputs(9,'00000000-0000-4000-8000-0000000000f9');
+ const old=await admin.query('SELECT approval_key FROM v106_test.fixture_recovery_approval_attestation WHERE organization_id=$1 AND attestation_version=2',[a]);
+ await assert.rejects(freshRecoveryIssuer({approvalKey:old.rows[0].approval_key,approvalVersion:2})
+  .issue({...approvals,attestationKey:randomBytes(32)}),{code:'V121_ISSUANCE_EMERGENCY_STOP'});
+ const holds=await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident]);
+ assert.deepEqual(holds.rows.map(r=>[r.module_name,r.hold_active,r.release_eligible]),[
+  ['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
 });
