@@ -2377,8 +2377,14 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    await audit.query('ALTER TABLE v121_anchor.fixture_iam_evidence_receipts ENABLE TRIGGER fixture_iam_receipts_immutable');
   }
   assert.equal((await status(3)).receipt_status,'RECEIPT_EXPIRED_STILL_HOLD');
-  await assert.rejects(writerB.query(receiptSql,params(3,p3)),
+  const expired=(await audit.query(
+   "SELECT expires_at FROM v121_anchor.fixture_iam_evidence_receipts WHERE organization_id=$1 AND gap_id='EXT-001' AND revision_no=3",[a])).rows[0].expires_at;
+  const expiredExactRetry=params(3,p3);
+  expiredExactRetry[8]=expired;
+  await assert.rejects(writerB.query(receiptSql,expiredExactRetry),
    /V121_IAM_REVISION_EXPIRED/);
+  await assert.rejects(writerB.query(receiptSql,params(3,p3)),
+   /V121_IAM_REVISION_CONFLICT/);
   const p4=make(4);
   await writerA.query(receiptSql,params(4,p4));
   assert.equal((await status(3)).receipt_status,'RECEIPT_SUPERSEDED_STILL_HOLD');
