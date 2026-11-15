@@ -549,3 +549,44 @@ test('invalid key versions and unauthorized secret updates are rejected',async()
  await assert.rejects(receiptWriter.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true'),/permission denied/);
  assert.equal((await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id])).rows[0].n,0);
 });
+
+test('simulated secret compromise revokes v2 and restores only with new v3 key',async()=>{
+ const old=await admin.query('SELECT attestation_key FROM v106_test.fixture_receipt_attestation_secrets WHERE organization_id=$1 AND key_version=2 AND active=true',[a]);
+ assert.equal(old.rowCount,1);
+ const oldKey=old.rows[0].attestation_key;
+ const nextKey=randomBytes(32);
+ const notice=await service.enqueue({...input,epoch:93});
+ const value=issuedFixtureReceipt(notice.notice_id,'00000000-0000-4000-8000-000000000093',6);
+ const make=(key,version)=>createIsolatedPostgresRevocationNotices({
+  receiptAttestationKey:key,receiptAttestationVersion:version,
+  receiptPool:receiptWriter,pool:writer,receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
+  receiptProofAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2}),
+  leaseGate:createFixtureLeaseGate({publicKey:fixtureLeaseKeys.publicKey,clock:()=>150,
+   loadAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2,lease_sequence:6})})
+ });
+ await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=2',[a]);
+ await assert.rejects(make(oldKey,2).appendNegativeReceipt(value),/V121_RECEIPT_ATTESTATION_REJECTED/);
+ const before=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[notice.notice_id]);
+ assert.equal(before.rows[0].n,0);
+ // Issuance is a simulated incident-owner action, not a production approval.
+ await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,3,$2,true)',[a,nextKey]);
+ const result=await make(nextKey,3).appendNegativeReceipt(value);
+ assert.equal(result.hold_active,true);
+ assert.equal(result.duplicate,false);
+ await assert.rejects(admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true WHERE organization_id=$1 AND key_version=2',[a]),/V121_ATTESTATION_KEY_IMMUTABLE/);
+});
+test('fixture key events are auditable, secret-free and append-only',async()=>{
+ const events=await admin.query('SELECT key_version,event_kind,actor,event_digest FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1 ORDER BY event_id',[a]);
+ assert.deepEqual(events.rows.map(x=>[x.key_version,x.event_kind]),[
+  [1,'KEY_ISSUED'],[1,'KEY_REVOKED'],[2,'KEY_ISSUED'],[2,'KEY_REVOKED'],[3,'KEY_ISSUED']]);
+ for(const e of events.rows){
+  const meta=[a,e.key_version,e.event_kind,e.actor].join('|');
+  assert.equal(e.event_digest,createHash('sha256').update(meta).digest('hex'));
+  assert.ok(['postgres'].includes(e.actor));
+ }
+ await assert.rejects(writer.query('SELECT * FROM v106_test.fixture_receipt_key_audit'),/permission denied/);
+ await assert.rejects(receiptWriter.query('DELETE FROM v106_test.fixture_receipt_key_audit'),/permission denied/);
+ await assert.rejects(admin.query('UPDATE v106_test.fixture_receipt_key_audit SET actor=\'changed\' WHERE organization_id=$1',[a]),/V121_KEY_AUDIT_APPEND_ONLY/);
+ await assert.rejects(admin.query('DELETE FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1',[a]),/V121_KEY_AUDIT_APPEND_ONLY/);
+ assert.equal((await admin.query('SELECT count(*)::int AS n FROM v106_test.fixture_receipt_key_audit WHERE organization_id=$1',[a])).rows[0].n,5);
+});
