@@ -43,11 +43,12 @@ const signed=(data,key)=>sign(null,data,key).toString('base64');
 
 function validateBody(body){
  if(!hasKeys(body,['schema_version','scope','gap_id','organization_id',
-  'revision_id','collected_at_ms','valid_until_ms','producer',
+  'revision_no','revision_id','collected_at_ms','valid_until_ms','producer',
   'artifacts','role_inventory','denial_matrix'])) fail('V121_IAM_EVIDENCE_SHAPE_INVALID');
  if(body.schema_version!=='v3.2-121-ext001-evidence-v1' ||
   body.scope!=='CI_FIXTURE_ONLY' || body.gap_id!=='EXT-001' ||
-  body.organization_id!==ORG || !isUuid(body.revision_id) ||
+  body.organization_id!==ORG || !Number.isSafeInteger(body.revision_no) ||
+  body.revision_no<1 || !isUuid(body.revision_id) ||
   !validTime(body.collected_at_ms) || !validTime(body.valid_until_ms) ||
   body.valid_until_ms<=body.collected_at_ms ||
   body.valid_until_ms-body.collected_at_ms>TTL)
@@ -175,6 +176,10 @@ export function fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs}={
  return Object.freeze({
   gap_id:'EXT-001',
   organization_id:body.organization_id,
+  revision_no:body.revision_no,
+  revision_id:body.revision_id,
+  issuer_signature_digest:sha(Buffer.from(envelope.issuer_signature_b64,'base64')),
+  reviewer_signature_digest:sha(Buffer.from(envelope.reviewer.signature_b64,'base64')),
   evidence_digest:sha(encoded('v121-ext001-intake-envelope-v1',envelope)),
   evidence_e1_digest:body.artifacts.find(a=>a.id==='EXT-001-E1').sha256,
   evidence_e2_digest:body.artifacts.find(a=>a.id==='EXT-001-E2').sha256,
@@ -184,5 +189,28 @@ export function fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs}={
   production_evidence_collected:false,
   release_eligible:false,
   hold_active:true
+ });
+}
+
+
+// Verify actual fixture file bytes, not just issuer-declared hashes. No I/O
+// or remote URI resolving is performed here; caller must supply the bytes.
+export function verifyFixtureExt001BytesAndFingerprint(envelope,{trustedKeys,nowMs,artifactBytes}={}){
+ const fingerprint=fingerprintFixtureExt001ForIntake(envelope,{trustedKeys,nowMs});
+ if(!(artifactBytes instanceof Map) || artifactBytes.size!==2 ||
+  !['EXT-001-E1','EXT-001-E2'].every(id=>artifactBytes.has(id)))
+  fail('V121_IAM_FILE_BYTES_MISSING');
+ for(const art of envelope.body.artifacts){
+  const bytes=artifactBytes.get(art.id);
+  if(!Buffer.isBuffer(bytes) || bytes.length===0 || bytes.length>1_048_576)
+   fail('V121_IAM_FILE_BYTES_INVALID');
+  if(sha(bytes)!==art.sha256)
+   fail('V121_IAM_FILE_DIGEST_MISMATCH');
+ }
+ return Object.freeze({
+  ...fingerprint,
+  file_bytes_verified_in_fixture:true,
+  production_evidence_collected:false,
+  release_eligible:false,hold_active:true
  });
 }
