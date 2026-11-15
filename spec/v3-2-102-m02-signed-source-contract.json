@@ -1,0 +1,92 @@
+{
+  "schema_version": "v3.2-102-m02-signed-source-contract-v1",
+  "parent_pr": 108,
+  "parent_head": "991fe545397c97bbc045f995af62e7c90b64963b",
+  "parent_ci": [
+    43659776780,
+    43659776625
+  ],
+  "module": "M02",
+  "scope": "CI_ONLY_PINNED_FIXTURE_SIGNED_READ_SOURCE_ADAPTER",
+  "source_code": "src/cross-module-signed-source-contract.mjs",
+  "test_file": "tests/security/v3-2-102-m02-signed-source-contract.test.mjs",
+  "read_contract": {
+    "required_domains": [
+      "sales",
+      "finance",
+      "academic"
+    ],
+    "read_method": "getFixtureWatermark(organization_id, incident_id)",
+    "attestation_method": "inspect({organization_id,incident_id})",
+    "required_envelope_fields": [
+      "schema_version",
+      "domain",
+      "organization_id",
+      "incident_id",
+      "source_epoch",
+      "source_revision",
+      "revocation_sequence",
+      "revocation_digest",
+      "incident_generation",
+      "evidence_digest",
+      "issued_at_ms",
+      "expires_at_ms",
+      "fixture_only",
+      "signature"
+    ],
+    "envelope_version": "v3.2-102-ci-source-proof-v1",
+    "signature_algorithm": "Ed25519 / fixture ephemeral key only",
+    "signature_message": "JSON.stringify(payload in fixed PAYLOAD_FIELDS order)",
+    "public_key_pinning": "by fixture domain at construction, no real credentials",
+    "test_max_envelope_lifetime_ms": 300000,
+    "timeout_min_ms": 10,
+    "timeout_max_ms": 10000,
+    "default_timeout_ms": 1000,
+    "source_epoch": "must agree between domains",
+    "incident_generation": "must agree between domains and never regress",
+    "revocation_sequence_digest": "must agree between domains; no sequence regression or same-sequence digest mutation",
+    "source_revision": "monotone per domain; aggregate max plus canonical combined evidence digest",
+    "evidence_digest": "SHA-256 of signed individual source metadata, not real funds or lessons",
+    "repeated_read_check": "two reads, compare canonical watermark, fail closed",
+    "source_read_errors": [
+      "FIXTURE_SOURCE_TIMEOUT",
+      "FIXTURE_SOURCE_UNAVAILABLE",
+      "FIXTURE_SOURCE_SIGNATURE_INVALID",
+      "FIXTURE_SOURCE_VERSION_ROLLBACK",
+      "FIXTURE_SOURCE_SAME_VERSION_EQUIVOCATION",
+      "FIXTURE_REVOCATION_DIGEST_EQUIVOCATION",
+      "FIXTURE_CROSS_DOMAIN_WATERMARK_CONFLICT",
+      "FIXTURE_SOURCE_CHANGED_BETWEEN_READS",
+      "FIXTURE_SOURCE_CLOCK_ROLLBACK",
+      "FIXTURE_SOURCE_ENVELOPE_INVALID_OR_EXPIRED"
+    ]
+  },
+  "integration": {
+    "v3_2_101_adapter": "getFixtureWatermark",
+    "production_read_api_connected": false,
+    "real_finance_signatures_verified": false,
+    "real_academic_signatures_verified": false,
+    "trusted_production_key_management": false,
+    "durable_ledger": false,
+    "atomic_cross_module_handoff": false,
+    "external_contract_status": "proposed-unimplemented"
+  },
+  "invariants": {
+    "student_primary": true,
+    "family_optional": true,
+    "history_order_payment_saleevent_lesson_compensation_preserved": true,
+    "existing_migration_range_from_prior_specs": "001-038",
+    "new_production_migration": false,
+    "external_checks_16": "UNVERIFIED",
+    "r01_to_r10": "UNVERIFIED",
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "full_postgresql_contract_chromium_uat": "NOT_RUN"
+}
