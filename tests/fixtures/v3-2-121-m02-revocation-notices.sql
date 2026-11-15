@@ -117,13 +117,16 @@ CREATE POLICY v121_wm_b ON v106_test.fixture_signer_watermarks FOR ALL TO v106_w
 -- Test-only MAC admission gate, not an independent Ed25519 or IAM verifier.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE v106_test.fixture_receipt_attestation_secrets (
- organization_id uuid PRIMARY KEY,
- attestation_key bytea NOT NULL CHECK(octet_length(attestation_key)=32)
+ organization_id uuid NOT NULL,
+ key_version integer NOT NULL CHECK(key_version BETWEEN 1 AND 2147483647),
+ attestation_key bytea NOT NULL CHECK(octet_length(attestation_key)=32),
+ active boolean NOT NULL DEFAULT false,
+ PRIMARY KEY(organization_id,key_version)
 );
 REVOKE ALL ON v106_test.fixture_receipt_attestation_secrets FROM PUBLIC;
 CREATE FUNCTION v106_test.fixture_append_negative_receipt(
  p_organization uuid,p_incident uuid,p_notice char(64),p_sequence integer,
- p_state text,p_previous char(64),p_digest char(64),p_payload text,p_attestation text)
+ p_state text,p_previous char(64),p_digest char(64),p_payload text,p_attestation text,p_key_version integer)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,v106_test AS $receipt_gate$
 DECLARE item jsonb;
@@ -157,8 +160,11 @@ BEGIN
     item#>>'{lease,lease,notice_id}' <> trim(p_notice) THEN
   RAISE EXCEPTION 'V121_RECEIPT_GATE_ENVELOPE';
  END IF;
+ IF p_key_version IS NULL OR p_key_version<1 THEN
+  RAISE EXCEPTION 'V121_RECEIPT_KEY_VERSION_INVALID';
+ END IF;
  SELECT attestation_key INTO secret FROM v106_test.fixture_receipt_attestation_secrets
- WHERE organization_id=p_organization;
+ WHERE organization_id=p_organization AND key_version=p_key_version AND active IS TRUE;
  IF secret IS NULL OR p_attestation IS NULL OR
     p_attestation !~ '^[a-f0-9]{64}$' OR
     p_attestation <> encode(public.hmac(convert_to(p_payload,'UTF8'),secret,'sha256'),'hex') THEN
@@ -172,6 +178,6 @@ BEGIN
 END;
 $receipt_gate$;
 REVOKE ALL ON FUNCTION v106_test.fixture_append_negative_receipt(
- uuid,uuid,char(64),integer,text,char(64),char(64),text,text) FROM PUBLIC;
+ uuid,uuid,char(64),integer,text,char(64),char(64),text,text,integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION v106_test.fixture_append_negative_receipt(
- uuid,uuid,char(64),integer,text,char(64),char(64),text,text) TO v106_receipt_writer_a;
+ uuid,uuid,char(64),integer,text,char(64),char(64),text,text,integer) TO v106_receipt_writer_a;
