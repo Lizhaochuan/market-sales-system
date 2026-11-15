@@ -755,3 +755,125 @@ SELECT ev.organization_id,ev.incident_id,ev.event_id,
  true::boolean AS hold_active
 FROM v106_test.fixture_external_security_events ev;
 REVOKE ALL ON v106_test.fixture_closeout_uat_readiness FROM PUBLIC;
+
+-- Append-only UAT failure / remediation / independent re-review, all CI-only.
+-- A re-review never mutates the original failed check or permits release.
+CREATE TABLE v106_test.fixture_uat_failures (
+ organization_id uuid NOT NULL,
+ incident_id uuid NOT NULL,
+ event_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ evidence_kind text NOT NULL,
+ failed_evidence_digest char(64) NOT NULL CHECK(failed_evidence_digest ~ '^[a-f0-9]{64}$'),
+ failed_by uuid NOT NULL,
+ failure_reason text NOT NULL CHECK(failure_reason IN
+  ('MISSING_EVIDENCE','WRONG_OWNER','CONFLICTING_EVIDENCE','REVIEW_REJECTED')),
+ PRIMARY KEY(organization_id,failure_id),
+ FOREIGN KEY(organization_id,event_id)
+  REFERENCES v106_test.fixture_external_security_events(organization_id,event_id)
+);
+REVOKE ALL ON v106_test.fixture_uat_failures FROM PUBLIC;
+CREATE TRIGGER fixture_uat_failures_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_uat_failures FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+
+CREATE TABLE v106_test.fixture_uat_remediations (
+ organization_id uuid NOT NULL,
+ failure_id uuid NOT NULL,
+ remediation_id uuid NOT NULL,
+ new_evidence_digest char(64) NOT NULL CHECK(
+  new_evidence_digest ~ '^[a-f0-9]{64}$' AND new_evidence_digest <> repeat('0',64)),
+ remediated_by uuid NOT NULL,
+ remediation_note_digest char(64) NOT NULL CHECK(remediation_note_digest ~ '^[a-f0-9]{64}$'),
+ PRIMARY KEY(organization_id,remediation_id),
+ UNIQUE(organization_id,failure_id,remediation_id),
+ FOREIGN KEY(organization_id,failure_id)
+  REFERENCES v106_test.fixture_uat_failures(organization_id,failure_id)
+);
+REVOKE ALL ON v106_test.fixture_uat_remediations FROM PUBLIC;
+CREATE TRIGGER fixture_uat_remediations_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_uat_remediations FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+
+CREATE TABLE v106_test.fixture_uat_remediation_reviews (
+ organization_id uuid NOT NULL,
+ remediation_id uuid NOT NULL,
+ reviewer_id uuid NOT NULL,
+ reviewer_domain text NOT NULL CHECK(reviewer_domain IN ('SECURITY','AUDIT')),
+ decision text NOT NULL CHECK(decision IN ('ACCEPTED_FOR_REVIEW','REJECTED')),
+ review_evidence_digest char(64) NOT NULL CHECK(review_evidence_digest ~ '^[a-f0-9]{64}$'),
+ hold_active boolean NOT NULL DEFAULT true CHECK(hold_active IS TRUE),
+ release_eligible boolean NOT NULL DEFAULT false CHECK(release_eligible IS FALSE),
+ PRIMARY KEY(organization_id,remediation_id,reviewer_domain),
+ FOREIGN KEY(organization_id,remediation_id)
+  REFERENCES v106_test.fixture_uat_remediations(organization_id,remediation_id)
+);
+REVOKE ALL ON v106_test.fixture_uat_remediation_reviews FROM PUBLIC;
+CREATE TRIGGER fixture_uat_remediation_reviews_immutable BEFORE UPDATE OR DELETE
+ ON v106_test.fixture_uat_remediation_reviews FOR EACH ROW
+ EXECUTE FUNCTION v106_test.fixture_security_signal_immutable();
+
+CREATE FUNCTION v106_test.fixture_record_uat_remediation_review(
+ p_org uuid,p_remediation uuid,p_reviewer uuid,p_domain text,
+ p_decision text,p_digest char(64))
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path=pg_catalog,v106_test AS $remediation_review$
+DECLARE owner_id uuid;
+DECLARE original_reviewer uuid;
+DECLARE other_reviewer uuid;
+DECLARE i uuid;
+BEGIN
+ IF session_user<>'v106_closeout_writer' OR
+   p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
+  RAISE EXCEPTION 'V121_UAT_REVIEW_ROLE_DENIED';
+ END IF;
+ IF p_domain IS NULL OR p_domain NOT IN ('SECURITY','AUDIT') OR
+   p_decision IS NULL OR p_decision NOT IN ('ACCEPTED_FOR_REVIEW','REJECTED') OR
+   p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}$' OR
+   p_reviewer IS NULL THEN
+  RAISE EXCEPTION 'V121_UAT_REVIEW_INVALID';
+ END IF;
+ SELECT r.remediated_by,f.failed_by,f.incident_id
+ INTO owner_id,original_reviewer,i
+ FROM v106_test.fixture_uat_remediations r
+ JOIN v106_test.fixture_uat_failures f ON
+  f.organization_id=r.organization_id AND f.failure_id=r.failure_id
+ WHERE r.organization_id=p_org AND r.remediation_id=p_remediation;
+ IF owner_id IS NULL THEN
+  RAISE EXCEPTION 'V121_UAT_REMEDIATION_NOT_FOUND';
+ END IF;
+ IF p_reviewer=owner_id OR p_reviewer=original_reviewer OR EXISTS(
+  SELECT 1 FROM v106_test.fixture_uat_remediation_reviews
+  WHERE organization_id=p_org AND remediation_id=p_remediation
+    AND reviewer_id=p_reviewer) THEN
+  RAISE EXCEPTION 'V121_UAT_REVIEWER_NOT_INDEPENDENT';
+ END IF;
+ IF NOT EXISTS(
+  SELECT 1 FROM v106_test.fixture_recovery_emergency_stops
+  WHERE organization_id=p_org AND incident_id=i AND issuance_blocked IS TRUE
+ ) THEN RAISE EXCEPTION 'V121_UAT_REVIEW_HOLD_REQUIRED'; END IF;
+ INSERT INTO v106_test.fixture_uat_remediation_reviews
+ (organization_id,remediation_id,reviewer_id,reviewer_domain,decision,review_evidence_digest)
+ VALUES(p_org,p_remediation,p_reviewer,p_domain,p_decision,p_digest);
+END;
+$remediation_review$;
+REVOKE ALL ON FUNCTION v106_test.fixture_record_uat_remediation_review(
+ uuid,uuid,uuid,text,text,char(64)) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION v106_test.fixture_record_uat_remediation_review(
+ uuid,uuid,uuid,text,text,char(64)) TO v106_closeout_writer;
+
+-- Explicitly a diagnostic: dual ACCEPTED_FOR_REVIEW does not resolve original failure.
+CREATE VIEW v106_test.fixture_uat_remediation_diagnostics AS
+SELECT f.organization_id,f.incident_id,f.event_id,f.failure_id,
+ count(DISTINCT r.remediation_id)::integer AS attempts,
+ count(DISTINCT rv.reviewer_domain) FILTER(WHERE rv.decision='ACCEPTED_FOR_REVIEW')::integer
+  AS accepted_review_roles,
+ true::boolean AS original_failure_retained,
+ true::boolean AS hold_active,false::boolean AS release_eligible
+FROM v106_test.fixture_uat_failures f
+LEFT JOIN v106_test.fixture_uat_remediations r
+ ON r.organization_id=f.organization_id AND r.failure_id=f.failure_id
+LEFT JOIN v106_test.fixture_uat_remediation_reviews rv
+ ON rv.organization_id=r.organization_id AND rv.remediation_id=r.remediation_id
+GROUP BY f.organization_id,f.incident_id,f.event_id,f.failure_id;
+REVOKE ALL ON v106_test.fixture_uat_remediation_diagnostics FROM PUBLIC;
