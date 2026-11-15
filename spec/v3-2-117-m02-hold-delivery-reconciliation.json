@@ -1,0 +1,197 @@
+{
+  "schema_version": "v3.2-117-m02-hold-delivery-reconciliation-v1",
+  "module": "M02",
+  "parent_pr": 123,
+  "parent_head_sha": "68e512f53fb46624b6d15df1d43eacb408c32bb4",
+  "parent_ci": [
+    {
+      "id": 43666863372,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 43666863375,
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "purpose": "CI_ONLY_PENDING_DELIVERY_NEGATIVE_RECONCILIATION_AND_SIGNED_CANCELLATION_ADVISORY",
+  "files": {
+    "module": "src/cross-module-hold-delivery-reconciliation.mjs",
+    "test": "tests/integration/v3-2-117-m02-hold-delivery-reconciliation.test.mjs",
+    "sql": "tests/fixtures/v3-2-117-m02-delivery-reconciliation.sql",
+    "sql_adapter": "tests/helpers/v3-2-117-m02-postgres-reconciliation.mjs",
+    "setup": "scripts/v3-2-117-setup-delivery-reconciliation.mjs"
+  },
+  "upstream": {
+    "source_hold": "V3.2-115 fully retained immutable HOLD chain",
+    "outbox": "V3.2-116 append-only signed-fixture outbox",
+    "recipient": "V3.2-116 negative-only fixture receipt",
+    "real_cross_domain_delivery_verified": false,
+    "real_staff_signature_and_source_provenance_verified": false
+  },
+  "classification": [
+    {
+      "code": "OUTBOX_GAP",
+      "action": "RECONCILE_MISSING_OUTBOX_MANUALLY",
+      "meaning": "HOLD exists but no V116 outbox; not proof of packet loss"
+    },
+    {
+      "code": "AWAITING_NEGATIVE_RECEIPT",
+      "action": "WAIT_AND_RECHECK_MANUALLY",
+      "meaning": "Outbox exists and no negative receipt before fixture threshold"
+    },
+    {
+      "code": "NEGATIVE_RECEIPT_OVERDUE",
+      "action": "INVESTIGATE_UNCERTAIN_DELIVERY",
+      "meaning": "Receipt age exceeds fixture threshold; not proof of non-delivery"
+    },
+    {
+      "code": "NEGATIVE_RECEIPT_RECORDED",
+      "action": "PRESERVE_NEGATIVE_RECEIPT_AND_HOLD",
+      "meaning": "V116 local test negative receipt exists, no business release"
+    },
+    {
+      "code": "SIGNED_FIXTURE_CANCELLATION_ADVISORY",
+      "action": "QUARANTINE_AND_VERIFY_REISSUE_MANUALLY",
+      "meaning": "Test-key-signed source disposition revoked; never cancels HOLD/outbox"
+    },
+    {
+      "code": "SOURCE_PROOF_UNVERIFIED",
+      "action": "VERIFY_INDEPENDENT_SOURCE_MANUALLY",
+      "meaning": "Signer offline, forged, expired, wrong scope, or signed unknown"
+    }
+  ],
+  "test_only_signed_disposition": {
+    "schema": "v3.2-117-ci-source-disposition-v1",
+    "algorithm": "Ed25519",
+    "signed_fields": [
+      "schema_version",
+      "organization_id",
+      "incident_id",
+      "student_id",
+      "hold_sequence",
+      "hold_event_digest",
+      "message_digest",
+      "issuer_id",
+      "source_epoch",
+      "source_revision",
+      "revocation_sequence",
+      "disposition",
+      "issued_at_ms",
+      "expires_at_ms",
+      "fixture_only"
+    ],
+    "only_dispositions": [
+      "active",
+      "revoked",
+      "unknown"
+    ],
+    "signed_revocation_is_reliable_real_external_cancellation": false,
+    "keys_from_isolated_test_fixture": true,
+    "provenance_root_of_trust_from_real_organization": false,
+    "unknown_and_signature_failure_cannot_prove_revocation": true,
+    "after_final_read_revocation_race_closed": false
+  },
+  "audit": {
+    "db": "v106_isolated",
+    "postgresql_version": 16,
+    "schema": "v106_test",
+    "guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "tables": [
+      "fixture_delivery_reconciliation_events",
+      "fixture_delivery_reconciliation_heads"
+    ],
+    "tenant_scope": [
+      "organization_id",
+      "incident_id",
+      "student_id"
+    ],
+    "role_grants": "SELECT,INSERT only on events and limited head update",
+    "force_row_level_security": true,
+    "event_chaining_and_duplicate_cause_digest": true,
+    "record_status": "HOLD_ACTIVE_NEGATIVE_AUDIT_ONLY",
+    "head_hold_active_must_be_true": true,
+    "serializable_transaction_and_per_scope_advisory_lock": true,
+    "resnapshot_inside_transaction": true,
+    "source_hold_outbox_receipt_snapshot_digest_bound": true,
+    "no_real_transport_worker": true,
+    "no_live_retry_or_redelivery": true,
+    "no_positive_delivery_or_business_approval": true,
+    "no_production_migration_039": true,
+    "no_production_database_write": true,
+    "no_edu_management_system_changes": true
+  },
+  "tests": [
+    "REC-01",
+    "REC-02",
+    "REC-03",
+    "REC-04",
+    "REC-05",
+    "REC-06",
+    "REC-07",
+    "REC-08",
+    "REC-09",
+    "REC-10",
+    "REC-11",
+    "REC-12",
+    "REC-13",
+    "REC-14",
+    "REC-15",
+    "REC-16",
+    "REC-17",
+    "REC-18",
+    "REC-19",
+    "REC-20"
+  ],
+  "operating_policy": {
+    "overdue_ms_is_ci_fixture_not_sla": 60000,
+    "late_receipt_append_new_reconciliation_not_rewrite_history": true,
+    "duplicate_identical_observation_blocks_replay": true,
+    "source_revoked_signed_fixture_does_not_remove_hold_or_outbox": true,
+    "missing_outbox_requires_independent_rescan_no_automated_repair": true,
+    "after_commit_snapshot_change_returns_blocked_and_keeps_audit": true,
+    "reception_proof_real_remote_system": false,
+    "all_six_real_owners": "UNASSIGNED",
+    "student_primary": true,
+    "family_optional_for_actual_siblings": true,
+    "original_orders_payments_saleevent_lessons_compensations_preserved": true
+  },
+  "external_contract_status": "proposed-unimplemented",
+  "external_admission_16": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "six_real_external_authority_categories": "UNVERIFIED",
+  "production_chromium_uat": "NOT_RUN",
+  "production_finance_academic_uat": "NOT_RUN",
+  "real_external_network_reliability_and_ordering_proven": false,
+  "real_source_revocation_authority_proven": false,
+  "real_finance_signatures_verified": false,
+  "real_academic_signatures_verified": false,
+  "hold_and_outbox_single_transaction": false,
+  "cross_service_atomic_handoff": false,
+  "hard_denials": {
+    "external_source_verified": false,
+    "external_recipient_verified": false,
+    "external_authority_verified": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "production_integration_allowed": false,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "limitations": [
+    "Outbox gap is only an isolated SQL observation; missing network confirmation is not evidence the recipient never saw a message",
+    "Signed disposition comes from ephemeral CI keys, not trusted external IAM or finance/academic sources",
+    "The source signature proves text possession of the ephemeral key, not true original payment, lesson or student history",
+    "Last-read-to-commit and last-postcommit-to-real-action races remain; no cross-service source lock",
+    "The reconciliation log is a separate third transaction after prior V115 HOLD and V116 outbox commits, not atomic creation",
+    "No automatic rescan, delivery worker, queue, retry backoff, cancellation or release operation",
+    "Local SQL receipt, even if present, never establishes real independently witnessed delivery",
+    "Test roles can alter head digest but cannot change event history; tamper detection is not independent external audit custody"
+  ],
+  "next_stage": "V3.2-118 CI-only monotone reconciliation watermark and incident-level missing-event scan, no automatic delivery"
+}
