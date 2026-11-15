@@ -2668,6 +2668,21 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   }finally{
    await historyObserver.end();
   }
+  // The key and its trigger-appended event are one transaction: rollback
+  // cannot leak a ghost activation into the independently reconstructed log.
+  const tentative=await audit.connect();
+  try{
+   await tentative.query('BEGIN');
+   await tentative.query('INSERT INTO v121_anchor.fixture_iam_source_auth_keys(organization_id,key_version,auth_key,active) VALUES($1,4,$2,true)',[a,randomBytes(32)]);
+   assert.equal((await tentative.query(
+    'SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_key_events WHERE organization_id=$1',[a])).rows[0].n,7);
+   await tentative.query('ROLLBACK');
+  }finally{
+   await tentative.query('ROLLBACK').catch(()=>{});
+   tentative.release();
+  }
+  assert.equal((await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_key_events WHERE organization_id=$1',[a])).rows[0].n,6);
+  assert.equal((await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_auth_keys WHERE organization_id=$1 AND key_version=4',[a])).rows[0].n,0);
   await assert.rejects(attester.query('SELECT * FROM v121_anchor.fixture_iam_source_key_events'),/permission denied/);
   await assert.rejects(writerA.query('SELECT * FROM v121_anchor.fixture_iam_source_key_events'),/permission denied/);
   assert.equal((await audit.query(
