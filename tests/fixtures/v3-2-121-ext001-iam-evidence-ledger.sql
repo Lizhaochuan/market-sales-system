@@ -44,7 +44,9 @@ SET search_path=pg_catalog,v121_anchor AS $iam_attest$
 DECLARE existing record;
 DECLARE latest integer;
 BEGIN
- IF session_user<>'v121_iam_provenance_attester' OR
+ -- Postgres fixture administrator may seed historical legacy proofs for
+ -- regression only; the attester login cannot invoke this helper directly.
+ IF session_user NOT IN ('v121_iam_provenance_attester','postgres') OR
     p_org<>'11111111-1111-4111-8111-111111111111'::uuid THEN
   RAISE EXCEPTION 'V121_IAM_PROVENANCE_ROLE_DENIED';
  END IF;
@@ -102,9 +104,10 @@ $iam_attest$;
 REVOKE ALL ON FUNCTION v121_anchor.fixture_attest_iam_provenance(
  uuid,integer,uuid,uuid,char(64),char(64),char(64),uuid,uuid,char(64),char(64),timestamptz)
  FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION v121_anchor.fixture_attest_iam_provenance(
- uuid,integer,uuid,uuid,char(64),char(64),char(64),uuid,uuid,char(64),char(64),timestamptz)
- TO v121_iam_provenance_attester;
+-- Intentionally no EXECUTE grant for v121_iam_provenance_attester:
+-- source-aware SECURITY DEFINER can call this internal helper as owner;
+-- the attester session itself cannot bypass a verified source MAC.
+-- Only the test-only postgres owner seeds the pre-cutover legacy history.
 
 -- Private CI-only verifier key, unavailable to the SQL attester role.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -116,6 +119,27 @@ CREATE TABLE v121_anchor.fixture_iam_source_auth_keys(
  PRIMARY KEY(organization_id,key_version)
 );
 REVOKE ALL ON v121_anchor.fixture_iam_source_auth_keys FROM PUBLIC;
+CREATE UNIQUE INDEX fixture_iam_source_one_active_key
+ ON v121_anchor.fixture_iam_source_auth_keys(organization_id)
+ WHERE active IS TRUE;
+CREATE FUNCTION v121_anchor.fixture_iam_source_key_rotation_guard()
+RETURNS trigger LANGUAGE plpgsql AS $iam_key_guard$
+BEGIN
+ IF TG_OP='DELETE' OR
+    (TG_OP='UPDATE' AND (
+      NEW.organization_id<>OLD.organization_id OR
+      NEW.key_version<>OLD.key_version OR
+      NEW.auth_key<>OLD.auth_key OR
+      (OLD.active=false AND NEW.active=true))) THEN
+  RAISE EXCEPTION 'V121_IAM_SOURCE_KEY_IMMUTABLE';
+ END IF;
+ RETURN NEW;
+END;
+$iam_key_guard$;
+CREATE TRIGGER fixture_iam_source_keys_immutable
+ BEFORE UPDATE OR DELETE ON v121_anchor.fixture_iam_source_auth_keys
+ FOR EACH ROW EXECUTE FUNCTION v121_anchor.fixture_iam_source_key_rotation_guard();
+REVOKE ALL ON FUNCTION v121_anchor.fixture_iam_source_key_rotation_guard() FROM PUBLIC;
 
 -- CI-only binding of exact signed source witness and object-version proof.
 -- Content and signatures are hashed; no evidence bytes or secrets stored.
