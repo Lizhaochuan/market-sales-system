@@ -100,7 +100,7 @@ function fixture(){
    incident_generation:s.incident_generation,
    revocation_sequence:s.revocation_sequence,
    revocation_digest:s.revocation_digest,
-   evidence_digest:s.evidence_digest,issued_at_ms:time-1000,
+   evidence_digest:s.evidence_digest,issued_at_ms:time-500,
    expires_at_ms:time+60000,fixture_only:true
   };
   return {...p,signature:enc(p,badSource&&d==='finance'?
