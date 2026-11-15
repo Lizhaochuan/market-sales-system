@@ -1004,3 +1004,42 @@ test('UAT closeout evidence checklist detects gaps, ownership mistakes and prese
  await assert.rejects(issuerWriter.query('SELECT * FROM v106_test.fixture_closeout_uat_readiness'),/permission denied/);
  await assert.rejects(admin.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false WHERE organization_id=$1 AND incident_id=$2',[a,incident]),/V121_SECURITY_ALERT_UNRESOLVED/);
 });
+
+test('UAT failed evidence persists across remediation and two independent re-reviews without release',async()=>{
+ const event='00000000-0000-4000-8000-0000000000e9';
+ const failure='00000000-0000-4000-8000-0000000000b1';
+ const remediation='00000000-0000-4000-8000-0000000000b2';
+ const originalReviewer='00000000-0000-4000-8000-000000000015';
+ const remediator='00000000-0000-4000-8000-000000000016';
+ const securityReviewer='00000000-0000-4000-8000-000000000017';
+ const auditReviewer='00000000-0000-4000-8000-000000000018';
+ const originalDigest=createHash('sha256').update('fixture-original-failed-finance-reconciliation').digest('hex');
+ const remediationDigest=createHash('sha256').update('fixture-correction-finance-reconciliation').digest('hex');
+ const noteDigest=createHash('sha256').update('fixture-remediation-note').digest('hex');
+ await admin.query('INSERT INTO v106_test.fixture_uat_failures(organization_id,incident_id,event_id,failure_id,evidence_kind,failed_evidence_digest,failed_by,failure_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+  [a,incident,event,failure,'FINANCIAL_IMPACT_RECONCILED',originalDigest,originalReviewer,'CONFLICTING_EVIDENCE']);
+ await admin.query('INSERT INTO v106_test.fixture_uat_remediations(organization_id,failure_id,remediation_id,new_evidence_digest,remediated_by,remediation_note_digest) VALUES($1,$2,$3,$4,$5,$6)',
+  [a,failure,remediation,remediationDigest,remediator,noteDigest]);
+ const sql='SELECT v106_test.fixture_record_uat_remediation_review($1::uuid,$2::uuid,$3::uuid,$4::text,$5::text,$6::char(64))';
+ await assert.rejects(closeoutWriter.query(sql,[a,remediation,remediator,'SECURITY','ACCEPTED_FOR_REVIEW',remediationDigest]),/V121_UAT_REVIEWER_NOT_INDEPENDENT/);
+ await assert.rejects(closeoutWriter.query(sql,[a,remediation,originalReviewer,'SECURITY','ACCEPTED_FOR_REVIEW',remediationDigest]),/V121_UAT_REVIEWER_NOT_INDEPENDENT/);
+ await assert.rejects(issuerWriter.query(sql,[a,remediation,securityReviewer,'SECURITY','ACCEPTED_FOR_REVIEW',remediationDigest]),/permission denied/);
+ await closeoutWriter.query(sql,[a,remediation,securityReviewer,'SECURITY','ACCEPTED_FOR_REVIEW',remediationDigest]);
+ await assert.rejects(closeoutWriter.query(sql,[a,remediation,securityReviewer,'AUDIT','ACCEPTED_FOR_REVIEW',remediationDigest]),/V121_UAT_REVIEWER_NOT_INDEPENDENT/);
+ await closeoutWriter.query(sql,[a,remediation,auditReviewer,'AUDIT','ACCEPTED_FOR_REVIEW',remediationDigest]);
+ await assert.rejects(closeoutWriter.query(sql,[a,remediation,auditReviewer,'AUDIT','ACCEPTED_FOR_REVIEW',remediationDigest]),/V121_UAT_REVIEWER_NOT_INDEPENDENT|duplicate key/);
+ const diagnostics=(await admin.query('SELECT attempts,accepted_review_roles,original_failure_retained,hold_active,release_eligible FROM v106_test.fixture_uat_remediation_diagnostics WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0];
+ assert.deepEqual([diagnostics.attempts,diagnostics.accepted_review_roles,
+  diagnostics.original_failure_retained,diagnostics.hold_active,diagnostics.release_eligible],[1,2,true,true,false]);
+ const old=(await admin.query('SELECT failed_evidence_digest,failure_reason FROM v106_test.fixture_uat_failures WHERE organization_id=$1 AND failure_id=$2',[a,failure])).rows[0];
+ assert.equal(old.failed_evidence_digest,originalDigest);
+ assert.equal(old.failure_reason,'CONFLICTING_EVIDENCE');
+ await assert.rejects(admin.query('UPDATE v106_test.fixture_uat_failures SET failed_evidence_digest=$1 WHERE failure_id=$2',[remediationDigest,failure]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+ await assert.rejects(admin.query('DELETE FROM v106_test.fixture_uat_remediations WHERE remediation_id=$1',[remediation]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+ await assert.rejects(admin.query('DELETE FROM v106_test.fixture_uat_remediation_reviews WHERE remediation_id=$1',[remediation]),/V121_SECURITY_SIGNAL_IMMUTABLE/);
+ await assert.rejects(closeoutWriter.query('UPDATE v106_test.fixture_recovery_emergency_stops SET issuance_blocked=false'),/permission denied/);
+ const stop=(await admin.query('SELECT issuance_blocked FROM v106_test.fixture_recovery_emergency_stops WHERE organization_id=$1 AND incident_id=$2',[a,incident])).rows[0];
+ assert.equal(stop.issuance_blocked,true);
+ const holds=(await admin.query('SELECT module_name,hold_active,release_eligible FROM v106_test.fixture_cross_module_holds WHERE organization_id=$1 AND incident_id=$2 ORDER BY module_name',[a,incident])).rows;
+ assert.deepEqual(holds.map(x=>[x.module_name,x.hold_active,x.release_eligible]),[['ACADEMIC',true,false],['FINANCE',true,false],['SALES',true,false]]);
+});
