@@ -125,3 +125,11 @@ EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`
 - 负向 PostgreSQL 16 测试覆盖普通 attester 对旧入口权限拒绝、退役后旧密钥重放失败、退役密钥恢复拒绝、修改密钥拒绝、一个机构同时两把 ACTIVE 密钥拒绝、新版 MAC 旧版本号重放拒绝、重试不新增来源历史行。
 - 范围仍是测试数据库和模拟信任根：数据库所有者/超级用户能绕过测试限制；不提供真实 IAM 密钥所有权、外部 KMS/HSM、独立密钥托管和生产不可篡改证明。过期/撤权跨系统竞态、业务责任和外部 UAT 尚未通过。
 - EXT-001=UNVERIFIED，production_evidence_collected=false，hold_active=true，release_eligible=false。PR #129 Draft、CI-only，不合并不部署不发送真实通知。
+
+## EXT-001 密钥撤权并发、跨租户与签名服务故障隔离（CI-only）
+
+- 在一次性 PostgreSQL 16 隔离库内，来源认证 SQL 读取 active HMAC 密钥时使用 SELECT ... FOR SHARE 行锁。若管理员撤权 UPDATE 先取得行锁，认证查询必须等待并在提交后重新检查 active=false（失败关闭）；若认证先取得锁，撤权必须等认证事务提交后才能生效。行锁与当前事务的只追加审计写入一致，不宣称实现跨系统即时撤权或外部原子事务。
+- 并发负向集成测试覆盖撤权先持锁和认证先持锁两个方向，并通过 pg_stat_activity 观测实际锁等待，而非仅模拟并发调用。重复提交不增加来源审计行。
+- A 机构合成证据、来源清单和有效 MAC 尝试以 B 机构身份提交，必须被隔离认证入口拒绝；B 机构不能生成该组织的证据认证记录。这只是固化的测试组织范围，并非通用多租户 IAM 实现。
+- CI sourceAuthSigner 异步故障/拒绝时返回 V121_IAM_SOURCE_SIGNER_UNAVAILABLE，不进入 SQL；若来源身份或文件在 signer 异步处理期间发生撤权、替换，签名后再次双来源检查并在 SQL 前失败关闭。正常双来源模拟读取分为签名前、签名后、SQL 后三个阶段，各两轮读取，总共六轮；失败不自动回滚已经提交的 SQL 历史。
+- **限制：** 数据库管理员仍拥有临时密钥及旧版历史播种权限；CI signer 和数据库不构成生产级独立信任根。并发锁只保证该隔离数据库的本地事务顺序，跨服务撤权与最终响应之间仍存在窗口。EXT-001 继续 UNVERIFIED，HOLD=true、release_eligible=false，PR Draft / CI-only，不合并、不部署。
