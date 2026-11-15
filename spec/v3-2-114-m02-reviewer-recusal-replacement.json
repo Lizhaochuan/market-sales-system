@@ -1,0 +1,223 @@
+{
+  "schema_version": "v3.2-114-m02-reviewer-recusal-replacement-v1",
+  "module": "M02",
+  "parent_pr": 120,
+  "parent_head_sha": "a2566c83f5877f0b5e0f432774f2440c8e721312",
+  "parent_ci": [
+    {
+      "id": 43665052834,
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 43665052863,
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "scope": "CI_ONLY_SIGNED_FIXTURE_REVIEWER_RECUSAL_AND_REPLACEMENT_AUDIT",
+  "source": "src/cross-module-reviewer-recusal-replacement.mjs",
+  "test": "tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs",
+  "sql_fixture": "tests/fixtures/v3-2-114-m02-reviewer-lifecycle.sql",
+  "sql_adapter": "tests/helpers/v3-2-114-m02-postgres-reviewer-lifecycle.mjs",
+  "sql_setup": "scripts/v3-2-114-setup-reviewer-lifecycle.mjs",
+  "input_stages": {
+    "evidence_intake": "V3.2-112 untrusted six-role metadata chain",
+    "reviewer_assignment": "V3.2-113 append-only pending reviewer assignment",
+    "independent_original_evidence_provenance": false,
+    "trusted_staff_identity_and_revocation": false
+  },
+  "fixture_protocol": {
+    "separate_governance_and_identity_ed25519_keys_required": true,
+    "evidence_action_schema": "v3.2-114-ci-governance-action-v1",
+    "identity_status_schema": "v3.2-114-ci-identity-status-v1",
+    "permitted_actions": [
+      "recuse",
+      "replace"
+    ],
+    "permitted_reasons": [
+      "conflict_of_interest",
+      "role_change",
+      "role_revoked",
+      "reassignment_after_recusal"
+    ],
+    "signed_action_binding": [
+      "organization_id",
+      "incident_id",
+      "student_id",
+      "action_id",
+      "action_kind",
+      "reason_code",
+      "previous_reviewer_id",
+      "next_reviewer_id",
+      "sequence",
+      "previous_event_digest",
+      "assignment_digest",
+      "intake_head_digest",
+      "evidence_snapshot_digest",
+      "issued_at_ms",
+      "expires_at_ms",
+      "fixture_only"
+    ],
+    "signed_identity_fields": [
+      "organization_id",
+      "incident_id",
+      "student_id",
+      "reviewer_id",
+      "reviewer_role",
+      "active",
+      "role_revision",
+      "revocation_sequence",
+      "observed_at_ms",
+      "expires_at_ms",
+      "fixture_only"
+    ],
+    "old_and_new_reviewer_checked_before_and_after_sql": true,
+    "old_reviewer_revocation_requires_matching_reason": true,
+    "new_reviewer_must_be_active": true,
+    "replacement_reviewer_cannot_be_original_assigned_reviewer": true,
+    "replacement_reviewer_cannot_match_six_domain_submitters_or_claimed_owners": true,
+    "role_and_provenance_claims_authentic": false,
+    "actual_organization_admin_appointment": false,
+    "successful_fixture_transition_is_business_approval": false
+  },
+  "database": {
+    "real_disposable_postgresql_version": 16,
+    "database_name": "v106_isolated",
+    "schema": "v106_test",
+    "guard": "V106_ISOLATED_PG=YES_TEST_ONLY",
+    "event_table": "fixture_reviewer_lifecycle_events",
+    "head_table": "fixture_reviewer_lifecycle_heads",
+    "scope": [
+      "organization_id",
+      "incident_id",
+      "student_id"
+    ],
+    "transaction": "SERIALIZABLE",
+    "atomically_recheck_v112_intake_head_and_v113_original_assignment": true,
+    "append_only_audit_events": true,
+    "mutable_monotonic_head": true,
+    "unique_action_id_per_scope": true,
+    "role_row_level_security": "FORCE RLS",
+    "transactionally_atomic_external_source_authority": false,
+    "production_postgres_connected": false,
+    "production_schema_changed": false,
+    "production_migration_created": false
+  },
+  "cases": [
+    {
+      "id": "LIFE-01",
+      "expected": "Signed recusal is an unapproved SQL audit event"
+    },
+    {
+      "id": "LIFE-02",
+      "expected": "Direct replacement leaves original reviewer assignment and source history unchanged"
+    },
+    {
+      "id": "LIFE-03",
+      "expected": "Recusal followed by reassignment extends an immutable event chain"
+    },
+    {
+      "id": "LIFE-04",
+      "expected": "Reviewer conflicts with any submitted role are rejected"
+    },
+    {
+      "id": "LIFE-05",
+      "expected": "Revoked reviewer must use consistent independently signed reason"
+    },
+    {
+      "id": "LIFE-06",
+      "expected": "Forged governance signature cannot transition reviewer"
+    },
+    {
+      "id": "LIFE-07",
+      "expected": "Forged identity signer or shared roots are rejected"
+    },
+    {
+      "id": "LIFE-08",
+      "expected": "Forged organization or lifecycle chain digest is rejected"
+    },
+    {
+      "id": "LIFE-09",
+      "expected": "Expired action and revoked replacement identity are rejected"
+    },
+    {
+      "id": "LIFE-10",
+      "expected": "Identity revocation after SQL commit denies current review"
+    },
+    {
+      "id": "LIFE-11",
+      "expected": "New V112 intake after SQL commit invalidates old review"
+    },
+    {
+      "id": "LIFE-12",
+      "expected": "Precommit SQL failure rolls back both event and head"
+    },
+    {
+      "id": "LIFE-13",
+      "expected": "Competing transition writers cannot both append the same lifecycle step"
+    },
+    {
+      "id": "LIFE-14",
+      "expected": "Replayed signed transition cannot overwrite previous audit"
+    },
+    {
+      "id": "LIFE-15",
+      "expected": "Wrong tenant SQL writer cannot append another tenant action"
+    },
+    {
+      "id": "LIFE-16",
+      "expected": "Historical events are immutable to SQL writer and payment data protected"
+    },
+    {
+      "id": "LIFE-17",
+      "expected": "Caller-asserted finance approval and malformed scope are denied"
+    },
+    {
+      "id": "LIFE-18",
+      "expected": "V112 history and V113 assigned reviewer remain unchanged"
+    }
+  ],
+  "explicit_unclosed_gaps": [
+    "Fixture Ed25519 issuer and identity keys are controlled by tests, not external IAM or production governance",
+    "Role provenance and eligibility are unverified V112 metadata, not real finance or academic evidence",
+    "Signed reviewer status can change after last postcommit check; cross-service atomic barrier is absent",
+    "SQL locally binds V112 head and V113 assignment, but cannot atomically bind external identity or business transaction",
+    "An already stored transition remains a pending historical fact even if issuer later revokes it",
+    "No real owner assignment, HR recusal approval, independent human receipt or signed production source policy",
+    "No production PostgreSQL crash recovery, Chromium or formal cross-module contractual UAT",
+    "16 external admission checks, R01-R10 and six real finance/academic/handoff requirements remain unverified"
+  ],
+  "owner_role_assignment": "UNASSIGNED",
+  "real_reviewer_appointments_verified": 0,
+  "real_finance_and_academic_independent_approvals_verified": false,
+  "cross_system_atomic_handoff_implemented": false,
+  "production_reviewer_approval_implemented": false,
+  "external_contract_status": "proposed-unimplemented",
+  "sixteen_external_checks": "UNVERIFIED",
+  "r01_to_r10": "UNVERIFIED",
+  "six_independent_external_authority_requirements": "UNVERIFIED",
+  "hard_denials": {
+    "external_reviewer_appointed": false,
+    "external_owner_verified": false,
+    "real_evidence_verified": false,
+    "external_authority_verified": false,
+    "finance_authorized": false,
+    "academic_authorized": false,
+    "handoff_allowed": false,
+    "compensation_write_allowed": false,
+    "release_eligible": false,
+    "hold_active": true,
+    "production_integration_allowed": false,
+    "merge_authorized": false,
+    "deploy_authorized": false
+  },
+  "student_primary": true,
+  "family_only_as_needed_for_real_siblings": true,
+  "original_order_payment_saleevent_lesson_compensation_history_preserved": true,
+  "historic_migration_range_from_upstream_specs": "001-038",
+  "production_migration_039_added": false,
+  "edu_management_system_unchanged": true,
+  "current_crm_documentation_unchanged": true,
+  "next_stage": "V3.2-115 audit stale pending reviewer events and externally signed reviewer owner attestation requirements; prohibit production approval"
+}
