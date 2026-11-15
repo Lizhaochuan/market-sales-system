@@ -1,0 +1,22 @@
+name: V3.2-94 isolated manual lineage recovery
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-manual-lineage-recovery.mjs'
+      - 'tests/security/v3-2-94-m02-manual-lineage-recovery.test.mjs'
+      - '.github/workflows/v3-2-94-manual-lineage-recovery.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-manual-recovery:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify manual recovery syntax
+        run: node --check src/cross-module-manual-lineage-recovery.mjs
+      - name: Run recovery review and lineage audit safety regressions
+        run: node --test tests/security/v3-2-94-m02-manual-lineage-recovery.test.mjs tests/security/v3-2-93-m02-lineage-integrity-audit.test.mjs
