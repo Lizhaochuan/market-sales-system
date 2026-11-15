@@ -153,6 +153,8 @@ CREATE TABLE v106_test.fixture_receipt_key_audit (
  UNIQUE(organization_id,key_version,event_kind)
 );
 REVOKE ALL ON v106_test.fixture_receipt_key_audit FROM PUBLIC;
+GRANT SELECT ON v106_test.fixture_receipt_key_audit TO v106_audit_reader;
+-- Deliberately grant no secret-table read, key modification, or receipt mutation to auditor.
 CREATE FUNCTION v106_test.fixture_audit_key_transition() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,v106_test AS $audit_transition$
@@ -194,6 +196,7 @@ RETURNS void LANGUAGE plpgsql SECURITY DEFINER
 SET search_path=pg_catalog,v106_test AS $receipt_gate$
 DECLARE item jsonb;
 DECLARE secret bytea;
+DECLARE audit_count integer;
 BEGIN
  IF session_user <> 'v106_receipt_writer_a' OR
     p_organization <> '11111111-1111-4111-8111-111111111111'::uuid THEN
@@ -228,6 +231,15 @@ BEGIN
  END IF;
  SELECT attestation_key INTO secret FROM v106_test.fixture_receipt_attestation_secrets
  WHERE organization_id=p_organization AND key_version=p_key_version AND active IS TRUE;
+ SELECT count(*) INTO audit_count
+ FROM v106_test.fixture_receipt_key_audit aud
+ WHERE aud.organization_id=p_organization AND aud.key_version=p_key_version
+  AND aud.event_kind='KEY_ISSUED'
+  AND aud.event_digest=encode(sha256(convert_to(
+   aud.organization_id::text||'|'||aud.key_version::text||'|'||aud.event_kind||'|'||aud.actor,'UTF8')),'hex');
+ IF audit_count<>1 THEN
+  RAISE EXCEPTION 'V121_RECEIPT_KEY_AUDIT_UNVERIFIED';
+ END IF;
  IF secret IS NULL OR p_attestation IS NULL OR
     p_attestation !~ '^[a-f0-9]{64}$' OR
     p_attestation <> encode(public.hmac(convert_to(p_payload,'UTF8'),secret,'sha256'),'hex') THEN
