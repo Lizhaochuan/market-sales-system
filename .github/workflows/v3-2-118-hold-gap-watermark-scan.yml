@@ -1,0 +1,79 @@
+name: V3.2-118 bounded HOLD gap scan and monotone watermarks
+on:
+  pull_request:
+    paths:
+      - 'src/cross-module-hold-gap-watermark-scan.mjs'
+      - 'tests/integration/v3-2-118-m02-hold-gap-watermark-scan.test.mjs'
+      - 'tests/helpers/v3-2-118-m02-postgres-hold-gap-scan.mjs'
+      - 'tests/fixtures/v3-2-118-m02-hold-gap-scan.sql'
+      - 'scripts/v3-2-118-setup-hold-gap-scan.mjs'
+      - 'spec/v3-2-118-m02-hold-gap-watermark-scan.json'
+      - 'docs/V3.2-118_M02_HOLD_GAP_WATERMARK_SCAN.md'
+      - '.github/workflows/v3-2-118-hold-gap-watermark-scan.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-hold-gap-scan:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ephemeral-v106-admin-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install CI-only runtime packages
+        run: npm install --omit=dev --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Validate V118 source test adapter and fixture setup syntax
+        run: |
+          node --check src/cross-module-hold-gap-watermark-scan.mjs
+          node --check tests/integration/v3-2-118-m02-hold-gap-watermark-scan.test.mjs
+          node --check tests/helpers/v3-2-118-m02-postgres-hold-gap-scan.mjs
+          node --check scripts/v3-2-118-setup-hold-gap-scan.mjs
+      - name: Prepare disposable V106 V109 V110 V112 V113 V114 V115 V116 V117 and V118 tables
+        run: |
+          node scripts/v3-2-106-setup-isolated-pg.mjs
+          node scripts/v3-2-109-setup-lease-sql.mjs
+          node scripts/v3-2-110-setup-loss-notice-sql.mjs
+          node scripts/v3-2-112-setup-evidence-intake-sql.mjs
+          node scripts/v3-2-113-setup-reviewer-assignments.mjs
+          node scripts/v3-2-114-setup-reviewer-lifecycle.mjs
+          node scripts/v3-2-115-setup-review-hold.mjs
+          node scripts/v3-2-116-setup-hold-outbox.mjs
+          node scripts/v3-2-117-setup-delivery-reconciliation.mjs
+          node scripts/v3-2-118-setup-hold-gap-scan.mjs
+      - name: Run V118 complete source chain and bounded monotone gap scan drills
+        run: node --test tests/integration/v3-2-118-m02-hold-gap-watermark-scan.test.mjs
+      - name: Regress V117 pending delivery reconciliation and V116 signed outbox
+        run: node --test tests/integration/v3-2-117-m02-hold-delivery-reconciliation.test.mjs tests/integration/v3-2-116-m02-hold-outbox-delivery.test.mjs
+      - name: Regress V115 permanent HOLD and V114 reviewer recusal
+        run: node --test tests/integration/v3-2-115-m02-review-invalidation-hold.test.mjs tests/integration/v3-2-114-m02-reviewer-recusal-replacement.test.mjs
+      - name: Regress V113 reviewer assignment and V112 untrusted evidence intake
+        run: node --test tests/integration/v3-2-113-m02-independent-reviewer-assignment.test.mjs tests/integration/v3-2-112-m02-evidence-intake-quarantine.test.mjs
+      - name: Regress V111 independent domain reviews and V110 negative receipts
+        run: node --test tests/security/v3-2-111-m02-independent-evidence-review.test.mjs tests/integration/v3-2-110-m02-lease-loss-negative-receipt.test.mjs
+      - name: Regress V109 V108 V107 and V106 PostgreSQL causal fences
+        run: node --test tests/integration/v3-2-109-m02-causal-lease-fence.test.mjs tests/integration/v3-2-108-m02-postcommit-causal-race.test.mjs tests/integration/v3-2-107-m02-signed-postgres-e2e.test.mjs tests/integration/v3-2-106-m02-postgres-checkpoint.test.mjs
+      - name: Assert all production authority remains unverified and no migration 039
+        run: |
+          node --input-type=module -e "import{readFileSync}from'node:fs';const s=JSON.parse(readFileSync('spec/v3-2-118-m02-hold-gap-watermark-scan.json'));const d=s.hard_denials;if(s.parent_pr!==124||s.cases.length!==20||s.sql_contract.monotone_enforced_in_sql_trigger!==true||s.scan_contract.no_release_operation!==true||s.sql_contract.production_migration_created!==false||s.acceptance_limits.external_contract_status!=='proposed-unimplemented'||Object.entries(d).some(([k,v])=>k==='hold_active'?v!==true:v!==false))process.exit(1)"
+      - name: Recheck V105 external business admission remains unresolved
+        run: node --test tests/security/v3-2-105-m02-admission-contract-review.test.mjs
+      - name: Regress eighteen V82 through V99 isolated safety suites
+        run: node scripts/v3-2-100-run-m02-node-regressions.mjs
