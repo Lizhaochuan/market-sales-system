@@ -75,3 +75,10 @@
 - 集成测试验证持久水位、跨 adapter 重启旧签名重放、直接 SQL 水位回退、删除权限和跨租户不可见。
 - **安全限制**：当前仅测试数据库内的水位，尚未绑定独立短租约验证器的 lease_sequence；没有真实 IAM 授权签名、网络水位权威来源或跨系统原子一致性。持久水位仅记录本地最大已观察值，不代表能够证明实际外部撤权时刻。
 - 继续保持六方真实负责人 UNASSIGNED、正式 UAT 未通过、HOLD、Draft、禁止合并和部署。
+
+## V121 opted-in signed lease + SQL fencing (CI-only)
+- `fixture_signer_watermarks` 新增持久 `lease_sequence`，数据库防回退触发器和 RLS 同时保护 epoch、水位与序号。
+- 隔离 SQL adapter 在显式提供 `leaseGate` 时强制 `lease` 字段：临时 Ed25519 租约与回执证明必须绑定同一租户、异常、签署者、通知、epoch 和撤权水位；租约有效期最长 30 秒，写入前、COMMIT 前和提交后复核。
+- `lease_sequence` 和负向回执在同一 SERIALIZABLE 事务中记录，新的 adapter 实例读取共享 SQL 水位即可拒绝旧序号；过期租约必须失败并保持 HOLD。
+- **仍有阻断缺口**：为了兼容早期 CI 测试，未提供 `leaseGate` 的旧隔离 adapter 仍允许仅凭回执签名入库。这不是生产接口，不得描述成系统全局强制短租约；真实 IAM、可信共享授权租约颁发、双向租约序列的业务语义、外部跨系统原子性和正式 UAT 尚未完成。进程内 gate 状态不可视为权威来源。
+- 全程仅在一次性 PostgreSQL 16 数据库测试，继续 Draft/HOLD/不合并/不部署。
