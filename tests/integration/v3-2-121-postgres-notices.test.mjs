@@ -257,3 +257,31 @@ test('authority unavailable at commit checkpoint is denied without persisted rec
  const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
  assert.equal(count.rows[0].n,0);
 });
+
+test('durable signer watermark blocks old signed proof after adapter restart',async()=>{
+ const q=await service.enqueue({...input,epoch:51});
+ const value=fixtureSignedInput(q);
+ const elevated={...value.proof.statement,revocation_watermark:3};
+ const proof={statement:elevated,signature_b64:sign(null,encodeFixtureReceiptProof(elevated),keyPair.privateKey).toString('base64')};
+ const higher=createIsolatedPostgresRevocationNotices({pool:writer,
+  receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
+  receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:3,active:true})});
+ const first=await higher.appendNegativeReceipt({...value,proof});
+ assert.equal(first.hold_active,true);
+ const row=await writer.query('SELECT revocation_watermark FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1 AND incident_id=$2 AND signer_id=$3',[a,incident,elevated.signer_id]);
+ assert.equal(row.rows[0].revocation_watermark,3);
+ const q2=await service.enqueue({...input,epoch:52});
+ const old=fixtureSignedInput(q2);
+ const restarted=createIsolatedPostgresRevocationNotices({pool:writer,
+  receiptPublicKey:keyPair.publicKey,receiptClock:()=>150,
+  receiptProofAuthority:async()=>({authority_epoch:4,revocation_watermark:2,active:true})});
+ await assert.rejects(restarted.appendNegativeReceipt(old),{code:'NOTICE_SIGNER_WATERMARK_REGRESSION'});
+ const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q2.notice_id]);
+ assert.equal(count.rows[0].n,0);
+});
+test('SQL trigger prevents direct watermark regression and tenant deletion',async()=>{
+ await assert.rejects(writer.query('UPDATE v106_test.fixture_signer_watermarks SET revocation_watermark=1 WHERE organization_id=$1',[a]),/V121_WATERMARK_REGRESSION/);
+ await assert.rejects(writer.query('DELETE FROM v106_test.fixture_signer_watermarks'),/permission denied/);
+ const other=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_signer_watermarks WHERE organization_id=$1',[b]);
+ assert.equal(other.rows[0].n,0);
+});
