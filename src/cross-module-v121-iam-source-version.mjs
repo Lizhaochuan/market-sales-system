@@ -262,9 +262,26 @@ export async function issueFixtureExt001FromTwoSources(args){
  const payload=encodeFixtureExt001SourceAuthorization({
   ...sourceFingerprint,receipt_id:args.receiptId
  },sourceBindingDigest,args.sourceKeyVersion);
- const sourceMac=await args.sourceAuthSigner(payload);
+ let sourceMac;
+ try{
+  sourceMac=await args.sourceAuthSigner(payload);
+ }catch{
+  // A remote verifier outage or refusal cannot silently fall back to
+  // the legacy SQL path or cause any database attestation.
+  fail('V121_IAM_SOURCE_SIGNER_UNAVAILABLE');
+ }
  if(typeof sourceMac!=='string'||!/^[a-f0-9]{64}$/.test(sourceMac))
   fail('V121_IAM_SOURCE_AUTH_INVALID');
+ // A delayed signer may outlive source revocation or content replacement.
+ // Re-read both independent stores again before the SQL write.
+ const afterSigner=await verifyFixtureExt001SourceVersion({
+  ...args,nowMs:clock(),clock
+ });
+ if(afterSigner.revision_id!==verified.revision_id||
+    afterSigner.envelope_digest!==verified.envelope_digest||
+    !['EXT-001-E1','EXT-001-E2'].every(id=>
+      verified.artifactBytes.get(id).equals(afterSigner.artifactBytes.get(id))))
+  fail('V121_IAM_SOURCE_CHANGED_DURING_SIGNING');
  const result=await issueFixtureExt001VerifiedProvenance({
   envelope:args.envelope,
   artifactBytes:verified.artifactBytes,
@@ -296,7 +313,8 @@ export async function issueFixtureExt001FromTwoSources(args){
  return Object.freeze({
   ...result,
   source_checked_in_fixture:true,
-  independent_read_rounds:4,
+  independent_read_rounds:6,
+  post_signer_source_rechecked:true,
   post_attestation_source_rechecked:true,
   production_source_authenticated:false,
   production_evidence_collected:false,
