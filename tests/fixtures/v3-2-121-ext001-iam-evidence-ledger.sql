@@ -188,8 +188,12 @@ BEGIN
     p_source_mac IS NULL OR trim(p_source_mac) !~ '^[a-f0-9]{64}$' THEN
   RAISE EXCEPTION 'V121_IAM_SOURCE_AUTH_DENIED';
  END IF;
+ -- Row lock serializes successful MAC admission with key retirement.
+ -- If retirement starts first, this SELECT waits and rechecks active=false.
+ -- If admission locks first, retirement cannot commit before admission ends.
  SELECT auth_key INTO secret FROM v121_anchor.fixture_iam_source_auth_keys
- WHERE organization_id=p_org AND key_version=p_key_version AND active=true;
+ WHERE organization_id=p_org AND key_version=p_key_version AND active=true
+ FOR SHARE;
  signed_material:=concat_ws('|',
   'v121-ext001-source-auth-v1',p_key_version::text,p_org::text,p_revision::text,
   p_revision_id::text,p_receipt::text,trim(p_envelope_digest),trim(p_e1),
