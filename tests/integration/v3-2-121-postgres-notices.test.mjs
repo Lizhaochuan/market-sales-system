@@ -12,7 +12,9 @@ import {createIsolatedPostgresRevocationNotices} from '../helpers/v3-2-121-m02-p
 import {createIsolatedRevocationNoticeService} from '../../src/cross-module-revocation-notice-contract.mjs';
 import {REQUIRED_IAM_ROLES,REQUIRED_DENIAL_CASES,signFixtureExt001Envelope,fingerprintFixtureExt001ForIntake,verifyFixtureExt001BytesAndFingerprint,issueFixtureExt001VerifiedProvenance,encodeFixtureExt001SourceAuthorization} from '../../src/cross-module-v121-iam-evidence.mjs';
 import {signFixtureExt001SourceManifest,issueFixtureExt001FromTwoSources} from '../../src/cross-module-v121-iam-source-version.mjs';
-import {signFixtureIamKeyExternalAnchor,verifyFixtureIamKeyExternalAnchor} from '../helpers/v3-2-121-fixture-iam-key-external-anchor.mjs';
+import {signFixtureIamKeyExternalAnchor,verifyFixtureIamKeyExternalAnchor,
+ inspectFixtureArchivedIamKeyAnchor,appendFixtureIamKeyCheckpoint,
+ fingerprintFixtureIamKeyAnchor} from '../helpers/v3-2-121-fixture-iam-key-external-anchor.mjs';
 const hash=o=>createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const a='11111111-1111-4111-8111-111111111111';
 const b='22222222-2222-4222-8222-222222222222';
@@ -2671,6 +2673,41 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
    });
    assert.equal(externalReview.verdict,'EXTERNAL_FIXTURE_KEY_AUDIT_MATCH_STILL_HOLD');
    assert.equal(externalReview.release_eligible,false);
+   // Fixed EXT-001 closeout: exercise the failure orchestration on real SQL
+   // event rows. The external adapter remains an explicit in-memory fixture.
+   let stored=null;
+   const store={read:async()=>structuredClone(stored),
+    compareAndAppend:async({expectedCheckpointDigest,checkpoint})=>{
+     const current=stored?fingerprintFixtureIamKeyAnchor(stored.anchor):'0'.repeat(64);
+     if(current!==expectedCheckpointDigest)return false;
+     stored=structuredClone(checkpoint);return true;
+    }};
+   const appendArgs={rows:history,organizationId:a,signerId:archiveSigner,
+    expectedCheckpointDigest:'0'.repeat(64),store,
+    readTrust:async()=>({publicKeys,keyStates}),
+    signCheckpoint:async args=>signFixtureIamKeyExternalAnchor({
+     ...args,privateKey:archiveKeys.privateKey})};
+   await assert.rejects(appendFixtureIamKeyCheckpoint({...appendArgs,
+    signCheckpoint:async()=>{throw Error('fixture signer unavailable');}}),
+   {code:'V121_KEY_ANCHOR_SIGNER_UNAVAILABLE'});
+   assert.equal(stored,null);
+   const append=store.compareAndAppend;
+   store.compareAndAppend=async args=>{
+    await append(args);throw Error('fixture acknowledgement lost');
+   };
+   await assert.rejects(appendFixtureIamKeyCheckpoint(appendArgs),
+    {code:'V121_KEY_ANCHOR_STORE_WRITE_UNCONFIRMED'});
+   assert.ok(stored); // Never pretend a committed external write rolled back.
+   keyStates.set(archiveSigner,'REVOKED');
+   const forensic=inspectFixtureArchivedIamKeyAnchor({rows:history,...stored,
+    organizationId:a,publicKeys,keyStates});
+   assert.equal(forensic.verdict,'HISTORICAL_FIXTURE_KEY_AUDIT_ONLY');
+   assert.equal(forensic.current_authority,false);
+   assert.equal(forensic.release_eligible,false);
+   assert.throws(()=>verifyFixtureIamKeyExternalAnchor({rows:history,...stored,
+    organizationId:a,publicKeys,keyStates,nowMs:Date.now()}),
+   {code:'V121_KEY_ANCHOR_SIGNER_UNTRUSTED'});
+   keyStates.set(archiveSigner,'ACTIVE');
    // A database owner can recompute its entire LOCAL hash chain after editing
    // history. That fabricated history must fail against the OUT-OF-BAND signature.
    const fabricated=structuredClone(history);
@@ -2763,3 +2800,4 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   await audit.end();
  }
 });
+

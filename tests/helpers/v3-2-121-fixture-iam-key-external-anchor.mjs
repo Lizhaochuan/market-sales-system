@@ -124,16 +124,28 @@ export function verifyFixtureIamKeyExternalAnchor({
  rows,anchor,organizationId,publicKeys,keyStates,nowMs,
  previousAnchor=null,minimumEventCount=1
 }){
+ return verifyHistory({rows,anchor,organizationId,publicKeys,keyStates,nowMs,
+  previousAnchor,minimumEventCount},false);
+}
+// Signature/content inspection only: expiry is deliberately not authorization.
+// A compromised key can backdate a forgery; this does NOT prove pre-revocation
+// issuance, trusted wall-clock time, archive durability or current authority.
+export function inspectFixtureArchivedIamKeyAnchor(args){
+ return verifyHistory(args,true);
+}
+function verifyHistory({rows,anchor,organizationId,publicKeys,keyStates,nowMs,
+ previousAnchor=null,minimumEventCount=1},historical){
  const {message,bytes}=encodedProof(anchor);
  const s=anchor.statement;
  if(!(publicKeys instanceof Map)||!publicKeys.has(s.signer_id)||
-  !(keyStates instanceof Map)||keyStates.get(s.signer_id)!=='ACTIVE')
+  !(keyStates instanceof Map)||!(historical?['ACTIVE','REVOKED']:['ACTIVE'])
+   .includes(keyStates.get(s.signer_id)))
   fail('V121_KEY_ANCHOR_SIGNER_UNTRUSTED');
  let valid=false;
  try{valid=verify(null,message,publicKeys.get(s.signer_id),bytes);}
  catch{valid=false;}
  if(!valid)fail('V121_KEY_ANCHOR_SIGNATURE_INVALID');
- if(!safeInt(nowMs)||nowMs<s.issued_at_ms||nowMs>=s.expires_at_ms)
+ if(!historical&&(!safeInt(nowMs)||nowMs<s.issued_at_ms||nowMs>=s.expires_at_ms))
   fail('V121_KEY_ANCHOR_EXPIRED');
  if(s.organization_id!==organizationId)
   fail('V121_KEY_ANCHOR_SCOPE_INVALID');
@@ -148,7 +160,9 @@ export function verifyFixtureIamKeyExternalAnchor({
   const previousSigner=previousAnchor.statement.signer_id;
   let previousValid=false;
   try{
-   previousValid=publicKeys.has(previousSigner) &&
+   previousValid=previousAnchor.statement.organization_id===organizationId &&
+    ['ACTIVE','REVOKED'].includes(keyStates.get(previousSigner)) &&
+    publicKeys.has(previousSigner) &&
     verify(null,prior.message,publicKeys.get(previousSigner),prior.bytes);
   }catch{previousValid=false;}
   if(!previousValid)fail('V121_KEY_ANCHOR_PREVIOUS_MISMATCH');
@@ -161,8 +175,94 @@ export function verifyFixtureIamKeyExternalAnchor({
  if(current.event_count!==s.event_count||
    current.head_event_digest!==s.head_event_digest)
   fail('V121_KEY_ANCHOR_CONTENT_MISMATCH');
- return Object.freeze({verdict:'EXTERNAL_FIXTURE_KEY_AUDIT_MATCH_STILL_HOLD',
+ return Object.freeze({verdict:historical?'HISTORICAL_FIXTURE_KEY_AUDIT_ONLY':
+   'EXTERNAL_FIXTURE_KEY_AUDIT_MATCH_STILL_HOLD',
   checkpoint_digest:fingerprintFixtureIamKeyAnchor(anchor),
   event_count:current.event_count,hold_active:true,release_eligible:false,
-  production_evidence_collected:false,release_authorized:false});
+  production_evidence_collected:false,release_authorized:false,
+  current_authority:false,pre_revocation_issuance_proven:false});
 }
+
+// CI fixture orchestration. The adapter must atomically compare-and-append a
+// tenant head and retain prior immutable checkpoints. An error/timeout after a
+// write is ambiguous: never claim rollback and never fall back to a local head.
+// Callers must reconcile an unknown write before retrying with a new head pin.
+export async function appendFixtureIamKeyCheckpoint({
+ rows,organizationId,signerId,expectedCheckpointDigest,store,
+ readTrust,signCheckpoint,clock=Date.now,timeoutMs=1000
+}){
+ if(!HASH.test(expectedCheckpointDigest)||!UUID.test(signerId)||
+  !store||typeof store.read!=='function'||typeof store.compareAndAppend!=='function'||
+  typeof readTrust!=='function'||typeof signCheckpoint!=='function'||
+  typeof clock!=='function'||!safeInt(timeoutMs)||timeoutMs>5000)
+  fail('V121_KEY_ANCHOR_SERVICE_INPUT_INVALID');
+ const snapshot=structuredClone(rows);
+ rebuildFixtureIamKeyEvents(snapshot,organizationId);
+ async function bounded(operation,code){
+  let timer;
+  try{
+   return await Promise.race([
+    Promise.resolve().then(operation),
+    new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(code)),timeoutMs);})
+   ]);
+  }catch{fail(code);}finally{clearTimeout(timer);}
+ }
+ async function trust(){
+  const value=await bounded(()=>readTrust(),'V121_KEY_ANCHOR_TRUST_UNAVAILABLE');
+  if(!(value?.publicKeys instanceof Map)||!(value?.keyStates instanceof Map))
+   fail('V121_KEY_ANCHOR_TRUST_UNAVAILABLE');
+  return {publicKeys:new Map(value.publicKeys),keyStates:new Map(value.keyStates)};
+ }
+ async function read(){
+  const value=await bounded(()=>store.read(organizationId),'V121_KEY_ANCHOR_STORE_UNAVAILABLE');
+  if(value===null)return null;
+  if(!exactKeys(value,['anchor','previousAnchor']))
+   fail('V121_KEY_ANCHOR_STORE_INVALID');
+  return structuredClone(value);
+ }
+ const head=await read();
+ const digest=head?fingerprintFixtureIamKeyAnchor(head.anchor):ZERO;
+ if(digest!==expectedCheckpointDigest)fail('V121_KEY_ANCHOR_HEAD_CONFLICT');
+ let trusted=await trust();
+ if(head){
+  inspectFixtureArchivedIamKeyAnchor({
+   rows:snapshot.slice(0,head.anchor.statement.event_count),
+   anchor:head.anchor,previousAnchor:head.previousAnchor,
+   organizationId,...trusted
+  });
+ }
+ if(trusted.keyStates.get(signerId)!=='ACTIVE'||!trusted.publicKeys.has(signerId))
+  fail('V121_KEY_ANCHOR_SIGNER_UNTRUSTED');
+ const issuedAtMs=clock();
+ if(!safeInt(issuedAtMs)||(head&&issuedAtMs<head.anchor.statement.issued_at_ms))
+  fail('V121_KEY_ANCHOR_EXPIRED');
+ const anchor=structuredClone(await bounded(()=>signCheckpoint({
+  rows:structuredClone(snapshot),organizationId,signerId,issuedAtMs,
+  previousAnchor:head?structuredClone(head.anchor):null
+ }),'V121_KEY_ANCHOR_SIGNER_UNAVAILABLE'));
+ if(anchor?.statement?.signer_id!==signerId||anchor?.statement?.issued_at_ms!==issuedAtMs)
+  fail('V121_KEY_ANCHOR_SIGNATURE_INVALID');
+ const previousAnchor=head?.anchor??null;
+ const args={rows:snapshot,anchor,previousAnchor,organizationId};
+ trusted=await trust();
+ verifyFixtureIamKeyExternalAnchor({...args,...trusted,nowMs:clock()});
+ const checkpointDigest=fingerprintFixtureIamKeyAnchor(anchor);
+ const written=await bounded(()=>store.compareAndAppend({
+  organizationId,expectedCheckpointDigest,
+  checkpoint:structuredClone({anchor,previousAnchor})
+ }),'V121_KEY_ANCHOR_STORE_WRITE_UNCONFIRMED');
+ if(written!==true)fail('V121_KEY_ANCHOR_HEAD_CONFLICT');
+ const persisted=await read();
+ if(!persisted||fingerprintFixtureIamKeyAnchor(persisted.anchor)!==checkpointDigest||
+  (persisted.previousAnchor?fingerprintFixtureIamKeyAnchor(persisted.previousAnchor):ZERO)
+    !==expectedCheckpointDigest)
+  fail('V121_KEY_ANCHOR_STORE_READBACK_MISMATCH');
+ // The write may survive a late revocation; preserve it for forensics, fail
+ // the current operation, and leave every release gate closed.
+ trusted=await trust();
+ return verifyFixtureIamKeyExternalAnchor({
+  ...args,anchor:persisted.anchor,previousAnchor:persisted.previousAnchor,
+  ...trusted,nowMs:clock()
+ });
+}
+

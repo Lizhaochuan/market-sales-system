@@ -1,5 +1,7 @@
 # V3.2-121 / EXT-001｜生产 IAM 证据接收规范（CI-only）
 
+本轮固定范围、验收判据与停止边界见 [EXT-001 隔离开发收口](v3-2-121-ext001-closeout.md)。仅收口服务不可用、撤销后历史核验和检查点存储故障三项；真实环境依赖不再自动衍生模拟开发任务。
+
 > 本文件是尚未执行的**生产证据交接规范**，不是生产证据包。当前：`EXT-001=UNVERIFIED`，`NOT_COLLECTED`，`NOT_REVIEWED`，`NOT_SIGNED`，`HOLD=true`，`release_eligible=false`。对应 Draft PR #129。
 
 ## 所需责任与授权
@@ -150,3 +152,4 @@ EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`
 - **真实生产架构未落地**：未来需要独立身份域的签名服务和 KMS/HSM 保护私钥、跨组织独立审计人、外部不可修改的保留期存储（WORM 或等价设施）、离线保全受信公钥/检查点索引、签发与时间戳证据、最小序列防回退锚及双人审批。还需对 KMS 断连、存储超时、延迟归档、跨区灾难和密钥撤销后的历史核验开展真实 UAT。
 - CI 独立内存 Map 和模拟签署者不能证明外部服务隔离，数据库只读查询也不能证明生产源不可篡改。任何外部检查点失效或来源审计不一致都必须保持 HOLD，不得自动重算基线、覆盖旧检查点或授权发布。所有返回持续 hold_active=true、release_eligible=false。
 - EXT-001=UNVERIFIED，真实 IAM/真实外部审计锚和组织签字仍 NOT_COLLECTED/NOT_REVIEWED/NOT_SIGNED；PR #129 Draft / CI-only，不合并、不部署、不解除任何销售、财务或教务隔离。
+

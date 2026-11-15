@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {createHash,generateKeyPairSync} from 'node:crypto';
 import {
  rebuildFixtureIamKeyEvents,signFixtureIamKeyExternalAnchor,
- verifyFixtureIamKeyExternalAnchor,fingerprintFixtureIamKeyAnchor
+ verifyFixtureIamKeyExternalAnchor,fingerprintFixtureIamKeyAnchor,
+ inspectFixtureArchivedIamKeyAnchor,appendFixtureIamKeyCheckpoint
 } from '../helpers/v3-2-121-fixture-iam-key-external-anchor.mjs';
 
 const org='11111111-1111-4111-8111-111111111111';
@@ -55,6 +56,225 @@ test('independent signed checkpoint verifies six source-key events and remains H
  assert.equal(result.hold_active,true);
  assert.equal(result.release_eligible,false);
  assert.equal(result.release_authorized,false);
+});
+
+function serviceFixture(){
+ let head=null;
+ const archived=[];
+ const states=new Map([[signer,'ACTIVE']]);
+ const publicKeys=new Map([[signer,signing.publicKey]]);
+ const calls={sign:0,write:0};
+ const store={
+  read:async()=>structuredClone(head),
+  compareAndAppend:async({expectedCheckpointDigest,checkpoint})=>{
+   calls.write++;
+   const actual=head?fingerprintFixtureIamKeyAnchor(head.anchor):ZERO;
+   if(expectedCheckpointDigest!==actual)return false;
+   head=structuredClone(checkpoint);archived.push(structuredClone(checkpoint));
+   return true;
+  }
+ };
+ const args={rows:history().slice(0,4),organizationId:org,signerId:signer,
+  expectedCheckpointDigest:ZERO,store,clock:()=>1700000020000,
+  readTrust:async()=>({publicKeys,keyStates:states}),
+  signCheckpoint:async input=>{
+   calls.sign++;
+   return signFixtureIamKeyExternalAnchor({...input,privateKey:signing.privateKey});
+  }
+ };
+ return {args,store,states,publicKeys,calls,archived,get head(){return head;}};
+}
+
+test('revoked expired checkpoints retain forensic signature/content inspection without authority',()=>{
+ const first=full(history().slice(0,4)).anchor;
+ const {args}=full(history(),first,1700000021000);
+ args.keyStates.set(signer,'REVOKED');
+ const result=inspectFixtureArchivedIamKeyAnchor({...args,nowMs:1700001000000});
+ assert.equal(result.verdict,'HISTORICAL_FIXTURE_KEY_AUDIT_ONLY');
+ for(const field of ['release_eligible','release_authorized','current_authority',
+  'pre_revocation_issuance_proven','production_evidence_collected'])
+  assert.equal(result[field],false);
+ assert.equal(result.hold_active,true);
+ fail(()=>verifyFixtureIamKeyExternalAnchor(args),'V121_KEY_ANCHOR_SIGNER_UNTRUSTED');
+ fail(()=>inspectFixtureArchivedIamKeyAnchor({...args,publicKeys:new Map()}),
+  'V121_KEY_ANCHOR_SIGNER_UNTRUSTED');
+ fail(()=>inspectFixtureArchivedIamKeyAnchor({...args,keyStates:new Map()}),
+  'V121_KEY_ANCHOR_SIGNER_UNTRUSTED');
+ const forged=structuredClone(args.anchor);
+ forged.statement.head_event_digest='a'.repeat(64);
+ fail(()=>inspectFixtureArchivedIamKeyAnchor({...args,anchor:forged}),
+  'V121_KEY_ANCHOR_SIGNATURE_INVALID');
+ fail(()=>inspectFixtureArchivedIamKeyAnchor({...args,rows:history().slice(0,4)}),
+  'V121_KEY_ANCHOR_CONTENT_MISMATCH');
+ fail(()=>inspectFixtureArchivedIamKeyAnchor({...args,organizationId:other}),
+  'V121_KEY_ANCHOR_SCOPE_INVALID');
+ fail(()=>inspectFixtureArchivedIamKeyAnchor({...args,minimumEventCount:7}),
+  'V121_KEY_ANCHOR_ROLLBACK');
+});
+
+test('persisted compare-and-append advances 4 to 6 events; stale caller pin cannot write',async()=>{
+ const f=serviceFixture();
+ const first=await appendFixtureIamKeyCheckpoint(f.args);
+ assert.equal(first.event_count,4);
+ assert.equal(first.hold_active,true);
+ assert.equal(first.release_eligible,false);
+ const next=await appendFixtureIamKeyCheckpoint({...f.args,rows:history(),
+  expectedCheckpointDigest:first.checkpoint_digest});
+ assert.equal(next.event_count,6);
+ assert.equal(f.archived.length,2);
+ await assert.rejects(appendFixtureIamKeyCheckpoint(f.args),
+  {code:'V121_KEY_ANCHOR_HEAD_CONFLICT'});
+ assert.equal(f.calls.write,2);
+});
+
+test('read failure, lost checkpoint and malformed storage fail before signing',async()=>{
+ for(const read of [async()=>{throw Error('offline');},async()=>undefined,
+  async()=>({anchor:null})]){
+  const f=serviceFixture();f.store.read=read;
+  await assert.rejects(appendFixtureIamKeyCheckpoint(f.args),
+   error=>['V121_KEY_ANCHOR_STORE_UNAVAILABLE','V121_KEY_ANCHOR_STORE_INVALID'].includes(error.code));
+  assert.equal(f.calls.sign,0);assert.equal(f.calls.write,0);
+ }
+ const f=serviceFixture();
+ await assert.rejects(appendFixtureIamKeyCheckpoint({...f.args,
+  expectedCheckpointDigest:'f'.repeat(64)}),{code:'V121_KEY_ANCHOR_HEAD_CONFLICT'});
+ assert.equal(f.calls.sign,0);
+});
+
+test('signer rejection and hung signer time out without writing a checkpoint',async()=>{
+ for(const signCheckpoint of [async()=>{throw Error('offline');},()=>new Promise(()=>{})]){
+  const f=serviceFixture();
+  await assert.rejects(appendFixtureIamKeyCheckpoint({...f.args,signCheckpoint,timeoutMs:10}),
+   {code:'V121_KEY_ANCHOR_SIGNER_UNAVAILABLE'});
+  assert.equal(f.calls.write,0);assert.equal(f.head,null);
+ }
+});
+
+test('trust outage and revocation during signing block persistence',async()=>{
+ const unavailable=serviceFixture();
+ await assert.rejects(appendFixtureIamKeyCheckpoint({...unavailable.args,
+  readTrust:async()=>{throw Error('registry offline');}}),
+ {code:'V121_KEY_ANCHOR_TRUST_UNAVAILABLE'});
+ assert.equal(unavailable.calls.sign,0);
+ const f=serviceFixture();
+ await assert.rejects(appendFixtureIamKeyCheckpoint({...f.args,signCheckpoint:async input=>{
+  const signed=await f.args.signCheckpoint(input);f.states.set(signer,'REVOKED');return signed;
+ }}),{code:'V121_KEY_ANCHOR_SIGNER_UNTRUSTED'});
+ assert.equal(f.calls.write,0);
+});
+
+test('write failures, CAS conflict and acknowledgement loss cannot return success',async()=>{
+ for(const mode of ['reject','conflict','write-then-reject','hang']){
+  const f=serviceFixture(),append=f.store.compareAndAppend;
+  f.store.compareAndAppend=async input=>{
+   if(mode==='conflict')return false;
+   if(mode==='write-then-reject')await append(input);
+   if(mode==='hang')return new Promise(()=>{});
+   throw Error('write failed or acknowledgement lost');
+  };
+  await assert.rejects(appendFixtureIamKeyCheckpoint({...f.args,timeoutMs:10}),
+   {code:mode==='conflict'?'V121_KEY_ANCHOR_HEAD_CONFLICT':
+    'V121_KEY_ANCHOR_STORE_WRITE_UNCONFIRMED'});
+  assert.equal(f.archived.length,mode==='write-then-reject'?1:0);
+ }
+});
+
+test('missing or unavailable readback never turns acknowledged write into success',async()=>{
+ for(const mode of ['missing','unavailable','wrong-prefix']){
+  const f=serviceFixture(),read=f.store.read;
+  let reads=0;
+  f.store.read=async()=>{
+   if(++reads===1)return read();
+   if(mode==='unavailable')throw Error('offline after write');
+   if(mode==='wrong-prefix')return {anchor:f.head.anchor,previousAnchor:f.head.anchor};
+   return null;
+  };
+  await assert.rejects(appendFixtureIamKeyCheckpoint(f.args),
+   {code:mode==='unavailable'?'V121_KEY_ANCHOR_STORE_UNAVAILABLE':
+    'V121_KEY_ANCHOR_STORE_READBACK_MISMATCH'});
+  assert.equal(f.archived.length,1);
+ }
+});
+
+test('post-write signer revocation preserves forensic checkpoint and rejects current operation',async()=>{
+ const f=serviceFixture(),append=f.store.compareAndAppend;
+ f.store.compareAndAppend=async input=>{
+  const written=await append(input);f.states.set(signer,'REVOKED');return written;
+ };
+ await assert.rejects(appendFixtureIamKeyCheckpoint(f.args),
+  {code:'V121_KEY_ANCHOR_SIGNER_UNTRUSTED'});
+ assert.equal(f.archived.length,1);
+ const result=inspectFixtureArchivedIamKeyAnchor({rows:f.args.rows,
+  ...f.head,organizationId:org,publicKeys:f.publicKeys,keyStates:f.states});
+ assert.equal(result.verdict,'HISTORICAL_FIXTURE_KEY_AUDIT_ONLY');
+});
+
+test('new active signer may extend revoked historical signer; revoked signer cannot append',async()=>{
+ const f=serviceFixture();
+ const first=await appendFixtureIamKeyCheckpoint(f.args);
+ f.states.set(signer,'REVOKED');
+ const newSigner='00000000-0000-4000-8000-0000000000d8';
+ const keys=generateKeyPairSync('ed25519');
+ f.publicKeys.set(newSigner,keys.publicKey);f.states.set(newSigner,'ACTIVE');
+ const next={...f.args,rows:history(),expectedCheckpointDigest:first.checkpoint_digest};
+ await assert.rejects(appendFixtureIamKeyCheckpoint(next),
+  {code:'V121_KEY_ANCHOR_SIGNER_UNTRUSTED'});
+ const result=await appendFixtureIamKeyCheckpoint({...next,signerId:newSigner,
+  signCheckpoint:async input=>signFixtureIamKeyExternalAnchor({...input,privateKey:keys.privateKey})});
+ assert.equal(result.event_count,6);assert.equal(result.release_authorized,false);
+});
+
+test('concurrent writers share an atomic head check; only one append succeeds',async()=>{
+ const f=serviceFixture();
+ const results=await Promise.allSettled([
+  appendFixtureIamKeyCheckpoint(f.args),appendFixtureIamKeyCheckpoint(f.args)
+ ]);
+ assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+ const rejected=results.find(x=>x.status==='rejected');
+ assert.equal(rejected.reason.code,'V121_KEY_ANCHOR_HEAD_CONFLICT');
+ assert.equal(f.archived.length,1);
+});
+
+test('hung storage and trust registry are bounded; expiry during persistence fails closed',async()=>{
+ for(const dependency of ['read','trust']){
+  const f=serviceFixture();
+  const never=()=>new Promise(()=>{});
+  if(dependency==='read')f.store.read=never;
+  const args={...f.args,timeoutMs:10};
+  if(dependency==='trust')args.readTrust=never;
+  await assert.rejects(appendFixtureIamKeyCheckpoint(args),
+   {code:dependency==='read'?'V121_KEY_ANCHOR_STORE_UNAVAILABLE':
+    'V121_KEY_ANCHOR_TRUST_UNAVAILABLE'});
+  assert.equal(f.calls.sign,0);assert.equal(f.calls.write,0);
+ }
+ const f=serviceFixture(),append=f.store.compareAndAppend;
+ let now=f.args.clock();
+ f.store.compareAndAppend=async input=>{
+  const written=await append(input);now+=60_000;return written;
+ };
+ await assert.rejects(appendFixtureIamKeyCheckpoint({...f.args,clock:()=>now}),
+  {code:'V121_KEY_ANCHOR_EXPIRED'});
+ assert.equal(f.archived.length,1);
+});
+
+test('bad signer output is rejected before write and changed readback is rejected after write',async()=>{
+ const f=serviceFixture();
+ await assert.rejects(appendFixtureIamKeyCheckpoint({...f.args,
+  signCheckpoint:async input=>{
+   const anchor=structuredClone(await f.args.signCheckpoint(input));
+   anchor.statement.head_event_digest='f'.repeat(64);return anchor;
+  }}),{code:'V121_KEY_ANCHOR_SIGNATURE_INVALID'});
+ assert.equal(f.calls.write,0);
+ const g=serviceFixture(),read=g.store.read;
+ let reads=0;
+ g.store.read=async()=>{
+  const value=await read();
+  if(++reads===2)value.anchor.statement.head_event_digest='f'.repeat(64);
+  return value;
+ };
+ await assert.rejects(appendFixtureIamKeyCheckpoint(g.args),
+  {code:'V121_KEY_ANCHOR_STORE_READBACK_MISMATCH'});
+ assert.equal(g.archived.length,1);
 });
 test('database owner can rehash a local event chain but cannot match pinned external signature',()=>{
  const {args}=full();
@@ -150,3 +370,4 @@ test('a replacement hash chain cannot extend a previously pinned checkpoint',()=
   ...validNext.args,rows:rewritten
  }),'V121_KEY_ANCHOR_PREVIOUS_MISMATCH');
 });
+
