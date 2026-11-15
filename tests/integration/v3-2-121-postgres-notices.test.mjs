@@ -68,7 +68,7 @@ test.before(async()=>{
   await admin.query(`CREATE POLICY ${name}_b ON v106_test.${name} FOR SELECT TO v106_writer_b USING(organization_id='${b}'::uuid)`);
  }
  await admin.query(await readFile(new URL('../fixtures/v3-2-121-m02-revocation-notices.sql',import.meta.url),'utf8'));
- await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,attestation_key) VALUES($1,$2)',[a,receiptAttestationKey]);
+ await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,1,$2,true)',[a,receiptAttestationKey]);
  const m={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),status:'FIXTURE_EXPORT'};
  const md=hash(m);
  const r={scope:{organization_id:a,incident_id:incident},sequence:1,previous_event_digest:'0'.repeat(64),target_manifest_sequence:1,
@@ -193,8 +193,8 @@ test('definer admission rollback leaves no partial receipt',async()=>{
   receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),
   proof:value.proof,lease:value.lease};
  const json=JSON.stringify(payload),digest=hash(payload);
- const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),digest,json,hmacReceipt(json)];
- const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)';
+ const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),digest,json,hmacReceipt(json),1];
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text,$10::integer)';
  const client=await receiptWriter.connect();
  try{
   await client.query('BEGIN');
@@ -456,12 +456,12 @@ test('dedicated receipt role cannot INSERT table directly',async()=>{
 });
 test('definer receipt gate rejects mismatched digest and unsigned envelope',async()=>{
  const q=await service.enqueue({...input,epoch:84});
- const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)';
- const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}',hmacReceipt('{}')];
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text,$10::integer)';
+ const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),'a'.repeat(64),'{}',hmacReceipt('{}'),1];
  await assert.rejects(receiptWriter.query(sql,params),/V121_RECEIPT_GATE_INVALID/);
  const forged={organization_id:a,incident_id:incident,notice_id:q.notice_id,
   receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64)};
- await assert.rejects(receiptWriter.query(sql,[...params.slice(0,6),hash(forged),JSON.stringify(forged),hmacReceipt(JSON.stringify(forged))]),/V121_RECEIPT_GATE_ENVELOPE/);
+ await assert.rejects(receiptWriter.query(sql,[...params.slice(0,6),hash(forged),JSON.stringify(forged),hmacReceipt(JSON.stringify(forged)),1]),/V121_RECEIPT_GATE_ENVELOPE/);
  const after=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
  assert.equal(after.rows[0].n,0);
 });
@@ -474,8 +474,8 @@ test('receipt role cannot read attestation secret or forge structurally complete
   receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),
   proof:value.proof,lease:value.lease};
  const raw=JSON.stringify(payload);
- const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)';
- const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),hash(payload),raw,'0'.repeat(64)];
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text,$10::integer)';
+ const params=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),hash(payload),raw,'0'.repeat(64),1];
  await assert.rejects(receiptWriter.query(sql,params),/V121_RECEIPT_ATTESTATION_REJECTED/);
  const count=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
  assert.equal(count.rows[0].n,0);
@@ -486,8 +486,63 @@ test('wrong MAC fails without storing receipt or signer watermark',async()=>{
  const p={organization_id:a,incident_id:incident,notice_id:q.notice_id,receipt_sequence:1,
   receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),proof:receipt.proof,lease:receipt.lease};
  const raw=JSON.stringify(p);
- const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text)';
- await assert.rejects(receiptWriter.query(sql,[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),hash(p),raw,'f'.repeat(64)]),/V121_RECEIPT_ATTESTATION_REJECTED/);
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text,$10::integer)';
+ await assert.rejects(receiptWriter.query(sql,[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),hash(p),raw,'f'.repeat(64),1]),/V121_RECEIPT_ATTESTATION_REJECTED/);
  const row=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
  assert.equal(row.rows[0].n,0);
+});
+
+test('HMAC key rotation revokes old version and permits explicit new version',async()=>{
+ const oldKey=receiptAttestationKey;
+ const newKey=randomBytes(32);
+ const q=await service.enqueue({...input,epoch:90});
+ const event=issuedFixtureReceipt(q.notice_id,'00000000-0000-4000-8000-000000000090',4);
+ const payload={organization_id:a,incident_id:incident,notice_id:q.notice_id,
+  receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),
+  proof:event.proof,lease:event.lease};
+ const raw=JSON.stringify(payload);
+ const digest=hash(payload);
+ const oldMac=createHmac('sha256',oldKey).update(raw).digest('hex');
+ const newMac=createHmac('sha256',newKey).update(raw).digest('hex');
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text,$10::integer)';
+ const base=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),digest,raw];
+ await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=1',[a]);
+ await admin.query('INSERT INTO v106_test.fixture_receipt_attestation_secrets(organization_id,key_version,attestation_key,active) VALUES($1,2,$2,true)',[a,newKey]);
+ try{
+  await assert.rejects(receiptWriter.query(sql,[...base,oldMac,1]),/V121_RECEIPT_ATTESTATION_REJECTED/);
+  await assert.rejects(receiptWriter.query(sql,[...base,oldMac,2]),/V121_RECEIPT_ATTESTATION_REJECTED/);
+  const q2=await service.enqueue({...input,epoch:91});
+  await assert.rejects(ledger.appendNegativeReceipt(issuedFixtureReceipt(q2.notice_id,'00000000-0000-4000-8000-000000000091',5)),
+   /V121_RECEIPT_ATTESTATION_REJECTED/);
+  const refreshed=createIsolatedPostgresRevocationNotices({
+   receiptAttestationKey:newKey,receiptAttestationVersion:2,
+   receiptPool:receiptWriter,pool:writer,receiptPublicKey:keyPair.publicKey,
+   receiptClock:()=>150,receiptProofAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2}),
+   leaseGate:createFixtureLeaseGate({publicKey:fixtureLeaseKeys.publicKey,clock:()=>150,
+    loadAuthority:async()=>({active:true,authority_epoch:4,revocation_watermark:2,lease_sequence:5})})
+  });
+  const after=await refreshed.appendNegativeReceipt(issuedFixtureReceipt(q2.notice_id,'00000000-0000-4000-8000-000000000091',5));
+  assert.equal(after.hold_active,true);
+  assert.equal(after.duplicate,false);
+  const r=await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id]);
+  assert.equal(r.rows[0].n,0);
+ }finally{
+  // CI fixture can restore the old key only for legacy tests; no production key reactivation.
+  await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true WHERE organization_id=$1 AND key_version=1',[a]);
+  await admin.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=false WHERE organization_id=$1 AND key_version=2',[a]);
+ }
+});
+test('invalid key versions and unauthorized secret updates are rejected',async()=>{
+ const q=await service.enqueue({...input,epoch:92});
+ const event=issuedFixtureReceipt(q.notice_id,'00000000-0000-4000-8000-000000000092',6);
+ const payload={organization_id:a,incident_id:incident,notice_id:q.notice_id,
+  receipt_sequence:1,receipt_state:'NEGATIVE_RECEIPT',previous_digest:'0'.repeat(64),
+  proof:event.proof,lease:event.lease};
+ const raw=JSON.stringify(payload);
+ const sql='SELECT v106_test.fixture_append_negative_receipt($1::uuid,$2::uuid,$3::char(64),$4::integer,$5::text,$6::char(64),$7::char(64),$8::text,$9::text,$10::integer)';
+ const base=[a,incident,q.notice_id,1,'NEGATIVE_RECEIPT','0'.repeat(64),hash(payload),raw,hmacReceipt(raw)];
+ await assert.rejects(receiptWriter.query(sql,[...base,0]),/V121_RECEIPT_KEY_VERSION_INVALID/);
+ await assert.rejects(receiptWriter.query(sql,[...base,99]),/V121_RECEIPT_ATTESTATION_REJECTED/);
+ await assert.rejects(receiptWriter.query('UPDATE v106_test.fixture_receipt_attestation_secrets SET active=true'),/permission denied/);
+ assert.equal((await writer.query('SELECT count(*)::int AS n FROM v106_test.fixture_revocation_negative_receipts WHERE notice_id=$1',[q.notice_id])).rows[0].n,0);
 });
