@@ -2627,6 +2627,51 @@ test('EXT-001 synthetic IAM intake: immutable receipts, exact retry, revocation,
   await assert.rejects(attester.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,3,thirdMac]),
    /V121_IAM_SOURCE_AUTH_DENIED/);
   assert.equal((await audit.query('SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_bindings WHERE organization_id=$1',[a])).rows[0].n,1);
+  // Reconnect as an independent test-only observer to prove historical
+  // activation/revocation evidence survives key rotation and session loss.
+  const historyObserver=new pg.Client({host,database:'v121_anchor_isolated',
+   user:'postgres',password:'postgres'});
+  await historyObserver.connect();
+  try{
+   const history=(await historyObserver.query(
+    'SELECT organization_id,event_index,key_version,event_type,key_digest,previous_event_digest,event_digest,recorded_at FROM v121_anchor.fixture_iam_source_key_events WHERE organization_id=$1 ORDER BY event_index',[a])).rows;
+   assert.deepEqual(history.map(e=>[e.event_index,e.key_version,e.event_type]),[
+    [1,1,'ACTIVATED'],[2,1,'REVOKED'],
+    [3,2,'ACTIVATED'],[4,2,'REVOKED'],
+    [5,3,'ACTIVATED'],[6,3,'REVOKED']
+   ]);
+   const fingerprints=new Map([
+    [1,createHash('sha256').update(sourceAuthKey).digest('hex')],
+    [2,createHash('sha256').update(nextSourceKey).digest('hex')],
+    [3,createHash('sha256').update(thirdKey).digest('hex')]
+   ]);
+   for(let i=0;i<history.length;i++){
+    const e=history[i];
+    const previous=i===0?'0'.repeat(64):history[i-1].event_digest.trim();
+    assert.equal(e.organization_id,a);
+    assert.equal(e.key_digest.trim(),fingerprints.get(e.key_version));
+    assert.equal(e.previous_event_digest.trim(),previous);
+    const payload=[
+     'v121-ext001-source-key-event-v1',a,e.event_index,e.key_version,
+     e.event_type,e.key_digest.trim(),previous,e.recorded_at.getTime()
+    ].join('|');
+    assert.equal(e.event_digest.trim(),createHash('sha256').update(payload).digest('hex'));
+   }
+   await assert.rejects(historyObserver.query(
+    'UPDATE v121_anchor.fixture_iam_source_key_events SET key_digest=$1 WHERE organization_id=$2 AND event_index=1',
+    ['0'.repeat(64),a]),/V121_ANCHOR_LEDGER_IMMUTABLE/);
+   await assert.rejects(historyObserver.query(
+    'DELETE FROM v121_anchor.fixture_iam_source_key_events WHERE organization_id=$1 AND event_index=2',[a]),
+    /V121_ANCHOR_LEDGER_IMMUTABLE/);
+   assert.equal((await historyObserver.query(
+    'SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_key_events WHERE organization_id=$1',[a])).rows[0].n,6);
+  }finally{
+   await historyObserver.end();
+  }
+  await assert.rejects(attester.query('SELECT * FROM v121_anchor.fixture_iam_source_key_events'),/permission denied/);
+  await assert.rejects(writerA.query('SELECT * FROM v121_anchor.fixture_iam_source_key_events'),/permission denied/);
+  assert.equal((await audit.query(
+   'SELECT count(*)::int AS n FROM v121_anchor.fixture_iam_source_key_events WHERE organization_id=$1',[b])).rows[0].n,0);
   await assert.rejects(writerA.query(sourceSql,[...provenanceParams(6,p6),sourceResult.source_binding_digest,1,forgedMac]),
    /permission denied/);
   await assert.rejects(writerA.query('SELECT * FROM v121_anchor.fixture_iam_source_bindings'),
