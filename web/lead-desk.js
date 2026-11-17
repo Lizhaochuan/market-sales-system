@@ -139,5 +139,5 @@
  };
  const prior=window.__refreshBusinessWorkspace;window.__refreshBusinessWorkspace=async()=>{if(prior)await prior();await refresh();};
  window.addEventListener('isolated-session-clear',()=>{epoch++;seq++;busy=false;items=[];staff=[];detail=null;selected=null;loginToken=null;box.hidden=true;panel.replaceChildren();$('student-access-entry').hidden=false;const hint=$('student-access-note')?.nextElementSibling;if(hint?.classList.contains('fineprint'))hint.hidden=false;});
- fetch('/api/v1/health',{cache:'no-store'}).then(r=>r.json()).then(r=>{enabled=r?.data?.isolated_workspace===true;if(enabled&&state.token&&!state.strict)refresh();}).catch(()=>{});
+ fetch('/api/v1/health',{cache:'no-store'}).then(r=>r.json()).then(r=>{enabled=r?.data?.isolated_workspace===true&&r?.data?.sales_workflow_v34!==true;if(enabled&&state.token&&!state.strict)refresh();}).catch(()=>{});
 })();

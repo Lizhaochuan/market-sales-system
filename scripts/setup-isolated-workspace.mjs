@@ -15,5 +15,6 @@ try{
  for(const file of migrations)await c.query(await readFile(new URL('../db/migrations/'+file,import.meta.url),'utf8'));
  await c.query(await readFile(new URL('../tests/fixtures/fictional_ui_demo_seed.sql',import.meta.url),'utf8'));
  await c.query(await readFile(new URL('../tests/fixtures/isolated-business-workspace.sql',import.meta.url),'utf8'));
+ if(process.env.MS_ENABLE_V34_WORKFLOW==='1'){await c.query(await readFile(new URL('../db/workspace-migrations/039_v34_sales_loop.sql',import.meta.url),'utf8'));await c.query(await readFile(new URL('../tests/fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));}
  console.log('Disposable isolated workspace initialized; HOLD remains active.');
 }finally{await c.end();}

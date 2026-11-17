@@ -2,6 +2,7 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {fail,ownsStudent,ownsOpportunity} from './auth.mjs';
 import {leadDesk} from './lead-desk.mjs';
+import {salesWorkflow} from './sales-workflow.mjs';
 
 const kinds=new Set(['tasks','trials','quotes','order-intents','expense-plans','automation-rules']);
 const flags={scope:'FICTIONAL_PLANNING_ONLY',hold_active:true,release_eligible:false,
@@ -88,6 +89,11 @@ async function normalize(c,ctx,kind,b){
 }
 const stateFor=kind=>kind==='tasks'?'open':kind==='automation-rules'?'configured':'draft';
 export async function workspaceOperation(c,ctx,{method,parts,body}){
+ if(parts[0]==='workflow'){if(!ctx.v34Enabled)fail(404,'NOT_FOUND','V3.4未启用');return salesWorkflow(c,ctx,{method,parts,body});}
+ if(ctx.v34Enabled&&method==='POST'){
+  if(parts[0]==='leads')fail(409,'WORKFLOW_REQUIRED','请在新版工作台保存，确保后续动作完整');
+  if(parts[1]&&uuid(parts[1])){const r=await c.query('SELECT lead_id FROM ms_workspace.records WHERE id=$1',[parts[1]]);if(r.rows[0]?.lead_id)fail(409,'WORKFLOW_REQUIRED','该记录须通过新版客户工作台操作');}
+ }
  if(parts[0]==='leads')return leadDesk(c,ctx,{method,parts,body},workspaceOperation);
  const [kind,id,action]=parts;
  if(method==='GET'&&kind==='summary'&&!id)return summary(c,ctx);

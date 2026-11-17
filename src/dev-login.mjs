@@ -24,7 +24,7 @@ export async function demoLogin(c,body,{secret,issuer,devLoginSecret}) {
   if(!devLoginSecret||typeof devLoginSecret!=='string'||devLoginSecret.length<32)
     fail(404,'NOT_FOUND','演示登录未启用');
   if(!body||typeof body!=='object'||Array.isArray(body)||
-    !['sales-a','sales-b','supervisor','supervisor-2'].includes(body.account_code)||
+    !['sales-a','sales-b','supervisor','supervisor-2','finance'].includes(body.account_code)||
     !demoSecretMatches(body.passphrase,devLoginSecret))
     fail(401,'AUTH_REQUIRED','演示账号或访问口令不正确');
   // The demo prefix ensures this endpoint cannot authenticate real staff.
@@ -36,9 +36,10 @@ export async function demoLogin(c,body,{secret,issuer,devLoginSecret}) {
   return {
     token:demoToken(r.rows[0],secret,issuer),
     display_name:r.rows[0].display_name,
-    role_label:body.account_code.startsWith('supervisor')?'主管':'销售顾问',
+    role_label:body.account_code.startsWith('supervisor')?'主管':body.account_code==='finance'?'收款核实员':'销售顾问',
     account_code:body.account_code,
     expires_in_seconds:1800,
     stage:'isolated-test'
   };
 }
+

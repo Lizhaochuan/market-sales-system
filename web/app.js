@@ -1374,7 +1374,7 @@ function setView(view){
 function snapshotMainForms(){
   const out={};
   document.querySelectorAll('#workspace form').forEach(form=>{
-    if(!form.id||form.id==='business-form'||form.id==='audit-form'||form.closest('#lead-desk'))return;
+    if(!form.id||form.id==='business-form'||form.id==='audit-form'||form.closest('#lead-desk, #sales-workflow'))return;
     const touchedText=[...form.elements].some(el=>{
       if(!el.name||el.disabled||el.type==='hidden'||el.type==='submit'||el.type==='button')return false;
       if(el.type==='checkbox'||el.type==='radio')return el.checked!==el.defaultChecked;

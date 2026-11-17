@@ -170,6 +170,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
   if(op.startsWith('identity'))return identityOperation(c,ctx,op,p,body);
   switch(op){
     case 'updateLeadSource': {
+      if(ctx.v34Enabled)fail(409,'WORKFLOW_REQUIRED','新版客户来源修正须携带版本，请使用客户工作台');
       object(body,['source']);
       if(!['市场转入','主动咨询','家长转介绍','到店','网络咨询','其他','待确认'].includes(body.source))
         fail(422,'VALIDATION_ERROR','请选择线索来源');
@@ -374,6 +375,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       return {relationship_id:r.rows[0].id,student_id:student.id,contact_id:contact.id,verification_state:state};
     }
     case 'createLead': {
+      if(ctx.v34Enabled)fail(409,'WORKFLOW_REQUIRED','新 Lead 须同时安排首次联系，请使用新版工作台');
       object(body,['source_event_ref','contact_id','source_channel_id','notes']);
       const event=await orgEntity(c,'contact_events',body.source_event_ref,org,'咨询事件');
       if(!ctx.manager&&event.recorded_by!==actor)
@@ -573,10 +575,10 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     default: fail(404,'NOT_FOUND','没有找到该业务接口');
   }
 }
-async function readJson(req){
+async function readJson(req,maxBytes=32768){
   const chunks=[];let size=0;
   for await(const chunk of req) {
-    size+=chunk.length;if(size>32768)fail(413,'PAYLOAD_TOO_LARGE','请求内容超过允许大小');
+    size+=chunk.length;if(size>maxBytes)fail(413,'PAYLOAD_TOO_LARGE','请求内容超过允许大小');
     chunks.push(chunk);
   }
   if(!size)fail(400,'VALIDATION_ERROR','请填写业务内容');
@@ -588,9 +590,10 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false,workspaceEnabled=false}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false,workspaceEnabled=false,v34Enabled=false}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
+  if(v34Enabled&&!workspaceEnabled)throw new Error('V3.4 requires opt-in isolated workspace');
   if(workspaceEnabled&&(strictStaffMode||scopedReadPools!==undefined||scopedWritePools!==undefined))
     throw new Error('Fictional planning workspace requires a separate disposable demo; scoped/strict pools cannot be used');
   // Explicit opt-in migration: legacy demo behavior is unchanged unless
@@ -623,7 +626,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         return;
       }
       if(url.pathname==='/api/v1/health'&&req.method==='GET'){
-        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode,isolated_workspace:workspaceEnabled}},requestId);return;
+        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode,isolated_workspace:workspaceEnabled,sales_workflow_v34:v34Enabled}},requestId);return;
       }
       const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
         .find(x=>x.method===req.method&&x.match);
@@ -655,7 +658,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       if(strictStaffMode&&!externalClaims)
         fail(403,'STAFF_AUTH_REQUIRED','严格员工模式只接受经审核的外部 RSA 身份');
       if(!externalClaims)identity=verifyToken(token,secret,issuer);
-      const body=req.method==='POST'?await readJson(req):null;
+      const body=req.method==='POST'?await readJson(req,v34Enabled&&route.op==='workspace'&&route.match[1].startsWith('workflow')?1_500_000:32768):null;
       const key=req.headers['idempotency-key'];
       if(req.method==='POST'&&(!KEY.test(key||'')))
         fail(422,'VALIDATION_ERROR','写入请求必须提供16至128位有效防重复编号');
@@ -669,7 +672,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         c=await pool.connect();
         await c.query('BEGIN');
         if(externalClaims)identity=await resolveExternalStaff(c,externalClaims);
-        ctx=await staffContext(c,identity);
+        ctx=await staffContext(c,identity);ctx.v34Enabled=v34Enabled;
       }
       // RLS tenant is bound to PostgreSQL SESSION_USER by a migration-owner
       // protected mapping; no request/session GUC can select another tenant.
