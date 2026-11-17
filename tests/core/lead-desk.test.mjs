@@ -50,15 +50,52 @@ test('lead desk: one lead flow, ownership, version binding and safe financial bo
   await t.test('B and outside tenant cannot read or operate A lead',async()=>{
    assert.equal((await get('leads',tb)).data.items.length,0);
    assert.equal((await get('leads/'+leadId,tb)).status,403);
-   assert.equal((await post('leads/'+leadId+'/followup',{result:'已联系'},tb)).status,403);
+   assert.equal((await post('leads/'+leadId+'/followup',{result:'communicated'},tb)).status,403);
    assert.equal((await get('leads/'+leadId,tx)).status,404);
    assert.equal((await get('leads',tm)).data.items.length,1);
   });
   await t.test('source correction preserves attribution and follow-up is a select plus optional note',async()=>{
    assert.equal((await post('leads/'+leadId+'/source',{source:'转介绍'})).status,200);
    const l=(await get('leads')).data.items[0];assert.equal(l.source.source,'转介绍');assert.equal(l.origin.source,'市场活动');assert.equal(l.original_notes,'家长原话');
-   assert.equal((await post('leads/'+leadId+'/followup',{result:'已联系',next_at:new Date(Date.now()+86400000).toISOString()})).status,200);
+   assert.equal((await post('leads/'+leadId+'/followup',{result:'communicated',next_at:new Date(Date.now()+86400000).toISOString()})).status,200);
    assert.equal((await post('leads/'+leadId+'/followup',{result:'已成交'})).status,422);
+  });
+  await t.test('communication result, persistent stage and next arrangement are independent',async()=>{
+   const before=(await get('leads/'+leadId)).data;
+   assert.equal(before.sales_stage,'needs_discovery');
+   const r=await post('leads/'+leadId+'/followup',{result:'message_left',sales_stage:'trial_completed',expected_stage_version:before.stage_version,next_at:new Date(Date.now()+86400000).toISOString(),next_action:'回访试听感受'});
+   assert.equal(r.status,200,JSON.stringify(r));
+   assert.equal(r.data.result,'message_left');assert.equal(r.data.sales_stage,'trial_completed');assert.equal(r.data.sales_stage_basis,'SALES_REPORTED');
+   const again=await post('leads/'+leadId+'/followup',{result:'not_connected'});assert.equal(again.status,200);
+   assert.equal(again.data.sales_stage,'trial_completed');
+   const list=await get('leads');assert.equal(list.data.items.find(l=>l.id===leadId).sales_stage,'trial_completed');
+   assert.deepEqual(list.data.followup_options.communication_results.map(r=>r.id),['not_connected','communicated','message_left','other']);
+   const history=(await get('leads/'+leadId)).data.events.filter(e=>e.event_name==='LEAD_DESK_FOLLOWUP_V2');
+   assert.equal(history[1].after_business_json.next_action,'回访试听感受');
+  });
+  await t.test('other requires explanation; mixed old outcomes and stale stage overwrites fail atomically',async()=>{
+   const before=(await get('leads/'+leadId)).data;
+   assert.equal((await post('leads/'+leadId+'/followup',{result:'other',notes:'  '})).status,422);
+   assert.equal((await post('leads/'+leadId+'/followup',{result:'准备报名'})).status,422);
+   assert.equal((await post('leads/'+leadId+'/followup',{result:'communicated',sales_stage:'准备报名',expected_stage_version:before.stage_version})).status,422);
+   assert.equal((await post('leads/'+leadId+'/followup',{result:'communicated',sales_stage:'needs_confirmed',expected_stage_version:before.stage_version-1})).status,409);
+   assert.equal((await get('leads/'+leadId)).data.stage_version,before.stage_version);
+   const good=await post('leads/'+leadId+'/followup',{result:'other',notes:'家长要求短信联系'});assert.equal(good.status,200);assert.equal(good.data.notes,'家长要求短信联系');
+  });
+  await t.test('sales-reported enrolled stage creates no financial or academic authority',async()=>{
+   const current=(await get('leads/'+leadId)).data;
+   const r=await post('leads/'+leadId+'/followup',{result:'communicated',sales_stage:'enrolled',expected_stage_version:current.stage_version});assert.equal(r.status,200);
+   const row=(await get('leads')).data.items.find(l=>l.id===leadId);assert.equal(row.sales_stage,'enrolled');assert.equal(row.won_count,0);assert.equal(row.lead_state,'working');
+   assert.equal((await pool.query('SELECT count(*)::int n FROM ms.sale_events WHERE owner_snapshot_id=$1',[a])).rows[0].n,0);
+  });
+  await t.test('old mixed records stay unchanged and unclassified, never guessed into a stage',async()=>{
+   const id=(await pool.query("INSERT INTO ms.leads(organization_id,owner_user_id,lead_state) VALUES($1,$2,'working') RETURNING id",[org,a])).rows[0].id;
+   const old={result:'准备报名',notes:'原始记录'};
+   await pool.query("INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,after_business_json,reason_zh) VALUES($1,$2,'lead',$3,'LEAD_DESK_FOLLOWUP',$4,'旧版数据')",[org,a,id,old]);
+   let detail=(await get('leads/'+id)).data;assert.equal(detail.sales_stage,'unclassified');assert.equal(detail.sales_stage_basis,'UNCLASSIFIED');
+   const r=await post('leads/'+id+'/followup',{result:'communicated'});assert.equal(r.status,200);assert.equal(r.data.sales_stage,'unclassified');
+   detail=(await get('leads/'+id)).data;assert.equal(detail.sales_stage_basis,'UNCLASSIFIED');assert.deepEqual(detail.events.find(e=>e.event_name==='LEAD_DESK_FOLLOWUP').after_business_json,old);
+   assert.equal((await get('leads')).data.items.find(l=>l.id===id).sales_stage,'unclassified');
   });
   await t.test('trial creates internal context automatically but no real booking',async()=>{
    const r=await post('leads/'+leadId+'/trial',{requested_slot_at:new Date(Date.now()+86400000).toISOString()});assert.equal(r.status,200,JSON.stringify(r));
@@ -96,7 +133,7 @@ test('lead desk: one lead flow, ownership, version binding and safe financial bo
   await t.test('lost lead retains history and refuses new activity',async()=>{
    assert.equal((await post('leads/'+leadId+'/lost',{reason:'时间不合适'})).status,200);
    assert.equal((await get('leads')).data.items.find(l=>l.id===leadId).lost.reason,'时间不合适');
-   assert.equal((await post('leads/'+leadId+'/followup',{result:'已联系'})).status,409);
+   assert.equal((await post('leads/'+leadId+'/followup',{result:'communicated'})).status,409);
    assert.ok((await get('leads/'+leadId)).data.records.length>=3);
   });
  }finally{if(server)await new Promise(resolve=>server.close(resolve));await pool.end();}

@@ -4,12 +4,14 @@
  const oldNav=[...nav.children],box=node('div');box.hidden=true;nav.prepend(box);
  const panel=node('section','view');panel.dataset.panel='lead-desk';panel.id='lead-desk';document.querySelector('main.main').append(panel);
  let group='sales',items=[],staff=[],selected=null,detail=null,epoch=0,seq=0,busy=false,enabled=false;
- let editingQuote=null;
+ let editingQuote=null,communicationResults=[],salesStages=[];
+ const stageName=code=>salesStages.find(s=>s.id===code)?.display_name||'待确认（旧记录）';
+ const resultName=code=>communicationResults.find(r=>r.id===code)?.display_name||code;
  let legacy=new URLSearchParams(location.search).get('workspace')==='legacy',loginToken=null;
  const sources=['市场活动','网络咨询','到店','转介绍','主动咨询','其他'];
  function button(label,run,parent,cls='secondary'){const b=node('button',cls,label);b.type='button';b.addEventListener('click',run);parent.append(b);return b;}
  function field(parent,label,name,type='text',value=''){const l=node('label','',label),i=node('input');i.name=name;i.type=type;i.value=value;l.append(i);parent.append(l);return i;}
- function select(parent,label,name,values,value){const l=node('label','',label),s=node('select');s.name=name;for(const v of values)s.append(option(typeof v==='string'?v:v.id,typeof v==='string'?v:v.display_name));if(value)s.value=value;l.append(s);parent.append(l);return s;}
+ function select(parent,label,name,values,value){const l=node('label','',label),s=node('select');s.name=name;s.setAttribute('aria-label',label);for(const v of values)s.append(option(typeof v==='string'?v:v.id,typeof v==='string'?v:v.display_name));if(value)s.value=value;l.append(s);parent.append(l);return s;}
  function form(parent,title,submitLabel,save){const d=node('details','panel'),head=node('summary','',title),f=node('form','field-stack');d.append(head,f);parent.append(d);f.addEventListener('submit',e=>{e.preventDefault();mutate(()=>save(f));});const submit=node('button','primary',submitLabel);submit.type='submit';return {f,d,submit};}
  function local(d){return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);}
  function tomorrow(){const d=new Date();d.setDate(d.getDate()+1);d.setHours(10,0,0,0);return local(d);}
@@ -27,7 +29,7 @@
  function note(msg){$('lead-message').textContent=msg;}
  async function mutate(run,preserve=false){if(busy)return;const draft=preserve?window.__snapshotLeadDraft?.():null;busy=true;const ticket=epoch,token=state.token;panel.querySelectorAll('button').forEach(b=>b.disabled=true);try{await run();if(ticket!==epoch||token!==state.token)return;await refresh();if(ticket!==epoch||token!==state.token)return;if(draft)await window.__restoreLeadDraft(draft);note('已保存');}catch(e){if(ticket===epoch&&token===state.token){note(e.message||'保存失败，请重试');panel.querySelectorAll('button').forEach(b=>b.disabled=false);}}finally{if(ticket===epoch)busy=false;}}
  async function refresh(){if(!enabled||!state.token||state.strict)return;const token=state.token,ticket=++seq;
-  try{const data=await api(root);if(token!==state.token||ticket!==seq)return;items=data.items;staff=data.staff;box.hidden=false;layout();
+  try{const data=await api(root);if(token!==state.token||ticket!==seq)return;items=data.items;staff=data.staff;communicationResults=data.followup_options.communication_results;salesStages=data.followup_options.sales_stages;box.hidden=false;layout();
    if(selected){const d=await api(root+'/'+selected);if(token!==state.token||ticket!==seq)return;detail=d;}
    if(loginToken!==token){loginToken=token;if(!legacy)show();}else if(state.view==='lead-desk')render();
   }catch(e){if(token!==state.token||ticket!==seq)return;items=[];detail=null;panel.replaceChildren(node('p','','读取失败，请点击刷新数据重试。'));}
@@ -42,23 +44,43 @@
    if(staff.length)select(f,'分配给','owner_user_id',staff,state.user.staff_id);field(f,'备注（选填）','notes').maxLength=1000;f.append(submit);
   }
   const list=node('div','panel');list.id='lead-list';panel.append(list);
-  const search=field(list,'查找客户','lead_search','search');const filter=select(list,'状态','status_filter',['全部','Following','Closed Won','Closed Lost'],'全部');const rows=node('div');list.append(rows);
-  function draw(){rows.replaceChildren();const visible=items.filter(l=>(group!=='market'||l.origin?.origin_group==='market')&&(group!=='deals'||Number(l.won_count)>0)&&(!search.value||(l.contact_name||'').includes(search.value))&&(filter.value==='全部'||status(l)===filter.value));
+  const search=field(list,'查找客户','lead_search','search');const filter=select(list,'状态','status_filter',['全部','Following','Closed Won','Closed Lost'],'全部');const stageFilter=select(list,'销售阶段','stage_filter',[{id:'all',display_name:'全部阶段'},...salesStages,{id:'unclassified',display_name:'待确认（旧记录）'}],'all');const rows=node('div');list.append(rows);
+  function draw(){rows.replaceChildren();const visible=items.filter(l=>(group!=='market'||l.origin?.origin_group==='market')&&(group!=='deals'||Number(l.won_count)>0)&&(!search.value||(l.contact_name||'').includes(search.value))&&(filter.value==='全部'||status(l)===filter.value)&&(stageFilter.value==='all'||l.sales_stage===stageFilter.value));
    if(!visible.length)rows.append(node('p','','暂无记录'));
-   for(const l of visible){const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'未命名联系人'),node('p','',`${status(l)} · ${l.source?.source||l.original_source||'来源待确认'} · ${l.owner_name||'未分配'}`));if(Number(l.won_count)>0)card.append(node('p','form-hint','成交金额：'+yuan(l.won_amount_cents)));if(l.followup?.next_at)card.append(node('p','form-hint','下次跟进：'+new Date(l.followup.next_at).toLocaleString()));button('打开客户',()=>open(l.id),card);rows.append(card);}
-  }search.addEventListener('input',draw);filter.addEventListener('change',draw);draw();
+   for(const l of visible){const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'未命名联系人'),node('p','',`${status(l)} · ${l.source?.source||l.original_source||'来源待确认'} · ${l.owner_name||'未分配'}`));card.append(node('p','','销售阶段：'+stageName(l.sales_stage)));if(l.followup?.schema_version===2)card.append(node('p','fineprint','最近沟通：'+resultName(l.followup.result)));if(l.followup?.next_action)card.append(node('p','fineprint','下次事项：'+l.followup.next_action));if(Number(l.won_count)>0)card.append(node('p','form-hint','成交金额：'+yuan(l.won_amount_cents)));if(l.followup?.next_at)card.append(node('p','form-hint','下次跟进：'+new Date(l.followup.next_at).toLocaleString()));button('打开客户',()=>open(l.id),card);rows.append(card);}
+  }search.addEventListener('input',draw);filter.addEventListener('change',draw);stageFilter.addEventListener('change',draw);draw();
   if(group==='deals')panel.append(node('p','form-hint','只有财务确认的成交才进入 Closed Won；当前未连接真实 CRM，未同步的记录不会显示为已同步。'));
  }
  function studentFields(f){if(detail.students.length===0)field(f,'学生姓名','student_name').required=true;else if(detail.students.length>1)select(f,'本次学生','student_id',detail.students);}
  function renderDetail(){const l=items.find(i=>i.id===selected);if(!l){selected=null;return render();}button('返回 Leads',()=>{selected=null;detail=null;render();},panel);panel.append(node('h2','',l.contact_name||'客户'),node('p','',status(l)+' · 负责人：'+(l.owner_name||'未分配')));
   if(!detail){panel.append(node('p','','正在读取…'));return;}
+  panel.append(node('p','','当前销售阶段：'+stageName(detail.sales_stage)));
   if(l.original_notes)panel.append(node('p','form-hint','原始备注：'+l.original_notes));
   panel.append(node('p','fineprint','最初来源：'+(l.origin?.source||l.original_source||'待确认')));
   const closed=status(l)!=='Following'||l.lead_state==='converted';
   if(!closed){
    const source=select(panel,'当前来源','current_source',sources,l.source?.source||l.original_source);source.addEventListener('change',()=>mutate(()=>api(root+'/'+selected+'/source',{method:'POST',body:{source:source.value}}),true));
-   const {f,d,submit}=form(panel,'记跟进','保存跟进',f=>{const b=Object.fromEntries(new FormData(f));if(b.next_at)b.next_at=localIso(b.next_at);return api(root+'/'+selected+'/followup',{method:'POST',body:b});});d.open=true;f.id='lead-followup-form';select(f,'本次结果','result',['已联系','未接通','待回复','试听后回访','准备报名','其他']);field(f,'补充说明（选填）','notes').maxLength=1000;
-   const next=field(f,'下次跟进（选填）','next_at','datetime-local');const presets=node('div','trial-preset-row');for(const [label,days]of [['明天',1],['三天后',3],['一周后',7]])button(label,()=>{const d=new Date();d.setDate(d.getDate()+days);d.setHours(10,0,0,0);next.value=local(d);},presets);f.append(presets,submit);
+   const {f,d,submit}=form(panel,'记跟进','保存跟进',f=>{
+    const b=Object.fromEntries(new FormData(f));
+    b.next_action=b.next_action_choice==='其他'?b.next_action:b.next_action_choice;delete b.next_action_choice;
+    b.expected_stage_version=Number(b.expected_stage_version);if(b.next_at)b.next_at=localIso(b.next_at);
+    return api(root+'/'+selected+'/followup',{method:'POST',body:b});
+   });d.open=true;f.id='lead-followup-form';
+   const version=node('input');version.type='hidden';version.name='expected_stage_version';version.value=detail.stage_version;f.append(version);
+   const result=select(f,'本次沟通结果','result',[{id:'',display_name:'请选择本次沟通结果'},...communicationResults]);result.required=true;
+   const stageOptions=detail.sales_stage==='unclassified'?[{id:'unclassified',display_name:'待确认（旧记录）'},...salesStages]:salesStages;
+   select(f,'当前销售阶段','sales_stage',stageOptions,detail.sales_stage);
+   f.append(node('p','fineprint','阶段沿用当前值，有变化再改。此处为销售记录，排课、试听完成和到账仍以实际确认信息为准。'));
+   const notes=field(f,'沟通说明（选填）','notes');notes.maxLength=1000;
+   const noteHint=node('p','fineprint','选择“其他”时请填写沟通说明。');noteHint.hidden=true;f.append(noteHint);
+   function syncNotes(){notes.required=result.value==='other';notes.closest('label').firstChild.textContent=notes.required?'沟通说明（必填）':'沟通说明（选填）';noteHint.hidden=!notes.required;}result.addEventListener('change',syncNotes);
+   const next=field(f,'下次跟进时间（选填）','next_at','datetime-local');
+   const presets=node('div','trial-preset-row');for(const [label,days]of [['明天',1],['三天后',3],['一周后',7]])button(label,()=>{const d=new Date();d.setDate(d.getDate()+days);d.setHours(10,0,0,0);next.value=local(d);},presets);f.append(presets);
+   const action=select(f,'下次跟进事项（选填）','next_action_choice',[{id:'',display_name:'暂不安排'},'了解需求','确认试听时间','回访试听感受','跟进报名付款','其他']);
+   const custom=field(f,'跟进事项说明（必填）','next_action');custom.maxLength=300;custom.closest('label').hidden=true;
+   function syncAction(){custom.closest('label').hidden=action.value!=='其他';custom.required=action.value==='其他';}
+   action.addEventListener('change',syncAction);
+   f.addEventListener('input',()=>{syncNotes();syncAction();});f.append(submit);
    const trial=form(panel,'约试听','保存试听申请',f=>{const b=Object.fromEntries(new FormData(f));b.requested_slot_at=localIso(b.requested_slot_at);return api(root+'/'+selected+'/trial',{method:'POST',body:b});});trial.f.id='lead-trial-form';studentFields(trial.f);const at=field(trial.f,'希望试听时间','requested_slot_at','datetime-local',tomorrow());at.required=true;
    const times=node('div','trial-preset-row');for(const t of ['10:00','14:00','16:00','19:00'])button(t,()=>{at.value=(at.value||tomorrow()).slice(0,11)+t;},times);trial.f.append(times,node('p','fineprint','提交后待排课确认。'),trial.submit);
    courseForm();
@@ -71,7 +93,16 @@
     button('查看方案历史',async()=>{const token=state.token,id=selected;try{const h=await api('/api/v1/isolated-workspace/quotes/'+r.id+'/history');if(token!==state.token||id!==selected)return;const out=node('div');for(const v of h.items)out.append(node('p','','第'+v.version+'版 · '+yuan(v.body.total_cents)));a.append(out);}catch(e){note(e.message);}},a);
    }records.append(a);
   }
-  const timeline=node('div','panel');timeline.id='lead-timeline';timeline.append(node('h3','','跟进记录'));for(const e of detail.events){const b=e.after_business_json;if(e.event_name==='LEAD_DESK_FOLLOWUP')timeline.append(node('p','',`${new Date(e.happened_at).toLocaleString()} · ${b.result}${b.notes?' · '+b.notes:''}${b.next_at?' · 下次 '+new Date(b.next_at).toLocaleString():''}`));if(e.event_name==='LEAD_DESK_LOST')timeline.append(node('p','','Closed Lost · '+b.reason));}panel.append(timeline);
+  const timeline=node('div','panel');timeline.id='lead-timeline';timeline.append(node('h3','','跟进记录'));
+  for(const e of detail.events){const b=e.after_business_json;
+   if(e.event_name==='LEAD_DESK_FOLLOWUP_V2'){
+    const row=node('article','lead-row');row.append(node('p','',new Date(e.happened_at).toLocaleString()+' · 沟通结果：'+resultName(b.result)),node('p','','销售阶段：'+stageName(b.sales_stage)));
+    if(b.notes)row.append(node('p','','沟通说明：'+b.notes));
+    if(b.next_at||b.next_action)row.append(node('p','form-hint','下次跟进：'+(b.next_at?new Date(b.next_at).toLocaleString():'时间未定')+(b.next_action?' · '+b.next_action:'')));timeline.append(row);
+   }
+   if(e.event_name==='LEAD_DESK_FOLLOWUP')timeline.append(node('p','fineprint',`${new Date(e.happened_at).toLocaleString()} · 旧版记录（未分类）：${b.result}${b.notes?' · '+b.notes:''}${b.next_at?' · 下次 '+new Date(b.next_at).toLocaleString():''}`));
+   if(e.event_name==='LEAD_DESK_LOST')timeline.append(node('p','','Closed Lost · '+b.reason));
+  }panel.append(timeline);
  }
  function courseForm(record,focus=false){editingQuote=record?.id||null;$('lead-course-box')?.remove();const c=form(panel,record?'修改课程方案':'课程与成交','保存课程方案',async f=>{
    const items=[...f.querySelectorAll('.lead-course-line')].map(row=>({course_label:row.querySelector('[name="course"]').value,quantity:Number(row.querySelector('[name="lessons"]').value),proposed_unit_cents:cents(row.querySelector('[name="price"]').value)}));

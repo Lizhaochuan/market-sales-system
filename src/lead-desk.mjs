@@ -2,7 +2,10 @@
 // transactional storage details, never separate conversion steps for sales.
 import {fail,ownsLead,ownsStudent,sameOrgStaff} from './auth.mjs';
 const sources=['市场活动','网络咨询','到店','转介绍','主动咨询','其他'];
-const outcomes=['已联系','未接通','待回复','试听后回访','准备报名','其他'];
+const choices=entries=>entries.map(([id,display_name])=>({id,display_name}));
+const communicationResults=choices([['not_connected','未接通'],['communicated','已沟通'],['message_left','已留言待回复'],['other','其他']]);
+const salesStages=choices([['needs_discovery','待了解需求'],['needs_confirmed','需求已确认'],['trial_booked','已约试听'],['trial_completed','已完成试听'],['enrollment_pending_payment','报名待付款'],['enrolled','已报名'],['paused','暂缓'],['declined','明确不报名']]);
+const followupOptions={communication_results:communicationResults,sales_stages:salesStages};
 const flags={hold_active:true,release_eligible:false,external_authority_verified:false};
 function check(b,keys){if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!keys.includes(k)))fail(422,'VALIDATION_ERROR','请核对填写内容');}
 function text(x,max=500){if(typeof x!=='string'||!x.trim()||x.trim().length>max)fail(422,'VALIDATION_ERROR','内容为空或过长');return x.trim();}
@@ -14,6 +17,15 @@ async function lead(c,ctx,id,lock=false){
  if(!uuid(id))fail(422,'VALIDATION_ERROR','线索编号错误');
  await ownsLead(c,ctx,id);
  return (await c.query(`SELECT * FROM ms.leads WHERE id=$1${lock?' FOR UPDATE':''}`,[id])).rows[0];
+}
+// Sales observations are independent of academic/finance authority. Old mixed
+// results cannot safely be inferred as stages or classified communication facts.
+async function currentSalesStage(c,ctx,id){
+ const r=await c.query(`SELECT after_business_json AS report FROM ms.audit_events
+  WHERE organization_id=$1 AND target_type='lead' AND target_id=$2
+  AND event_name IN ('LEAD_DESK_CREATED','LEAD_DESK_FOLLOWUP_V2')
+  AND after_business_json ? 'sales_stage' ORDER BY happened_at DESC,id DESC LIMIT 1`,[ctx.user.organization_id,id]);
+ return {sales_stage:r.rows[0]?.report.sales_stage??'unclassified',stage_version:r.rows[0]?.report.stage_version??0,sales_stage_basis:r.rows[0]?.report.sales_stage&&r.rows[0].report.sales_stage!=='unclassified'?'SALES_REPORTED':'UNCLASSIFIED'};
 }
 async function studentChoices(c,ctx,id){return (await c.query(`SELECT s.id,s.display_name FROM ms.lead_students ls
  JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=$1 AND s.organization_id=$2 AND s.archived_at IS NULL
@@ -48,14 +60,21 @@ export async function leadDesk(c,ctx,{method,parts,body},workspace){
     AND a.event_name IN ('LEAD_DESK_CREATED','LEAD_DESK_SOURCE','LEAD_SOURCE_UPDATED') ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS source,
    (SELECT a.after_business_json FROM ms.audit_events a WHERE a.target_type='lead' AND a.target_id=l.id AND a.organization_id=$1
     AND a.event_name='LEAD_DESK_LOST' ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS lost,
-   (SELECT a.after_business_json FROM ms.audit_events a WHERE a.target_type='lead' AND a.target_id=l.id AND a.organization_id=$1 AND a.event_name='LEAD_DESK_FOLLOWUP' ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS followup,
+   (SELECT a.after_business_json FROM ms.audit_events a WHERE a.target_type='lead' AND a.target_id=l.id AND a.organization_id=$1 AND a.event_name IN ('LEAD_DESK_FOLLOWUP','LEAD_DESK_FOLLOWUP_V2') ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS followup,
+   COALESCE(stage.report->>'sales_stage','unclassified') AS sales_stage,
+   COALESCE((stage.report->>'stage_version')::integer,0) AS stage_version,
+   CASE WHEN stage.report IS NULL OR stage.report->>'sales_stage'='unclassified' THEN 'UNCLASSIFIED' ELSE 'SALES_REPORTED' END AS sales_stage_basis,
    (SELECT count(*)::integer FROM ms.sale_events se JOIN ms.opportunities o ON o.id=(SELECT so.opportunity_id FROM ms.sales_orders so WHERE so.id=se.order_id)
      WHERE o.originating_lead_id=l.id) AS won_count
    ,(SELECT sum(se.recognized_amount_cents)::text FROM ms.sale_events se JOIN ms.sales_orders so ON so.id=se.order_id JOIN ms.opportunities o ON o.id=so.opportunity_id WHERE o.originating_lead_id=l.id) AS won_amount_cents
    FROM ms.leads l LEFT JOIN ms.contacts co ON co.id=l.contact_id
    LEFT JOIN ms.contact_events e ON e.id=l.source_event_id LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id
+   LEFT JOIN LATERAL (SELECT a.after_business_json AS report FROM ms.audit_events a
+    WHERE a.organization_id=$1 AND a.target_type='lead' AND a.target_id=l.id
+    AND a.event_name IN ('LEAD_DESK_CREATED','LEAD_DESK_FOLLOWUP_V2') AND a.after_business_json ? 'sales_stage'
+    ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) stage ON true
    WHERE l.organization_id=$1 AND (l.owner_user_id=$2 OR $3::boolean) ORDER BY l.created_at DESC,l.id LIMIT 500`,[org,actor,ctx.manager]);
-  return {...flags,items:r.rows,staff:ctx.manager?(await c.query("SELECT id,display_name FROM ms.staff_users WHERE organization_id=$1 AND status='active' ORDER BY display_name",[org])).rows:[]};
+  return {...flags,followup_options:followupOptions,items:r.rows,staff:ctx.manager?(await c.query("SELECT id,display_name FROM ms.staff_users WHERE organization_id=$1 AND status='active' ORDER BY display_name",[org])).rows:[]};
  }
  if(method==='POST'&&!id){
   check(body,['contact_name','student_name','origin_group','source','notes','owner_user_id']);
@@ -70,7 +89,7 @@ export async function leadDesk(c,ctx,{method,parts,body},workspace){
    VALUES($1,$2,$3,now(),$4,$5) RETURNING id`,[org,co.id,body.source,owner,notes])).rows[0];
   const l=(await c.query(`INSERT INTO ms.leads(organization_id,contact_id,source_event_id,owner_user_id,lead_state)
    VALUES($1,$2,$3,$4,'working') RETURNING id`,[org,co.id,e.id,owner])).rows[0];
-  await event(c,ctx,l.id,'LEAD_DESK_CREATED',{origin_group:body.origin_group,source:body.source});
+  await event(c,ctx,l.id,'LEAD_DESK_CREATED',{origin_group:body.origin_group,source:body.source,sales_stage:'needs_discovery',stage_version:0});
   if(body.student_name){
    const s=(await c.query('INSERT INTO ms.students(organization_id,display_name,owner_user_id) VALUES($1,$2,$3) RETURNING id',[org,text(body.student_name,120),owner])).rows[0];
    await c.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'pending_review')",[l.id,s.id]);
@@ -86,7 +105,7 @@ export async function leadDesk(c,ctx,{method,parts,body},workspace){
    ORDER BY r.created_at DESC,r.id`,[id,org,actor,ctx.manager])).rows;
   const events=(await c.query(`SELECT event_name,after_business_json,happened_at FROM ms.audit_events WHERE organization_id=$1
    AND target_type='lead' AND target_id=$2 AND event_name LIKE 'LEAD_DESK_%' ORDER BY happened_at DESC,id DESC`,[org,id])).rows;
-  return {...flags,students,records,events};
+  return {...flags,...await currentSalesStage(c,ctx,id),students,records,events};
  }
  if(method!=='POST'||!action)fail(404,'NOT_FOUND','没有找到该操作');
  if(['closed','invalid','converted'].includes(l.lead_state))fail(409,'LEAD_CLOSED','已结束的线索不能继续修改');
@@ -95,10 +114,19 @@ export async function leadDesk(c,ctx,{method,parts,body},workspace){
   await event(c,ctx,id,'LEAD_SOURCE_UPDATED',{source:body.source});return {...flags};
  }
  if(action==='followup'){
-  check(body,['result','notes','next_at']);if(!outcomes.includes(body.result))fail(422,'VALIDATION_ERROR','请选择跟进结果');
+  check(body,['result','sales_stage','expected_stage_version','notes','next_at','next_action']);
+  if(!communicationResults.some(r=>r.id===body.result))fail(422,'VALIDATION_ERROR','请选择本次沟通结果');
+  const notes=body.notes?text(body.notes,1000):null;
+  if(body.result==='other'&&!notes)fail(422,'VALIDATION_ERROR','选择其他沟通结果时请填写说明');
+  const current=await currentSalesStage(c,ctx,id),stage=body.sales_stage??current.sales_stage;
+  if(!salesStages.some(s=>s.id===stage)&&!(stage==='unclassified'&&current.sales_stage==='unclassified'))fail(422,'VALIDATION_ERROR','请选择当前销售阶段');
+  if((body.sales_stage!==undefined||body.expected_stage_version!==undefined)&&(!Number.isSafeInteger(body.expected_stage_version)||body.expected_stage_version!==current.stage_version))fail(409,'VERSION_CONFLICT','客户阶段已更新，请刷新后再保存，避免覆盖新阶段');
   let next=null;if(body.next_at){if(!Number.isFinite(Date.parse(body.next_at)))fail(422,'VALIDATION_ERROR','请选择下次跟进时间');next=new Date(body.next_at).toISOString();}
-  await event(c,ctx,id,'LEAD_DESK_FOLLOWUP',{result:body.result,notes:body.notes?text(body.notes,1000):null,next_at:next});
-  return {...flags};
+  const report={schema_version:2,result:body.result,sales_stage:stage,previous_sales_stage:current.sales_stage,
+   stage_version:current.stage_version+1,sales_stage_basis:stage==='unclassified'?'UNCLASSIFIED':'SALES_REPORTED',
+   notes,next_at:next,next_action:body.next_action?text(body.next_action,300):null};
+  await event(c,ctx,id,'LEAD_DESK_FOLLOWUP_V2',report);
+  return {...flags,...report};
  }
  if(action==='lost'){
   check(body,['reason']);if(!['暂无需求','价格原因','时间不合适','无法联系','选择其他机构','其他'].includes(body.reason))fail(422,'VALIDATION_ERROR','请选择流失原因');
