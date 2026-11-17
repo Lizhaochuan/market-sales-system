@@ -124,6 +124,13 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal((await req('/finance')).status,403);
    assert.equal((await act(lead,'followup',{method:'phone',result:'failed',failure_reason:'无人接听',stage:'courses_introduced',next:next()})).status,422);
   });
+  await t.test('walk-in parent is a real meeting fact, not a fabricated invitation or advance booking',async()=>{
+   const lead=await create();const b={method:'campus',result:'communicated',stage:'needs_confirmed',meeting_actual:{confirmed_completed:true,at:new Date(Date.now()-60000).toISOString(),place:'实际到访接待室'},notes:'家长主动到校沟通需求，尚未介绍价格',next:next({action:'confirm_course'})};good(await act(lead,'followup',b));const d=await detail(lead),meeting=d.records.find(r=>r.kind==='appointments');assert.equal(meeting.state,'completed');assert.equal(meeting.body.was_scheduled,false);assert.equal(d.workflow.stage,'needs_confirmed');assert.equal(d.events.filter(e=>e.event_name==='V34_COMMUNICATION'&&e.after_business_json.purpose==='invite').length,0);assert.ok(d.workflow.primary_activity_id);
+  });
+  await t.test('cancelled trial and missed meeting retain followup without forcing a false stage regression',async()=>{
+   const lead=await create();good(await act(lead,'appointment',{appointment:{type:'trial',due_at:when(2),place:'试听室',course:'数学'}}));let d=await detail(lead),trial=d.records.find(r=>r.kind==='appointments');good(await act(lead,'activity',{record_id:trial.id,transition:'cancelled',feedback:'家长请求改期，先联系确认',next:next()}));good(await act(lead,'followup',{method:'phone',result:'failed',failure_reason:'无人接听',next:next()}));assert.equal((await detail(lead)).workflow.stage,'trial_booked');
+   good(await act(lead,'appointment',{appointment:{type:'meeting',due_at:when(2),place:'接待室'}}));d=await detail(lead);const meeting=d.records.find(r=>r.kind==='appointments'&&r.body.type==='meeting');good(await act(lead,'followup',{method:'campus',result:'failed',failure_reason:'未到场',next:next({action:'reschedule_visit'})}));assert.equal((await detail(lead)).records.find(r=>r.id===meeting.id).state,'no_show');
+  });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);
    await assert.rejects(pool.query('UPDATE ms_workspace.history SET state=\'bad\' WHERE record_id=$1',[trial.id]),/append only/);
