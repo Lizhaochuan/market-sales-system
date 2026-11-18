@@ -33,7 +33,8 @@ async function linked(c,ctx,l,b={}){
  if(!o)o=(await c.query('INSERT INTO ms.opportunities(student_id,owner_user_id,originating_lead_id) VALUES($1,$2,$3) RETURNING id',[s.id,l.owner_user_id,l.id])).rows[0];return {student:s.id,opp:o.id};
 }
 async function activity(c,ctx,l,b){
- fields(b,['id','action','title','method','due_at','owner_user_id']);
+ fields(b,['id','action','title','method','due_at','owner_user_id','appointment']);
+ if(b.appointment){if(Object.keys(b).length!==1)fail(422,'VALIDATION_ERROR','请选择预约或普通待办之一');return makeAppointment(c,ctx,l,b.appointment);}
  if(b.id){const r=await record(c,l,b.id);if(!['tasks','appointments'].includes(r.kind)||!active(r))fail(422,'NEXT_REQUIRED','所选活动已结束');return r;}
  if(!actions.some(a=>a.id===b.action)||!methods.some(m=>m.id===b.method))fail(422,'NEXT_REQUIRED','请选择下一步动作和联系方式');
  if(b.owner_user_id&&b.owner_user_id!==l.owner_user_id)fail(422,'NEXT_REQUIRED','下一步须由当前 Lead 负责人执行；转交需独立复核');
@@ -59,23 +60,24 @@ async function enrollmentState(c,ctx,l,r){const o=(await c.query('SELECT * FROM 
 async function financialQueue(c,ctx){if(!isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','仅授权核实员或主管可查看核实队列');const r=await c.query(`SELECT r.*,w.version AS workflow_version,s.display_name AS student_name FROM ms_workspace.records r JOIN ms.leads l ON l.id=r.lead_id JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms.students s ON s.id=r.student_id WHERE l.organization_id=$1 AND r.kind IN('payments','refunds') AND r.state IN('pending','approved') ORDER BY r.created_at`,[ctx.user.organization_id]);return {...flags,items:r.rows,can_verify:isFinance(ctx)};}
 export async function salesWorkflow(c,ctx,{method,parts,body}){
  const [,id,action]=parts,org=ctx.user.organization_id,actor=ctx.user.id;
- if(ctx.roleWorkspaces&&id!=='options'){const r=await departmentRoute(c,ctx,{method,parts,body},{activity,audit});if(r.handled)return {...flags,...r.value};}
+ if(ctx.roleWorkspaces&&id!=='options'){const r=await departmentRoute(c,ctx,{method,parts,body},{activity,audit,initialCommunication});if(r.handled)return {...flags,...r.value};}
  if(method==='GET'&&id==='options')return {...flags,...(ctx.roleWorkspaces?{access:workspaceAccess(ctx)}:{}),methods,stages,actions,failure_reasons:reasons,can_verify:isFinance(ctx),manager:ctx.manager,catalog:ctx.roleWorkspaces&&!workspaceAccess(ctx).sales?[]:(await c.query("SELECT id,version,body FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND state='active' ORDER BY body->>'course_label'",[org])).rows};
  if(method==='POST'&&id==='catalog'){fields(body,['course_label','standard_unit_cents','reason','expected_version']);if(!ctx.manager)fail(403,'FORBIDDEN','本地标准价目由主管维护');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[org+':catalog']);const name=text(body.course_label,120),unit=money(body.standard_unit_cents),old=(await c.query("SELECT * FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND lower(body->>'course_label')=lower($2) FOR UPDATE",[org,name])).rows[0];if(old&&old.version!==body.expected_version)fail(409,'VERSION_CONFLICT','本地价格已更新');const b={course_label:name,standard_unit_cents:unit,price_source:'LOCAL_APPROVED_PRICE',approved_by:actor,reason:text(body.reason),v34:true};const r=old?await update(c,ctx,old,'active',b):await save(c,ctx,{id:null,organization_id:org,owner_user_id:actor},'course-catalog','active',b);return {...flags,item:r};}
  if(method==='GET'&&id==='finance')return financialQueue(c,ctx);
  if(method==='GET'&&id==='metrics')return metrics(c,ctx);
  if(method==='GET'&&!id)return listing(c,ctx);
  if(method==='POST'&&!id){
-  fields(body,['contact_name','student_name','student_id','origin_group','source','notes','owner_user_id','contact_info','next']);
+  fields(body,['contact_name','student_name','student_id','origin_group','source','notes','owner_user_id','contact_info','next','initial_communication']);
   if(isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','收款核实员不应创建销售客户');
   const normalizedPhone=ctx.roleWorkspaces?await prepareSalesIntake(c,ctx,body):null;
-  const {contact_info,student_id,next:arrangement,...intake}=body;
+  const {contact_info,student_id,next:arrangement,initial_communication,...intake}=body;
   if(student_id&&body.student_name)fail(422,'VALIDATION_ERROR','已有学生无需重复填写姓名');
   const created=await leadDesk(c,ctx,{method:'POST',parts:['leads'],body:intake});
   const l=(await c.query('SELECT * FROM ms.leads WHERE id=$1 FOR UPDATE',[created.lead_id])).rows[0];
   if(student_id){const s=await ownsStudent(c,ctx,student_id);if(s.owner_user_id!==l.owner_user_id)fail(403,'FORBIDDEN','已有学生须由当前负责人接单，转交需独立复核');await c.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'pending_review')",[l.id,student_id]);}
+  const initialStage=initial_communication?await initialCommunication(c,ctx,l,initial_communication):'needs_discovery';
   const r=await activity(c,ctx,l,arrangement);
-  const w=(await c.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,contact_info) VALUES($1,$2,$3,$4) RETURNING *',[l.id,org,r.id,contact_info?text(contact_info,200):null])).rows[0];
+  const w=(await c.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,contact_info,stage) VALUES($1,$2,$3,$4,$5) RETURNING *',[l.id,org,r.id,contact_info?text(contact_info,200):null,r.kind==='appointments'&&r.body.type==='trial'&&r.state==='confirmed'?'trial_booked':initialStage])).rows[0];
   if(ctx.roleWorkspaces)await c.query("INSERT INTO ms_workspace.lead_directory(lead_id,organization_id,phone,department) VALUES($1,$2,$3,'sales')",[l.id,org,normalizedPhone]);
   await audit(c,ctx,l,'INTAKE',{primary_activity_id:r.id});return {...flags,lead_id:l.id,workflow:w};
  }
@@ -123,7 +125,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
   }
   const current=body.task_id?await record(c,l,body.task_id):w.primary_activity_id?await record(c,l,w.primary_activity_id):null;
   if(body.task_id&&(!active(current)||current.kind!=='tasks'))fail(409,'TASK_FINISHED','该待办已完成或不是沟通待办');
-  await next(c,ctx,l,w,following,{required:true,except:current&&(current.kind==='tasks'||['campus','visit'].includes(body.method)&&(['communicated'].includes(body.result)||body.result==='failed'&&['未到场','对方取消'].includes(body.failure_reason)))?current.id:null});
+  const successor=await next(c,ctx,l,w,following,{required:true,except:current&&(current.kind==='tasks'||['campus','visit'].includes(body.method)&&(['communicated'].includes(body.result)||body.result==='failed'&&['未到场','对方取消'].includes(body.failure_reason)))?current.id:null});
   if(current?.kind==='appointments'&&active(current)&&['campus','visit'].includes(body.method)&&body.result==='failed'&&['未到场','对方取消'].includes(body.failure_reason)){const status=body.failure_reason==='未到场'?'no_show':'cancelled';await update(c,ctx,current,status,{...current.body,actual_attendance:status==='no_show'?'absent':'not_recorded',feedback:notes||body.failure_reason,finished_at:new Date().toISOString(),finished_by:actor});await audit(c,ctx,l,'ACTIVITY_'+status.toUpperCase(),{record_id:current.id,type:current.body.type,feedback:notes||body.failure_reason});}
   let actualMeeting=null;
   if(['campus','visit'].includes(body.method)&&body.result==='communicated'){
@@ -133,8 +135,8 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
    else actualMeeting=await save(c,ctx,l,'appointments','completed',{type:'meeting',title:'现场实际面谈',action:'invite',method:body.method,due_at:at,finished_at:at,place,actual_attendance:'attended',feedback:notes||'已确认实际完成面谈',student_ids:body.student_ids??students.map(s=>s.student_id),was_scheduled:false,source:'WALK_IN_ACTUAL',recorded_by:actor,assignee_user_id:l.owner_user_id},{student:body.student_ids?.length===1?body.student_ids[0]:students.length===1?students[0].student_id:null});
    await audit(c,ctx,l,actualMeeting.body.was_scheduled===false?'WALK_IN_MEETING_COMPLETED':'ACTIVITY_COMPLETED',{record_id:actualMeeting.id,method:body.method,actual_at:at,was_scheduled:actualMeeting.body.was_scheduled!==false});
   }else if(body.meeting_actual)fail(422,'VALIDATION_ERROR','本次方式不应包含实际线下面谈资料');
-  const stage=body.stage??w.stage;if(body.result!=='communicated'&&stage!==w.stage)fail(422,'STAGE_UNCHANGED','未完成沟通不能在本条记录中推进销售进展');if(stage!==w.stage)await validateStage(c,l,stage);if(stage==='paused'){w.pause_reason=text(body.pause_reason??w.pause_reason);}
-  w.stage=stage;
+  let stage=body.stage??w.stage;if(body.result!=='communicated'&&stage!==w.stage)fail(422,'STAGE_UNCHANGED','未完成沟通不能在本条记录中推进销售进展');if(stage!==w.stage)await validateStage(c,l,stage);if(stage==='paused'){w.pause_reason=text(body.pause_reason??w.pause_reason);}
+  if(successor.kind==='appointments'&&successor.body.type==='trial'&&successor.state==='confirmed'&&following?.appointment)stage='trial_booked';w.stage=stage;
   if(current?.kind==='tasks'&&active(current))await update(c,ctx,current,'completed',{...current.body,completion:{method:body.method,result:body.result,notes},completed_at:new Date().toISOString(),completed_by:actor});
   const linkedIds=(await c.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[id])).rows.map(s=>s.student_id);const subjects=body.student_ids??(linkedIds.length<=1?linkedIds:null);if(!Array.isArray(subjects)||subjects.some(s=>!linkedIds.includes(s))||new Set(subjects).size!==subjects.length||linkedIds.length>1&&!subjects.length)fail(422,'STUDENT_REQUIRED','请选择本次实际沟通涉及的学生');
   await audit(c,ctx,l,'COMMUNICATION',{method:body.method,category:offline(body.method)?'offline':'online',result:body.result,failure_reason:body.failure_reason??null,notes,purpose:body.purpose??null,invite_result:body.invite_result??null,student_ids:subjects,stage,appointment_id:actualMeeting?.id??null,primary_activity_id:w.primary_activity_id});
@@ -151,9 +153,10 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
   if(t==='reschedule'){const when=date(body.due_at),reason=text(body.reason);await update(c,ctx,r,'rescheduled',{...r.body,due_at:when,rescheduled_from:r.body.due_at,reschedule_reason:reason});return bump(c,ctx,l,w,'ACTIVITY_RESCHEDULED',{record_id:r.id,from:r.body.due_at,to:when,reason});}
   if(!['completed','cancelled','no_show','confirmed'].includes(t)||r.kind==='tasks'&&t==='completed')fail(422,'VALIDATION_ERROR','沟通待办须记录本次结果后完成');
   if(t==='confirmed'){if(r.kind!=='appointments')fail(422,'VALIDATION_ERROR','不是预约');await update(c,ctx,r,'confirmed',r.body);if(r.body.type==='trial')w.stage='trial_booked';return bump(c,ctx,l,w,'APPOINTMENT_CONFIRMED',{record_id:r.id});}
-  await next(c,ctx,l,w,body.next,{required:r.id===w.primary_activity_id,except:r.id});
+  const successor=await next(c,ctx,l,w,body.next,{required:r.id===w.primary_activity_id,except:r.id});
   const feedback=text(body.feedback??body.reason);await update(c,ctx,r,t,{...r.body,actual_attendance:t==='completed'?'attended':t==='no_show'?'absent':'not_recorded',feedback,finished_at:new Date().toISOString(),finished_by:actor});
   if(r.kind==='appointments'&&r.body.type==='trial'&&t==='completed')w.stage='trial_completed';
+  if(body.next?.appointment&&successor.body.type==='trial'&&successor.state==='confirmed')w.stage='trial_booked';
   return bump(c,ctx,l,w,'ACTIVITY_'+t.toUpperCase(),{record_id:r.id,type:r.body.type,feedback});
  }
  if(action==='quote'){
@@ -229,6 +232,14 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
  }
  if(['request-correction','approve-correction','submit-refund','verify-refund'].includes(action))return corrections(c,ctx,l,w,action,body);
  fail(404,'NOT_FOUND','未找到业务操作');
+}
+async function initialCommunication(c,ctx,l,b){
+ fields(b,['method','at','place','notes','stage']);if(!methods.some(m=>m.id===b.method))fail(422,'VALIDATION_ERROR','请选择实际沟通方式');
+ const at=date(b.at);if(Date.parse(at)>Date.now()+300000)fail(422,'ACTUAL_MEETING_REQUIRED','已经发生的沟通不能填未来时间');
+ const stage=b.stage??'needs_discovery';if(!['needs_discovery','needs_confirmed','courses_introduced','enrollment_intent'].includes(stage))fail(422,'VALIDATION_ERROR','初次沟通进展不能替代试听或报名事实');
+ const notes=b.notes?text(b.notes):null,students=(await c.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[l.id])).rows.map(r=>r.student_id);let appointment_id=null;
+ if(['campus','visit'].includes(b.method)){const place=text(b.place,200);const r=await save(c,ctx,l,'appointments','completed',{type:'meeting',title:'现场实际面谈',action:'invite',method:b.method,due_at:at,finished_at:at,place,actual_attendance:'attended',feedback:notes||'录入时确认面谈已完成',student_ids:students,was_scheduled:false,source:'WALK_IN_ACTUAL',recorded_by:ctx.user.id,assignee_user_id:l.owner_user_id},{student:students.length===1?students[0]:null});appointment_id=r.id;await audit(c,ctx,l,'WALK_IN_MEETING_COMPLETED',{record_id:r.id,actual_at:at,was_scheduled:false});}
+ await audit(c,ctx,l,'COMMUNICATION',{method:b.method,category:offline(b.method)?'offline':'online',result:'communicated',notes,student_ids:students,stage,actual_at:at,appointment_id,purpose:null,invite_result:null});return stage;
 }
 async function makeAppointment(c,ctx,l,b){
  fields(b,['type','student_id','student_name','due_at','place','course','state']);if(!['meeting','trial'].includes(b.type)||!['pending','confirmed'].includes(b.state??'confirmed'))fail(422,'VALIDATION_ERROR','请核对预约类型与状态');

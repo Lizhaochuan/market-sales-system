@@ -56,7 +56,7 @@ export async function departmentRoute(c,ctx,{method,parts,body},helpers){
   const found=await matches(c,ctx,phone);return {handled:true,value:{phone,items:found.map(r=>{const own=r.owner_user_id===actor||a.sales_manager;return r.department==='market'?{lead_id:r.lead_id,status:'market_available',contact_name:r.contact_name,source:r.source,students:r.students||[]} :own?{lead_id:r.lead_id,status:'sales_available',contact_name:r.contact_name,owner_name:r.owner_name,students:r.students||[]}:{status:'assigned',owner_name:r.owner_name};})}};
  }
  if(action==='claim'){
-  if(!a.sales)fail(403,'DEPARTMENT_FORBIDDEN','只有销售可接收市场线索');check(body,['phone','next']);if(!/^[0-9a-f-]{36}$/i.test(id))fail(422,'VALIDATION_ERROR','线索编号错误');const phone=phoneNumber(body.phone);
+  if(!a.sales)fail(403,'DEPARTMENT_FORBIDDEN','只有销售可接收市场线索');check(body,['phone','next','initial_communication']);if(!/^[0-9a-f-]{36}$/i.test(id))fail(422,'VALIDATION_ERROR','线索编号错误');const phone=phoneNumber(body.phone);
   const l=(await c.query('SELECT * FROM ms.leads WHERE id=$1 AND organization_id=$2 FOR UPDATE',[id,org])).rows[0];if(!l)fail(404,'NOT_FOUND','未找到匹配线索');await lockPhone(c,org,phone);
   const d=(await c.query('SELECT * FROM ms_workspace.lead_directory WHERE lead_id=$1 AND organization_id=$2 AND phone=$3 FOR UPDATE',[id,org,phone])).rows[0];if(!d)fail(404,'NOT_FOUND','未找到匹配线索');
   if(d.department!=='market'){if(l.owner_user_id===actor)return {handled:true,value:{lead_id:id}};fail(409,'ALREADY_ASSIGNED','该线索已由其他销售接收');}
@@ -66,7 +66,7 @@ export async function departmentRoute(c,ctx,{method,parts,body},helpers){
   for(const s of linked){if(s.owner_user_id!==l.owner_user_id||(await c.query('SELECT 1 FROM ms.lead_students WHERE student_id=$1 AND lead_id<>$2',[s.id,id])).rowCount)fail(409,'STUDENT_REVIEW_REQUIRED','学生身份已有其他关联，需主管核实后交接');}
   const old=l.owner_user_id;l.owner_user_id=actor;await c.query('UPDATE ms.leads SET owner_user_id=$2 WHERE id=$1',[id,actor]);
   for(const s of linked)await c.query('UPDATE ms.students SET owner_user_id=$2 WHERE id=$1',[s.id,actor]);
-  const task=await helpers.activity(c,ctx,l,body.next);await c.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,contact_info) VALUES($1,$2,$3,$4)',[id,org,task.id,phone]);
+  const initialStage=body.initial_communication?await helpers.initialCommunication(c,ctx,l,body.initial_communication):'needs_discovery';const task=await helpers.activity(c,ctx,l,body.next);await c.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,contact_info,stage) VALUES($1,$2,$3,$4,$5)',[id,org,task.id,phone,task.kind==='appointments'&&task.body.type==='trial'&&task.state==='confirmed'?'trial_booked':initialStage]);
   await c.query("UPDATE ms_workspace.lead_directory SET department='sales',handed_to=$2,handed_at=now() WHERE lead_id=$1",[id,actor]);await helpers.audit(c,ctx,l,'MARKET_HANDOFF_ACCEPTED',{market_owner_id:old,sales_owner_id:actor,primary_activity_id:task.id});
   return {handled:true,value:{lead_id:id}};
  }
