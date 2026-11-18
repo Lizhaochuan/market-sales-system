@@ -106,7 +106,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
  if(action==='draft'){
   fields(body,['expected_version','draft']);if(!body.draft||typeof body.draft!=='object'||Array.isArray(body.draft)||JSON.stringify(body.draft).length>32768)fail(422,'VALIDATION_ERROR','草稿内容格式错误或过长');const draft=await save(c,ctx,l,'workflow-drafts','draft',{draft:body.draft,recorded_by:actor});await audit(c,ctx,l,'DRAFT_SAVED',{record_id:draft.id});return {...flags,saved_as:'DRAFT_ONLY'};
  }
- if(action==='arrange'){fields(body,['expected_version','next']);await next(c,ctx,l,w,body.next,{required:true});return bump(c,ctx,l,w,'NEXT_ARRANGED');}
+ if(action==='arrange'){fields(body,['expected_version','next']);const prev=!body.next?.id&&w.primary_activity_id?await record(c,l,w.primary_activity_id):null;const r=await next(c,ctx,l,w,body.next,{required:true});if(prev&&prev.id!==r.id&&prev.kind==='tasks'&&active(prev))await update(c,ctx,prev,'cancelled',{...prev.body,close_reason:'已调整为新的下一步安排'});return bump(c,ctx,l,w,'NEXT_ARRANGED');}
  if(action==='followup'){
   fields(body,['expected_version','method','result','failure_reason','notes','purpose','invite_result','appointment','stage','pause_reason','next','task_id','student_ids','meeting_actual']);
   if(!methods.some(m=>m.id===body.method)||!['failed','waiting','communicated','other'].includes(body.result)||!['wechat_text','online_other'].includes(body.method)&&body.result==='waiting')fail(422,'VALIDATION_ERROR','请核对本次沟通方式和结果');
@@ -144,7 +144,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
   return bump(c,ctx,l,w,'FOLLOWUP_COMPLETED');
  }
  if(action==='appointment'){
-  fields(body,['expected_version','appointment','next']);const r=await makeAppointment(c,ctx,l,body.appointment);w.primary_activity_id=r.id;if(r.body.type==='trial'&&r.state==='confirmed')w.stage='trial_booked';return bump(c,ctx,l,w,'APPOINTMENT_CREATED',{record_id:r.id});
+  fields(body,['expected_version','appointment','next']);const prev=w.primary_activity_id?await record(c,l,w.primary_activity_id):null;const r=await makeAppointment(c,ctx,l,body.appointment);w.primary_activity_id=r.id;if(prev&&prev.id!==r.id&&prev.kind==='tasks'&&active(prev))await update(c,ctx,prev,'completed',{...prev.body,completion:{method:prev.body.method,result:'communicated',notes:'已直接确认并保存预约，原联系待办自动完成'},completed_at:new Date().toISOString(),completed_by:actor});if(r.body.type==='trial'&&r.state==='confirmed')w.stage='trial_booked';return bump(c,ctx,l,w,'APPOINTMENT_CREATED',{record_id:r.id});
  }
  if(action==='activity'){
   fields(body,['expected_version','record_id','transition','due_at','reason','feedback','next']);
