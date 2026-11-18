@@ -1,0 +1,178 @@
+{
+  "schema_version": "v3.2-121-release-readiness-v1",
+  "scope": "CI_ONLY_DRAFT",
+  "project": "CRM M02 revocation notices and cross-module correction",
+  "draft_pr": 129,
+  "release_authorization_implemented": false,
+  "production_release_status": "HOLD",
+  "hold_active": true,
+  "release_eligible": false,
+  "allowed_actions": [
+    "ISOLATED_CI_TEST",
+    "DRAFT_PR_REVIEW",
+    "EVIDENCE_GAP_TRACKING"
+  ],
+  "forbidden_actions": [
+    "MERGE",
+    "PRODUCTION_DEPLOY",
+    "REAL_DATA_MUTATION",
+    "SECURITY_QUARANTINE_RELEASE",
+    "KEY_ISSUANCE_RESUME"
+  ],
+  "ci_controls": [
+    {
+      "id": "CI-001",
+      "status": "CI_SCOPE_ONLY",
+      "description": "Failed-evidence remediation and review stay append-only, serialized and idempotent",
+      "evidence": [
+        "tests/integration/v3-2-121-postgres-notices.test.mjs"
+      ]
+    },
+    {
+      "id": "CI-002",
+      "status": "CI_SCOPE_ONLY",
+      "description": "Cold-start reconstruction checks history completeness and 3-module HOLD",
+      "evidence": [
+        "tests/fixtures/v3-2-121-m02-revocation-notices.sql",
+        "tests/integration/v3-2-121-postgres-notices.test.mjs"
+      ]
+    },
+    {
+      "id": "CI-003",
+      "status": "CI_SCOPE_ONLY",
+      "description": "Snapshot digest and rollback checks only within test PostgreSQL",
+      "evidence": [
+        "tests/integration/v3-2-121-postgres-notices.test.mjs"
+      ]
+    },
+    {
+      "id": "CI-004",
+      "status": "CI_SCOPE_ONLY",
+      "description": "Ed25519 signature, rotation, revocation and trusted-attester admission are fixture-tested",
+      "evidence": [
+        "tests/contracts/v3-2-121-external-audit-anchor.test.mjs",
+        "tests/integration/v3-2-121-postgres-notices.test.mjs"
+      ]
+    },
+    {
+      "id": "CI-005",
+      "status": "CI_SCOPE_ONLY",
+      "description": "Quarantine events, dual-domain review, evidence linkage and tenant isolation are tested",
+      "evidence": [
+        "tests/fixtures/v3-2-121-external-anchor-ledger.sql",
+        "tests/integration/v3-2-121-postgres-notices.test.mjs"
+      ]
+    },
+    {
+      "id": "CI-006",
+      "status": "CI_SCOPE_ONLY",
+      "description": "Security HOLD and forbidden release remain enforced throughout fixture acceptance",
+      "evidence": [
+        "tests/contracts/v3-2-121-external-audit-anchor.test.mjs",
+        "tests/integration/v3-2-121-postgres-notices.test.mjs"
+      ]
+    },
+    {
+      "id": "CI-007",
+      "status": "CI_SCOPE_ONLY",
+      "description": "Cross-stage integration audit runs on this Draft PR",
+      "evidence": [
+        ".github/workflows/v3-2-121-m02-notices.yml"
+      ]
+    }
+  ],
+  "production_gaps": [
+    {
+      "id": "EXT-001",
+      "owner_domain": "SECURITY",
+      "status": "UNVERIFIED",
+      "requirement": "Production IAM, scoped service identities and independent privileged access review"
+    },
+    {
+      "id": "EXT-002",
+      "owner_domain": "SECURITY",
+      "status": "UNVERIFIED",
+      "requirement": "Non-bypassable production cryptographic verification, HSM/KMS and key lifecycle attestation"
+    },
+    {
+      "id": "EXT-003",
+      "owner_domain": "AUDIT",
+      "status": "UNVERIFIED",
+      "requirement": "Independent WORM external audit anchor, trusted timestamps and externally verified backups"
+    },
+    {
+      "id": "EXT-004",
+      "owner_domain": "SECURITY",
+      "status": "UNVERIFIED",
+      "requirement": "Real-time attester compromise monitoring, response drills and documented recovery controls"
+    },
+    {
+      "id": "EXT-005",
+      "owner_domain": "SALES",
+      "status": "UNVERIFIED",
+      "requirement": "Real orders, student-level attribution and immutable original sales history reconciliation"
+    },
+    {
+      "id": "EXT-006",
+      "owner_domain": "FINANCE",
+      "status": "UNVERIFIED",
+      "requirement": "Funds, refunds and compensating entries independently reconciled and accepted"
+    },
+    {
+      "id": "EXT-007",
+      "owner_domain": "ACADEMIC",
+      "status": "UNVERIFIED",
+      "requirement": "Delivery, class and learner record correction independently reconciled and accepted"
+    },
+    {
+      "id": "EXT-008",
+      "owner_domain": "OPERATIONS",
+      "status": "UNVERIFIED",
+      "requirement": "Multi-service disaster recovery, message delivery, failover and rollback game day"
+    },
+    {
+      "id": "EXT-009",
+      "owner_domain": "AUDIT",
+      "status": "UNVERIFIED",
+      "requirement": "Evidence provenance, privacy, retention and immutable independent forensic review"
+    },
+    {
+      "id": "EXT-010",
+      "owner_domain": "OPERATIONS",
+      "status": "UNVERIFIED",
+      "requirement": "Production deployment controls, isolation release design and independent UAT approval"
+    }
+  ],
+  "manual_signoffs": [
+    {
+      "domain": "SECURITY",
+      "status": "NOT_SIGNED"
+    },
+    {
+      "domain": "AUDIT",
+      "status": "NOT_SIGNED"
+    },
+    {
+      "domain": "SALES",
+      "status": "NOT_SIGNED"
+    },
+    {
+      "domain": "FINANCE",
+      "status": "NOT_SIGNED"
+    },
+    {
+      "domain": "ACADEMIC",
+      "status": "NOT_SIGNED"
+    },
+    {
+      "domain": "OPERATIONS",
+      "status": "NOT_SIGNED"
+    }
+  ],
+  "explicit_non_evidence": [
+    "Green CI is not proof of production UAT or release authorization",
+    "Two PostgreSQL databases in the same CI cluster are not independent external WORM",
+    "False-positive candidate, valid chain and two reviews do not lift security quarantine",
+    "This artifact contains no valid production signoff or attestation"
+  ]
+}

@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 const org='20000000-0000-4000-8000-000000000001';
 const passphrase='fictional-strong-ui-demo-passphrase-0001';
 async function login(page,account='sales-a'){
- await page.goto('/');
+ await page.goto('/?workspace=legacy');
  await page.locator('#login-form select[name="account_code"]').selectOption(account);
  await page.locator('#login-form input[name="passphrase"]').fill(passphrase);
  await page.getByRole('button',{name:'进入工作台'}).click();
@@ -69,3 +69,4 @@ test('M01 Chromium Chinese read-only channel hierarchy, XSS safety, failed refre
   await pool.end();
  }
 });
+

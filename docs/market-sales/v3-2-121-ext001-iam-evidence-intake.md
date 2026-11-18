@@ -1,0 +1,155 @@
+# V3.2-121 / EXT-001｜生产 IAM 证据接收规范（CI-only）
+
+本轮固定范围、验收判据与停止边界见 [EXT-001 隔离开发收口](v3-2-121-ext001-closeout.md)。仅收口服务不可用、撤销后历史核验和检查点存储故障三项；真实环境依赖不再自动衍生模拟开发任务。
+
+> 本文件是尚未执行的**生产证据交接规范**，不是生产证据包。当前：`EXT-001=UNVERIFIED`，`NOT_COLLECTED`，`NOT_REVIEWED`，`NOT_SIGNED`，`HOLD=true`，`release_eligible=false`。对应 Draft PR #129。
+
+## 所需责任与授权
+
+- **提交职责**：SECURITY 的正式 IAM 负责人，需要在受控系统中实名确认。
+- **独立复核职责**：AUDIT 的授权审核人，不得与材料提交者为同一主体，也不应共享同一服务凭据。
+- **证据接收系统**：必须是具有身份核验、最小权限、加密、保留与独立审计能力的真实外部系统。本仓库并未接入它，也不会接收或保管真实密码、会话、私钥、学生信息、收款和履约明细。
+- **证据版本**：材料须绑定组织、CRM 迭代/配置版本、采集时间、截止时间、来源系统、审核人和所涉生产权限范围。证据过期后只能重新采集，不能继续使用旧审核。
+
+## EXT-001-E1：生产 IAM 权限及身份清单
+
+必须包括：生产身份提供方和服务账号来源、角色与服务主体、作用域和授权边界、审批责任链、MFA/工作负载身份认证证明、撤销与离职停权记录，以及敏感权限职责分离。仅提交**经脱敏的清单和可信受控引用**；不允许提交认证秘密、生产令牌、真实权限导出的未脱敏原件。
+
+CI 合成样例强制覆盖 8 类职责：ATTESTER（验签）、ANCHOR_WRITER（锚点写入）、ANCHOR_READER（审计读取）、SECURITY_REPORTER（安全事件上报）、SALES、FINANCE、ACADEMIC、DEPLOYMENT。测试服务身份要求工作负载认证，人员身份要求 MFA，并标明最小权限；这些仅是模拟检查条件，真实生产证明仍需外部审计。
+
+## EXT-001-E2：最小权限、职责隔离及越权拒绝
+
+要求独立审核能重现并核实下列八类权限拒绝：验签角色不可直接写入锚点、写入者不可签发验签准入、销售不得修改财务、财务不得修改教务、教务不得修改销售、部署账号不能解除 HOLD、跨机构访问被拒、被撤销身份无法访问。每项必须有版本、时间、期望结果、实际结果、受控日志引用、复核者信息与校验摘要。单靠“通过”文字或截图不足以证明测试执行和来源真实。
+
+## 合成证据接收器的实现边界
+
+`src/cross-module-v121-iam-evidence.mjs` 实现纯离线的合成证据包验证：
+
+- 证据限 `CI_FIXTURE_ONLY`，只接受 `fixture://ext001/...` 虚构引用、`CI_SYNTHETIC` 来源标记及 E1/E2 完整摘要，禁止模拟资料冒充真实生产文件。
+- 合成材料由 SECURITY 模拟身份签名；独立 AUDIT 身份对材料摘要和审核意见另行签名。两者使用不同主体和可信公钥，并检查密钥状态、材料版本、组织与有效期。
+- 清单覆盖八类角色及对应认证方式；八类越权负向样例必须全部标为 `DENIED_IN_FIXTURE`，缺失、弱认证、角色错误、签名伪造、过期及跨机构材料均拒绝。
+- 验证器不读取真实 IAM，**不具备校验外部证据文件字节、真实云 IAM 状态、独立审核人身份真实性或生产操作日志的能力**；合成摘要只能证明提供的模拟元数据没有在验签后变化。
+- 成功响应恒定 `FIXTURE_EVIDENCE_INTERNALLY_CONSISTENT_STILL_HOLD`、`production_evidence_collected=false`、`independent_production_review_completed=false`、`release_authorized=false`、`hold_active=true`、`release_eligible=false`。不能以此结果更新生产验收矩阵、登记实际证据、触发合并或解除隔离。
+
+## 真实交接的待办条件
+
+1. **SECURITY** 提供实名、经过授权的证据责任主体及真实安全存储位置；先明确合规脱敏、最小暴露和访问权限，禁止把秘密提交 PR。
+2. 提供完整 E1/E2 **真实证据**以及与生产配置版本绑定的可独立核验证据哈希/受控引用。
+3. **AUDIT** 在独立权限边界下重新核对内容、真实性、权限拒绝测试和有效期，记录独立可追溯审核与差异处理。
+4. 所有审核通过后，还需经受控的真实签署与项目 UAT 记录处理；**本仓库中的模拟验证器不是批准流程**。其他 EXT-002—010 及独立签署也仍未完成。
+
+## 本轮验收
+
+CI 用 `tests/contracts/v3-2-121-iam-evidence.test.mjs` 测试完整合成 E1/E2、独立签名、过期、证据缺失、错误凭据、权限越权、跨租户、数据篡改，以及验证成功也不能修改上游交接状态。没有收集任何真实生产材料，没有向第三方发出凭证请求。
+
+保持 PR #129 Draft、CI-only、销售/财务/教务和安全隔离 HOLD，不合并、不部署、不修改任何真实业务数据。
+
+## EXT-001 后续：合成证据登记、重试、撤回与版本过期（CI-only）
+
+- 新增隔离数据库脚本 `tests/fixtures/v3-2-121-ext001-iam-evidence-ledger.sql`。它在已有 `v121_anchor_isolated` 的独立架构中维护只追加的 `fixture_iam_evidence_receipts`（证据接收历史）和 `fixture_iam_evidence_revocations`（撤回事件）。业务库 `v106_isolated` 不负责写入该记录；审计库仍由同一 CI PostgreSQL 集群管理，因此**不是外部 WORM**。
+- `v121_iam_intake_writer` 仅能通过受限函数提交经合成 Ed25519 校验后提取的包摘要、E1/E2 摘要、两个不同的审核主体、收据 UUID、递增版本号与失效时间。无直接表读写权限；`v121_iam_revoker` 只负责追加撤回事件，`v121_iam_intake_reader` 只能执行只读诊断。函数用机构+EXT-001 事务锁避免并发重排，强制 PostgreSQL `READ COMMITTED`。
+- 当同一版本、同一收据 ID、摘要、提交人与复核人和失效时间**完全一致**且仍是最新未撤回、未过期版本时，重复提交返回 `EXACT_RETRY_SYNTHETIC_STILL_HOLD`，不新增记录。同版本内容不同返回 `V121_IAM_REVISION_CONFLICT`；越序版本或旧版本重试拒绝。新版本必须为前一版本加一，旧版保留为 `RECEIPT_SUPERSEDED_STILL_HOLD`。
+- 撤回只追加新事件且不删除原收据；撤回后原版本返回 `RECEIPT_REVOKED_STILL_HOLD`，不得继续重试，二次撤回拒绝。数据库接收时设置的合成收据失效时间必须在未来且不超过 1 小时；到期状态为 `RECEIPT_EXPIRED_STILL_HOLD`，过期版本不得恢复。新版本需要重新生成、重新验签、独立复核并单独登记。
+- `fingerprintFixtureExt001ForIntake` 在内存中验证 SECURITY 与 AUDIT 的两个合成签名、证据来源、时间和跨模块权限测试后计算带域标识的 SHA-256 指纹。SQL **仅检验存入摘要和元数据的形状及版本一致性，不具备 Ed25519 本地验真功能**；若隔离写入角色本身遭入侵，仍可能伪造登记内容。生产不得将此流程当作真实 IAM 证据校验、安全认证、业务解隔或上线许可。
+- PostgreSQL CI 负测包含：无记录诊断、精确重复重试、冲突重试、跨机构、跳过版本、受限身份越权、未经外部验签的签名篡改拒绝、撤回及重复撤回、旧版不可复用、过期与重新版本化、并发两条不同内容竞争同一版本、连接重启后历史重建、管理员篡改保护触发器及销售/财务/教务 HOLD 不变。
+- **实际交接仍未发生**：`EXT-001=UNVERIFIED`、证据包 `NOT_COLLECTED`、真实独立复核 `NOT_REVIEWED`、人工签署 `NOT_SIGNED`。合成收据不得写入上游生产验收清单或当作真实生产证据引用。Draft PR #129 不合并、不部署。
+
+## EXT-001 证据原始字节、防替换和独立来源验真（CI-only）
+
+本阶段将合成证据的签名声明与原始文件字节关联，不再仅凭提交者在 JSON 中声明的 SHA-256 摘要接受凭证。合成包新增不可缺少的 `revision_no`，它与 `revision_id`、组织、文件摘要一起包含在 SECURITY 签名的正文中；AUDIT 的独立签名覆盖整个正文摘要。对两个必备证据文件 E1、E2，`verifyFixtureExt001BytesAndFingerprint` 实际读取**调用者在隔离测试中提供的 Buffer 字节**并计算 SHA-256，与各自的签名声明摘要逐一比较。文件缺失、额外文件、空文件、超出测试上限、E1/E2 互换、同路径内容被替换或审核版本被修改均被拒绝。
+
+隔离审计数据库新增不可修改的 `fixture_iam_provenance_proofs`：它记录机构、递增版本、签名版本 UUID、收据 UUID、两个文件的内容摘要、完整签名包摘要及 SECURITY/AUDIT 各自签名字节的 SHA-256 摘要、双方身份和失效时间。只有独立 `v121_iam_provenance_attester` 模拟账号可签发这份来源校验证明，原 `v121_iam_intake_writer` 不能创建或修改证明。新的收据登记在同一版本事务锁内，必须先找到完全匹配的来源证明，否则返回 `V121_IAM_PROVENANCE_MISSING_OR_MISMATCH`。来源证明只能是当前递增版本，重复同一证明可在未消费、未过期时幂等返回，重复版本不同证明被拒绝。原始收据、证明、撤回事件和历史版本均采用只追加记录。
+
+**证据源边界：** 当前 Buffer 是 CI 合成文件，不是从生产 IAM 或外部档案系统下载的真实证据。SHA-256 校验能证明**提交给验证器的那些字节**与原签名声明一致；如果同一受信验签账号遭入侵、文件没有从可信源获取，或签发后外部仓库内容被替换而未重新取回校验，数据库本身无法感知此事。生产必须进一步使用不可变内容寻址存储、受控对象版本 ID、独立真实 IAM 导出源、可信时间与安全审核身份，并在关键读取环节重新获取和核对字节。本轮不声称这些外部能力已具备。
+
+本轮仍只编制测试与接收规则。EXT-001 保持 `UNVERIFIED`、`NOT_COLLECTED`、`NOT_REVIEWED`、`NOT_SIGNED`；没有将合成证明写入生产验收矩阵。继续 PR #129 Draft，所有跨模块 HOLD 和禁止合并/部署约束不变。
+
+## EXT-001 外部存储版本和独立审计镜像重读（CI 模拟）
+
+新增 `src/cross-module-v121-iam-source-version.mjs` 的独立来源校验协议；此处的“来源”仅为两个被注入的**隔离测试读取器**，不连接真实云存储、IAM、Google Drive 或对象档案系统。
+
+1. **锁定对象身份**：来源清单绑定机构、证据包 `revision_no` / `revision_id`、完整 SECURITY/AUDIT 双签名包 SHA-256、E1/E2 的 `fixture://` 引用、不可重复的对象版本 ID、递增 generation 和文件 SHA-256。不能只用可变的“文件路径”代替对象版本。
+2. **两类独立来源证明**：主存储 `FIXTURE_PRIMARY_STORE` 和审计镜像 `FIXTURE_AUDIT_MIRROR` 各使用不同模拟身份的 Ed25519 密钥对来源清单签名，密钥不得复用 SECURITY/AUDIT 证据提交者身份。可信公钥与活动状态由模拟校验入口显式提供。来源清单的有效期不得超过原审核证据，过期不得使用。
+3. **重读当前内容**：两个读取器必须分别从相同的固定对象引用读取**当前版本**，核对版本 ID、generation、来源类型、声明的内容哈希、实际 Buffer 字节哈希、模拟不可变锁状态和观测时间（窗口最长 30 秒）。主存储和审计镜像结果必须一致，而且连续完成**两轮重新读取**。任意读取失败、版本更新、文件被替换、镜像未更新、锁状态异常或观测时间过旧均 fail-closed。
+4. **签发前二次保护**：`issueFixtureExt001FromTwoSources` 只有在双来源重读和签名验真完成后，才把最新核验过的两个 Buffer 交给 `issueFixtureExt001VerifiedProvenance`，由其再次校验文件与 SECURITY/AUDIT 证据签名，申请隔离 PostgreSQL 的来源凭证。来源异常时不得调用数据库 attester。
+5. **边界与后续真实交接**：模拟读取器由测试用代码提供，签名身份也来自临时密钥，**不代表生产来源已认证**；对签名者的相互独立性、云版本不可变锁、可信时间戳与主存储—审计系统的真正故障独立仍需要正式验证。此前的隔离验签入口仍存在，生产版本必须通过独立 IAM 权限禁止绕开完整来源校验。外部真实证据还必须使用受信对象存储、内容寻址索引、访问授权及只读审核日志，严格遵守隐私与数据最少化原则。
+
+`tests/contracts/v3-2-121-iam-source-version.test.mjs` 覆盖有效对象签名、版本切换、相同路径文件字节替换、审计镜像落后、不可变锁缺失、已撤销来源密钥、旧审核沿用、新版证据与旧清单冲突、来源不可用和失效时绝不签发。所有成功结果仍固定 `production_source_authenticated=false`、`production_evidence_collected=false`、`release_authorized=false`、`hold_active=true`、`release_eligible=false`。
+
+EXT-001 当前仍 `UNVERIFIED` / `NOT_COLLECTED` / `NOT_REVIEWED` / `NOT_SIGNED`；PR #129 保持 Draft、CI-only，不允许合并、部署或使用真实学生/订单/资金/履约数据测试。
+
+
+## EXT-001 模拟来源密钥独立性与读取中撤权复核（CI-only）
+
+- 对模拟 SECURITY 提交者、AUDIT 复核者、主存储见证者和审计镜像见证者执行 Ed25519 公钥 SPKI 指纹去重。只比较不同的 UUID/角色名不能证明密钥独立；即使两个来源签名各自有效，若底层公钥相同也必须拒绝。
+- 支持 Node.js 原生 public KeyObject 和可导入的公钥格式；无效/非 Ed25519/非公钥均拒绝，不能因安全加固阻断正常有效的测试对象。
+- 在异步双来源读取的每轮结束后重新检查 SECURITY/AUDIT 签署身份状态、两个来源见证签名及公钥独立性；模拟来源密钥在读取期间被撤销时，不允许调用 SQL attester。补充复用同一 Ed25519 公钥但签名有效的反例以及读取期间撤权的负向测试。
+- 这只是临时模拟信任注册表上的重新读取。最后一次复核与数据库提交之间仍有竞态窗口，未建立可信真实 IAM、外部对象不可变存储或数据库原生强制双来源校验。任何成功模拟验证仍不构成真实证据验收或解除 HOLD。
+- 以上变更的 CI 验收以最新提交的实际 GitHub Actions 结果为准；未通过时不得声明测试完成。PR #129 继续 Draft，禁止合并、部署及实际生产迁移。
+
+
+## EXT-001 SQL attestation 后双来源再核验（CI-only）
+
+- issueFixtureExt001FromTwoSources 在取得隔离 SQL attester 的确定性正向响应后，重新执行两轮主存储/审计镜像读取及四类身份的验签状态核验；正常执行共计四轮模拟双来源读取。后核验要求证据摘要、审核版本及 E1/E2 字节与提交前完全一致。
+- 任一来源在模拟 SQL 返回后被撤权、固定版本文件被替换、镜像不可用或内容改变时均 fail closed，不返回成功响应。负向测试保留 SQL 已记录合成审计事件的事实，禁止把后核验失败冒充数据库自动回滚。
+- 此检查仍非跨系统原子事务；后核验与最终输出之间也有竞态窗口。没有真实 IAM、真实 WORM 存储或生产撤权证明。成功只表示注入的 CI fixture 一致。
+- EXT-001 继续 UNVERIFIED、production_evidence_collected=false、hold_active=true、release_eligible=false；PR #129 Draft / CI-only，不合并、不部署、不写真实业务。
+
+
+## EXT-001 异步签发的时钟防回退与过期再校验（CI-only）
+
+- 双来源签发入口现在必须传入可多次读取的模拟 clock；初始读取、每轮文件读取、SQL attester 调用前后及最终出参均核查同一时钟不得回退。测试用无时钟、失效及回退值全部 fail closed。
+- 对证据 envelope 和两个来源签署的 manifest 在每轮异步读取后重查有效期。SQL 返回后若来源或证据过期，不得返回合成成功结果；如隔离 SQL 已产生取证行，保留不可修改记录，不虚构回滚。
+- 此时钟是 CI 注入的逻辑值，不是生产可信授时；进程可控时间源与数据库 clock_timestamp() 并非跨系统原子一致。该加固不能解决最终校验之后的撤权/过期竞态，也不提供真实外部 IAM、WORM 或签署认证。
+- EXT-001 保持 UNVERIFIED；证据仍 NOT_COLLECTED / NOT_REVIEWED / NOT_SIGNED。HOLD、release_eligible=false、PR #129 Draft、CI-only、不合并、不部署。
+
+
+## EXT-001 对象版本与双见证摘要的 SQL 留痕（CI-only）
+
+- 合成 E1/E2 对象除要求独立路径、内容 SHA-256，还必须有不同的对象版本 ID；两份材料不可复用一个版本身份。签名正确但版本 ID 别名的清单也会拒绝。
+- 双来源版本读取通过时，以有域隔离的 SHA-256 记录完整签名 sourceProof（版本清单以及主存储、审计镜像两份见证签名）。调用隔离 PostgreSQL 的 source-aware attester；新增只追加 `fixture_iam_source_bindings`，与原始 `fixture_iam_provenance_proofs` 通过租户、EXT-001、递增版本关联。SQL 要求原始证据与来源绑定在同一查询事务内提交，冲突摘要、回填旧版及非法调用者均拒绝。普通写入角色没有该表读写或来源认证入口执行权限。
+- PostgreSQL CI 集成校验来源绑定摘要存储、冲突重试、普通角色越权、UPDATE/DELETE 拒绝、证据收据原流程及三个业务模块 HOLD 不变。
+- **限制明确**：该 SQL 来源摘要由隔离 attester 角色提供；数据库没有独立验证双来源 Ed25519 签名和外部 IAM。测试 attester 凭据被盗仍能制造形状正确但来源未经复核的摘要。旧的原始字节级 fixture attestation 路径仍存在，不能把来源专用入口声称为全库不可绕过的生产策略。SQL 触发器也不是外部不可篡改 WORM。
+- EXT-001=UNVERIFIED；真实文件、外部身份、组织责任和 UAT 尚未验收；`hold_active=true`、`release_eligible=false`、`merge_authorized=false`、`deploy_authorized=false`。PR #129 仅 Draft / CI-only，禁止合并部署。
+
+## EXT-001 SQL 来源 HMAC 独立认证边界（一次性 CI）
+
+- 原 SQL 来源认证只接受来源摘要，模拟 attester 角色可绕过 JS 提交伪造指纹。本阶段在 PostgreSQL 16 隔离库中加入不向普通或 attester 角色开放的 fixture_iam_source_auth_keys（32 字节临时随机测试密钥，按租户和版本区分）和 pgcrypto HMAC-SHA256 校验。
+- 双来源校验通过后，由注入的独立 CI 模拟 signer 通过 sourceAuthSigner 对域标识、租户、证据版本和收据、E1/E2 内容摘要、SECURITY/AUDIT 签名摘要、过期时间及完整双来源清单指纹签发 MAC。SQL 在执行追加写入之前核验 MAC；无密钥、错误版本、篡改参数和自造摘要均拒绝。认证角色无法直接 SELECT/UPDATE 密钥表。
+- 回归测试包含缺少 signer、格式错误 MAC、错误密钥版本、伪造 MAC、合法签名但来源指纹冲突和角色权限拒绝。所有成功模拟验证继续 HOLD。
+- 限制：CI runner 和模拟 signer 持有密钥，不能代替真正独立、受认证的生产验证服务。SQL 不自行验证真实 Ed25519 签名，旧的原始合成证据 attester 入口仍存在；没有 KMS/HSM、真实 IAM、外部不可变存储和跨系统原子撤权。这是隔离来源入口的局部收敛，不是全库或生产不可绕过授权。
+- EXT-001 继续 UNVERIFIED、NOT_COLLECTED、NOT_REVIEWED、NOT_SIGNED；hold_active=true、release_eligible=false、merge_authorized=false、deploy_authorized=false。PR #129 Draft / CI-only，禁止合并部署或发出真实通知。
+
+## EXT-001 旧版 SQL 入口封闭与密钥退役重放隔离（CI-only）
+
+- 旧版 fixture_attest_iam_provenance 的 EXECUTE 已从普通 v121_iam_provenance_attester 登录角色撤销，不能再独立创建没有双来源 HMAC 的认证记录。只有安全定义者拥有的 source-aware SQL 函数可内部调用核心函数；PostgreSQL 测试超级管理员仅用于播种历史版合成证据、验证旧回执和追加历史。它不代表任何正式生产访问流程。
+- fixture_iam_source_auth_keys 新增按机构限制唯一 ACTIVE 密钥版本的索引，并通过不可删除、不可修改密钥字节、不可从退役状态重新启用的触发器保证单向轮换。HMAC 核验发生在历史认证及来源指纹持久写入之前，已退役的旧版 MAC 不得在精确重试中被重新接受；新版本的有效 MAC 可对原始只追加证据完成确定性精确重试。
+- 负向 PostgreSQL 16 测试覆盖普通 attester 对旧入口权限拒绝、退役后旧密钥重放失败、退役密钥恢复拒绝、修改密钥拒绝、一个机构同时两把 ACTIVE 密钥拒绝、新版 MAC 旧版本号重放拒绝、重试不新增来源历史行。
+- 范围仍是测试数据库和模拟信任根：数据库所有者/超级用户能绕过测试限制；不提供真实 IAM 密钥所有权、外部 KMS/HSM、独立密钥托管和生产不可篡改证明。过期/撤权跨系统竞态、业务责任和外部 UAT 尚未通过。
+- EXT-001=UNVERIFIED，production_evidence_collected=false，hold_active=true，release_eligible=false。PR #129 Draft、CI-only，不合并不部署不发送真实通知。
+
+## EXT-001 密钥撤权并发、跨租户与签名服务故障隔离（CI-only）
+
+- 在一次性 PostgreSQL 16 隔离库内，来源认证 SQL 读取 active HMAC 密钥时使用 SELECT ... FOR SHARE 行锁。若管理员撤权 UPDATE 先取得行锁，认证查询必须等待并在提交后重新检查 active=false（失败关闭）；若认证先取得锁，撤权必须等认证事务提交后才能生效。行锁与当前事务的只追加审计写入一致，不宣称实现跨系统即时撤权或外部原子事务。
+- 并发负向集成测试覆盖撤权先持锁和认证先持锁两个方向，并通过 pg_stat_activity 观测实际锁等待，而非仅模拟并发调用。重复提交不增加来源审计行。
+- A 机构合成证据、来源清单和有效 MAC 尝试以 B 机构身份提交，必须被隔离认证入口拒绝；B 机构不能生成该组织的证据认证记录。这只是固化的测试组织范围，并非通用多租户 IAM 实现。
+- CI sourceAuthSigner 异步故障/拒绝时返回 V121_IAM_SOURCE_SIGNER_UNAVAILABLE，不进入 SQL；若来源身份或文件在 signer 异步处理期间发生撤权、替换，签名后再次双来源检查并在 SQL 前失败关闭。正常双来源模拟读取分为签名前、签名后、SQL 后三个阶段，各两轮读取，总共六轮；失败不自动回滚已经提交的 SQL 历史。
+- **限制：** 数据库管理员仍拥有临时密钥及旧版历史播种权限；CI signer 和数据库不构成生产级独立信任根。并发锁只保证该隔离数据库的本地事务顺序，跨服务撤权与最终响应之间仍存在窗口。EXT-001 继续 UNVERIFIED，HOLD=true、release_eligible=false，PR Draft / CI-only，不合并、不部署。
+
+## EXT-001 来源密钥不可变生命周期审计与历史校验（CI-only）
+
+- 新增隔离 SQL 表 fixture_iam_source_key_events。每次启用或撤销临时 HMAC 来源密钥时，数据库触发器在同一事务内只追加 ACTIVATED 或 REVOKED 事件，记录租户、递增事件序号、密钥版本、密钥 SHA-256 指纹、时间和前序事件摘要。不记录密钥原文。
+- 按租户加事务级 advisory lock 串行化审计事件追加；每一行的 event_digest 绑定版本、操作、时间、前序摘要及密钥指纹。首次事件的前序摘要为 64 个零。独立测试重新读取原始审计行并逐条重算哈希链。
+- 合约保留不可修改历史，UPDATE/DELETE 被测试库触发器拒绝；普通 writer 和 attester 对事件表没有直接 SELECT 权限。集成验收检查 v1/v2/v3 的启用及撤销共六条事件，连接重建后顺序、指纹和摘要一致；未提交的 v4 创建被事务回滚，不留下密钥或审计行。跨组织 B 没有组织 A 的事件。
+- 限制：这里的不可变性是 PostgreSQL 测试表权限加触发器，不是外部 WORM。数据库超级用户和同一控制域可以改动记录或重新计算哈希链，无法证明组织级身份独立性，也不具备生产密钥保管和签署证明。真正的外部审计锚、密钥管理、真实 IAM 及 UAT 仍需独立验收。
+- EXT-001=UNVERIFIED，production_evidence_collected=false、release_eligible=false、hold_active=true。PR #129 Draft / CI-only，禁止合并、部署及解除跨模块隔离。
+
+## EXT-001 来源密钥审计外部签名检查点（CI-only）
+
+- 为源密钥生命周期追加日志引入独立的 Ed25519 签名检查点帮助器，不需要持有任何 PostgreSQL 写入凭据。检查点固定机构、完整事件数、链头摘要、上一检查点签名指纹、独立签名者身份和签发/到期时间；签名内容采用固定字段顺序、域隔离编码。验证器从只读 SQL 查询重建全链，再用调用方独立维护的受信公钥验签。
+- CI 的签名密钥与检查点档案保存在测试进程的独立内存对象中，未写回数据库；模拟前一检查点（4 条事件）和后续检查点（6 条事件），检验历史前缀、事件数量、事件摘要和检查点指纹。只有此前保存的检查点才能作为后续验证的前锚，当前签名不得替代历史基线。
+- 负向测试覆盖 SQL 历史缩短、存在未锚定的新尾部、机构串改、受信签名者被撤销、签名篡改、已过期检查点、最低序列回退、密钥事件违规、旧检查点伪造，以及数据库管理者重新计算整条本地哈希链。即使本地链摘要自洽，已固定的外部签名仍必须检测到历史内容改变。
+- **真实生产架构未落地**：未来需要独立身份域的签名服务和 KMS/HSM 保护私钥、跨组织独立审计人、外部不可修改的保留期存储（WORM 或等价设施）、离线保全受信公钥/检查点索引、签发与时间戳证据、最小序列防回退锚及双人审批。还需对 KMS 断连、存储超时、延迟归档、跨区灾难和密钥撤销后的历史核验开展真实 UAT。
+- CI 独立内存 Map 和模拟签署者不能证明外部服务隔离，数据库只读查询也不能证明生产源不可篡改。任何外部检查点失效或来源审计不一致都必须保持 HOLD，不得自动重算基线、覆盖旧检查点或授权发布。所有返回持续 hold_active=true、release_eligible=false。
+- EXT-001=UNVERIFIED，真实 IAM/真实外部审计锚和组织签字仍 NOT_COLLECTED/NOT_REVIEWED/NOT_SIGNED；PR #129 Draft / CI-only，不合并、不部署、不解除任何销售、财务或教务隔离。
+

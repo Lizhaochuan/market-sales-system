@@ -77,3 +77,74 @@ hr{border:0;border-top:1px solid var(--border);margin:28px 0}
 .isolated-staff-signin{margin-top:20px;padding-top:20px;border-top:1px solid var(--border)}
 .isolated-staff-signin h2{font-size:15px;margin:0 0 10px}
 .strict-scope-note{padding:12px 17px;margin:18px 0 0;border:1px solid #bacfeb;border-radius:10px;background:#eef5ff;color:#26537d;font-weight:600;line-height:1.6}
+
+/* Opt-in fictional business workspace. */
+#business-workspace>.panel+.panel{margin-top:20px}
+#business-summary{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:24px}
+#business-summary .stat-card{padding:18px}
+#business-summary .stat-card strong{font-size:28px;overflow-wrap:anywhere}
+#business-workspace .audit-item{overflow-wrap:anywhere}
+#business-workspace .topbar-actions{flex-wrap:wrap;gap:8px;margin-top:12px}
+#business-extra-lines .business-quote-line{border-top:1px solid var(--border);padding-top:16px;margin-top:16px}
+.business-pipeline-card{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.business-pipeline-card>strong,.business-pipeline-card>input,.business-pipeline-card>button{grid-column:1/-1}
+.business-pipeline-card>select,.business-pipeline-card>input{width:100%;min-height:44px;padding:10px;border:1px solid var(--border);border-radius:8px;background:white}
+.form-hint.warning{background:#fdf3eb;color:#8f4d19;border:1px solid #f0cfb3}
+.session-pill{background:#edf4f2;color:#285f56}
+.session-pill.warning{background:#fdf1e7;color:#9b4512}
+.record-side{display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0}
+.record-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+button.compact-btn{padding:6px 10px;font-size:12px;border-radius:7px}
+#business-trial-presets{display:flex;flex-direction:column;gap:8px;margin-top:-6px}
+.trial-preset-row{display:flex;flex-wrap:wrap;gap:8px}
+.business-quote-line-head{font-size:12px;color:var(--teal-dark)}
+@media(max-width:780px){
+ .topbar-actions{flex-wrap:wrap;gap:8px}
+ .session-pill{display:inline-flex}
+ .record{align-items:flex-start;flex-direction:column}
+ .record-side{align-items:flex-start;width:100%}
+ .record-actions{justify-content:flex-start}
+ .sidebar-bottom{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px}
+ .sidebar-bottom .user-row{grid-column:1;min-width:0}
+ .sidebar-bottom .avatar{flex-shrink:0}
+ .sidebar-bottom #logout-button{grid-column:2;grid-row:1;white-space:nowrap;margin:0;padding:10px}
+ .sidebar-bottom>a,.sidebar-bottom>#student-access-entry,.sidebar-bottom>.fineprint{grid-column:1/-1;margin:0;margin-left:0}
+ #business-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #business-summary .stat-card{padding:12px}
+ #business-summary .stat-card strong{font-size:24px}
+}
+
+
+/* A lead is the daily sales workspace. */
+#lead-desk {max-width:1100px}
+#lead-desk .panel {margin-block:18px}
+#lead-desk summary {font-weight:700;font-size:1.1rem;cursor:pointer;padding:6px 0}
+#lead-desk details[open] summary {margin-bottom:20px}
+#lead-desk label {display:flex;flex-direction:column;gap:8px;margin-block:12px}
+.lead-row {padding:20px 0;border-bottom:1px solid var(--line,#e1e7eb);overflow-wrap:anywhere}
+.lead-row button {margin:6px 8px 6px 0}
+.lead-course-line {display:grid;grid-template-columns:2fr 1fr 1.4fr auto;gap:12px;align-items:end;margin-bottom:18px}
+#lead-desk input,#lead-desk select {min-width:0;width:100%}
+@media(max-width:780px){.lead-course-line{grid-template-columns:1fr 1fr}.lead-course-line label:first-child{grid-column:1/-1}}
+
+#sales-workflow {max-width:1160px}
+#sales-workflow .panel{margin-block:18px}
+#sales-workflow summary{cursor:pointer;font-weight:700;font-size:1.08rem;padding:8px 0}
+#sales-workflow details[open]>summary{margin-bottom:18px}
+#sales-workflow label{display:flex;flex-direction:column;gap:8px;margin-block:12px}
+#sales-workflow input,#sales-workflow select,#sales-workflow textarea{min-width:0;width:100%}
+#sales-workflow input[type=checkbox]{width:auto;align-self:start}
+#sales-workflow fieldset{border:1px solid #d9e5e8;border-radius:16px;padding:18px;margin-block:18px;min-width:0}
+#sales-workflow legend{font-weight:700;padding:0 8px}
+.v34-course{display:grid;grid-template-columns:1.5fr .7fr 1fr 1fr;gap:12px;align-items:end;border-bottom:1px solid #d9e5e8;padding-block:12px}
+#sales-workflow .lead-row>button{margin:6px}
+#sales-workflow textarea{min-height:90px}
+#sales-workflow .stat-card{padding:16px;border:1px solid #d9e5e8;border-radius:14px}
+@media(max-width:780px){.v34-course{grid-template-columns:1fr 1fr}.v34-course label:first-child{grid-column:1/-1}#sales-workflow fieldset{padding:12px}#sales-workflow .panel{padding:20px}}
+
+/* Task-focused role workspaces. One customer operation at a time. */
+.v35-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}
+.v35-action-card{min-height:88px;text-align:left;padding:20px;border:1px solid #cfdfdf;border-radius:16px;background:#fff;color:#176f67;font:inherit;font-weight:700;cursor:pointer}
+.v35-action-card:hover,.v35-action-card:focus-visible{background:#edf8f5;border-color:#187d73}
+#v34-tasks>.form-hint{font-weight:700}#v35-lookup .panel{margin-top:16px}
+@media(max-width:600px){.v35-action-grid{grid-template-columns:1fr}.v35-action-card{min-height:64px;padding:16px}}

@@ -3,8 +3,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { fail } from './auth.mjs';
 
+const validDemoSecret = expected => typeof expected==='string' &&
+  (expected.length>=32 || expected==='0' && process.env.MS_STAGE==='isolated-test');
+
 export function demoSecretMatches(input, expected) {
-  if(typeof expected!=='string'||expected.length<32) return false;
+  if(!validDemoSecret(expected)) return false;
   if(typeof input!=='string'||input.length>1024) return false;
   const candidate=createHmac('sha256',expected).update(input).digest();
   const correct=createHmac('sha256',expected).update(expected).digest();
@@ -21,10 +24,10 @@ export function demoToken(user,secret,issuer) {
   return header+'.'+payload+'.'+sig;
 }
 export async function demoLogin(c,body,{secret,issuer,devLoginSecret}) {
-  if(!devLoginSecret||typeof devLoginSecret!=='string'||devLoginSecret.length<32)
+  if(!validDemoSecret(devLoginSecret))
     fail(404,'NOT_FOUND','演示登录未启用');
   if(!body||typeof body!=='object'||Array.isArray(body)||
-    !['sales-a','sales-b','supervisor','supervisor-2'].includes(body.account_code)||
+    !['sales-a','sales-b','supervisor','supervisor-2','finance','market-a','market-b','market-manager','general-admin'].includes(body.account_code)||
     !demoSecretMatches(body.passphrase,devLoginSecret))
     fail(401,'AUTH_REQUIRED','演示账号或访问口令不正确');
   // The demo prefix ensures this endpoint cannot authenticate real staff.
@@ -36,9 +39,10 @@ export async function demoLogin(c,body,{secret,issuer,devLoginSecret}) {
   return {
     token:demoToken(r.rows[0],secret,issuer),
     display_name:r.rows[0].display_name,
-    role_label:body.account_code.startsWith('supervisor')?'主管':'销售顾问',
+    role_label:body.account_code==='general-admin'?'总管理者':body.account_code==='market-manager'?'市场主管':body.account_code.startsWith('market-')?'市场人员':body.account_code.startsWith('supervisor')?'主管':body.account_code==='finance'?'收款核实员':'销售顾问',
     account_code:body.account_code,
     expires_in_seconds:1800,
     stage:'isolated-test'
   };
 }
+

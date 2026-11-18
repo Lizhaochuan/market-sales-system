@@ -1,3 +1,4 @@
+import {workspaceAccess,guardWorkspaceRoute} from './role-workspaces.mjs';
 import { createServer } from 'node:http';
 import { randomUUID, createHash } from 'node:crypto';
 import { demoLogin } from './dev-login.mjs';
@@ -9,6 +10,7 @@ import { migratedLegacyReads, readLegacyViaStaffPool } from './scoped-legacy-rea
 import { migratedLegacyWrites, writeLegacyViaStaffPool } from './scoped-legacy-write-adapter.mjs';
 import { AppError, fail, verifyToken, staffContext, ownsStudent, ownsLead, ownsOpportunity, sameOrgStaff } from './auth.mjs';
 import {buildIsolatedChannelCatalog} from './marketing-channel-catalog.mjs';
+import {workspaceOperation} from './isolated-business-workspace.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const KEY=/^[a-zA-Z0-9_-]{16,128}$/;
@@ -16,6 +18,14 @@ function needId(x,name) { if(typeof x!=='string'||!UUID.test(x))fail(422,'VALIDA
 function needText(x,name,max=300) {
   if(typeof x!=='string'||!x.trim()||x.trim().length>max)fail(422,'VALIDATION_ERROR',name+'不能为空或长度超限');
   return x.trim();
+}
+function optionalText(x,name,max=1000) {
+  if(x==null)return null;
+  if(typeof x!=='string')fail(422,'VALIDATION_ERROR',name+'格式不正确');
+  const trimmed=x.trim();
+  if(!trimmed)return null;
+  if(trimmed.length>max)fail(422,'VALIDATION_ERROR',name+'长度不能超过'+max+'字');
+  return trimmed;
 }
 function object(x,fields) {
   if(!x||typeof x!=='object'||Array.isArray(x))fail(422,'VALIDATION_ERROR','请求内容格式不正确');
@@ -58,6 +68,9 @@ async function getContact(c,ctx,id) {
   return x;
 }
 const routeDefs=[
+  ['POST',/^\/api\/v1\/leads\/([0-9a-f-]+)\/source$/,'updateLeadSource'],
+  ['GET',/^\/api\/v1\/isolated-workspace\/([a-z-]+(?:\/[a-z0-9-]+){0,2})$/,'workspace'],
+  ['POST',/^\/api\/v1\/isolated-workspace\/([a-z-]+(?:\/[a-z0-9-]+){0,2})$/,'workspace'],
   ['POST',/^\/api\/v1\/students$/,'createStudent'],
   ['GET',/^\/api\/v1\/students$/,'listStudents'],
   ['GET',/^\/api\/v1\/contacts$/,'listContacts'],
@@ -154,12 +167,24 @@ const routeDefs=[
 ];
 async function handle(c,ctx,op,p,body,requestUrl) {
   const org=ctx.user.organization_id,actor=ctx.user.id;
+  if(op==='workspace')return workspaceOperation(c,ctx,{method:body===null?'GET':'POST',parts:p[0].split('/'),body});
   if(op.startsWith('identity'))return identityOperation(c,ctx,op,p,body);
   switch(op){
+    case 'updateLeadSource': {
+      if(ctx.v34Enabled)fail(409,'WORKFLOW_REQUIRED','新版客户来源修正须携带版本，请使用客户工作台');
+      object(body,['source']);
+      if(!['市场转入','主动咨询','家长转介绍','到店','网络咨询','其他','待确认'].includes(body.source))
+        fail(422,'VALIDATION_ERROR','请选择线索来源');
+      const lead=await ownsLead(c,ctx,needId(p[0],'线索'));
+      await c.query('SELECT id FROM ms.leads WHERE id=$1 FOR UPDATE',[lead.id]);
+      await audit(c,ctx,'lead',lead.id,'LEAD_SOURCE_UPDATED','销售调整当前来源',{}, {source:body.source});
+      return {lead_id:lead.id,current_source:body.source};
+    }
     case 'getMe': {
       return {
         staff_id:actor,display_name:ctx.user.display_name,
         organization_id:org,role_codes:ctx.roles,
+        ...(ctx.roleWorkspaces?{workspace_access:workspaceAccess(ctx)}:{}),
         capabilities:{
           view_own_students:true,
           manage_own_leads:true,
@@ -207,7 +232,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     }
     case 'listEvents': {
       const r=await c.query(
-        "SELECT e.id AS event_id,e.event_type,e.occurred_at,c.display_name AS contact_display_name "+
+        "SELECT e.id AS event_id,e.contact_id,e.event_type,e.occurred_at,e.original_source_text,c.display_name AS contact_display_name "+
         "FROM ms.contact_events e LEFT JOIN ms.contacts c ON c.id=e.contact_id "+
         "WHERE e.organization_id=$1 AND ($2::boolean OR e.recorded_by=$3) "+
         "ORDER BY e.occurred_at DESC,e.id LIMIT 100",
@@ -225,8 +250,34 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     }
     case 'listLeads': {
       const r=await c.query(
-        "SELECT l.id AS lead_id,l.lead_state,l.created_at,c.display_name AS contact_display_name "+
+        "SELECT l.id AS lead_id,l.contact_id,l.lead_state,l.created_at,"+
+        "c.display_name AS contact_display_name,"+
+        "e.event_type AS source_event_type,e.occurred_at AS source_occurred_at,"+
+        "e.original_source_text AS source_notes,"+
+        "(SELECT a.after_business_json->>'source' FROM ms.audit_events a WHERE a.organization_id=$1 "+
+        "AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='LEAD_SOURCE_UPDATED' "+
+        "ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS current_source,"+
+        "COALESCE((SELECT json_agg(json_build_object("+
+        "'student_id',s.id,'display_name',s.display_name,'confirmation_state',ls.confirmation_state"+
+        ") ORDER BY s.display_name,s.id) "+
+        "FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id "+
+        "WHERE ls.lead_id=l.id AND s.organization_id=$1 AND s.archived_at IS NULL "+
+        "AND ($2::boolean OR s.owner_user_id=$3 OR EXISTS ("+
+        "SELECT 1 FROM ms.data_scope_grants g WHERE g.user_id=$3 AND g.resource_type='student' "+
+        "AND g.scope_type='specific' AND g.scope_ref=s.id AND g.revoked_at IS NULL "+
+        "AND (g.expires_at IS NULL OR g.expires_at>now())))),'[]'::json) AS linked_students,"+
+        "COALESCE((SELECT json_agg(json_build_object("+
+        "'student_id',s.id,'display_name',s.display_name,'relation_type',sc.relation_type"+
+        ") ORDER BY s.display_name,s.id) "+
+        "FROM ms.student_contacts sc JOIN ms.students s ON s.id=sc.student_id "+
+        "WHERE l.contact_id IS NOT NULL AND sc.contact_id=l.contact_id AND sc.valid_to IS NULL "+
+        "AND s.organization_id=$1 AND s.archived_at IS NULL "+
+        "AND ($2::boolean OR s.owner_user_id=$3 OR EXISTS ("+
+        "SELECT 1 FROM ms.data_scope_grants g WHERE g.user_id=$3 AND g.resource_type='student' "+
+        "AND g.scope_type='specific' AND g.scope_ref=s.id AND g.revoked_at IS NULL "+
+        "AND (g.expires_at IS NULL OR g.expires_at>now())))),'[]'::json) AS contact_linked_students "+
         "FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id "+
+        "LEFT JOIN ms.contact_events e ON e.id=l.source_event_id AND e.organization_id=$1 "+
         "WHERE l.organization_id=$1 AND ($2::boolean OR l.owner_user_id=$3) "+
         "ORDER BY l.created_at DESC,l.id LIMIT 100",
         [org,ctx.manager,actor]);
@@ -293,17 +344,19 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       return {contact_id:x.id,display_name:name,do_not_contact:x.do_not_contact};
     }
     case 'createEvent': {
-      object(body,['contact_id','channel_id','event_type','occurred_at','source_evidence_ref']);
+      object(body,['contact_id','channel_id','event_type','occurred_at','source_evidence_ref','original_source_text']);
       const contact=body.contact_id?await getContact(c,ctx,body.contact_id):null;
       if(body.channel_id)await orgEntity(c,'marketing_channels',body.channel_id,org,'渠道');
       const when=Date.parse(body.occurred_at);
       if(!Number.isFinite(when))fail(422,'VALIDATION_ERROR','咨询发生时间格式不正确');
       const type=needText(body.event_type,'咨询类型',50);
-      const r=await c.query('INSERT INTO ms.contact_events(organization_id,contact_id,channel_id,event_type,occurred_at,source_evidence_ref,recorded_by)'+
-        ' VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-        [org,contact?.id||null,body.channel_id||null,type,new Date(when),sourceName(body.source_evidence_ref)||null,actor]);
-      await audit(c,ctx,'contact_event',r.rows[0].id,'CONTACT_EVENT_CREATED','登记了一次真实客户咨询');
-      return {event_id:r.rows[0].id};
+      const notes=optionalText(body.original_source_text,'咨询备注',1000);
+      const r=await c.query('INSERT INTO ms.contact_events(organization_id,contact_id,channel_id,event_type,occurred_at,source_evidence_ref,original_source_text,recorded_by)'+
+        ' VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+        [org,contact?.id||null,body.channel_id||null,type,new Date(when),sourceName(body.source_evidence_ref)||null,notes,actor]);
+      await audit(c,ctx,'contact_event',r.rows[0].id,'CONTACT_EVENT_CREATED',
+        notes?'登记了一次真实客户咨询（含沟通备注）':'登记了一次真实客户咨询');
+      return {event_id:r.rows[0].id,original_source_text:notes};
     }
     case 'linkContact': {
       object(body,['contact_id','relation_type','verification_state','is_primary','permission_basis_ref']);
@@ -324,6 +377,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       return {relationship_id:r.rows[0].id,student_id:student.id,contact_id:contact.id,verification_state:state};
     }
     case 'createLead': {
+      if(ctx.v34Enabled)fail(409,'WORKFLOW_REQUIRED','新 Lead 须同时安排首次联系，请使用新版工作台');
       object(body,['source_event_ref','contact_id','source_channel_id','notes']);
       const event=await orgEntity(c,'contact_events',body.source_event_ref,org,'咨询事件');
       if(!ctx.manager&&event.recorded_by!==actor)
@@ -523,10 +577,10 @@ async function handle(c,ctx,op,p,body,requestUrl) {
     default: fail(404,'NOT_FOUND','没有找到该业务接口');
   }
 }
-async function readJson(req){
+async function readJson(req,maxBytes=32768){
   const chunks=[];let size=0;
   for await(const chunk of req) {
-    size+=chunk.length;if(size>32768)fail(413,'PAYLOAD_TOO_LARGE','请求内容超过允许大小');
+    size+=chunk.length;if(size>maxBytes)fail(413,'PAYLOAD_TOO_LARGE','请求内容超过允许大小');
     chunks.push(chunk);
   }
   if(!size)fail(400,'VALIDATION_ERROR','请填写业务内容');
@@ -538,9 +592,13 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false,workspaceEnabled=false,v34Enabled=false,roleWorkspaces=false}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
+  if(roleWorkspaces&&!v34Enabled)throw new Error('Role workspaces require V3.4');
+  if(v34Enabled&&!workspaceEnabled)throw new Error('V3.4 requires opt-in isolated workspace');
+  if(workspaceEnabled&&(strictStaffMode||scopedReadPools!==undefined||scopedWritePools!==undefined))
+    throw new Error('Fictional planning workspace requires a separate disposable demo; scoped/strict pools cannot be used');
   // Explicit opt-in migration: legacy demo behavior is unchanged unless
   // dedicated employee pools have been configured by the trusted server.
   // Providing an empty Map deliberately denies ALL migrated reads.
@@ -571,11 +629,12 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         return;
       }
       if(url.pathname==='/api/v1/health'&&req.method==='GET'){
-        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode}},requestId);return;
+        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode,isolated_workspace:workspaceEnabled,sales_workflow_v34:v34Enabled,role_workspaces:roleWorkspaces}},requestId);return;
       }
       const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
         .find(x=>x.method===req.method&&x.match);
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
+      if(route.op==='workspace'&&!workspaceEnabled)fail(404,'NOT_FOUND','该隔离业务工作台未启用');
       // Channel maintenance is CI-only and requires approved strict staff logins.
       // Never run this through the broad tenant-level demo connection.
       if(!strictStaffMode&&['listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates','listCampaignCompensationResponsibilityMatrix','listCampaignCompensationEvidenceApprovalGates','listCampaignCompensationPacketFreezeGates','appendCampaignFinanceEscalationFollowup','reportCampaignFinanceIncident','triageCampaignFinanceIncident','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft'].includes(route.op))
@@ -602,7 +661,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       if(strictStaffMode&&!externalClaims)
         fail(403,'STAFF_AUTH_REQUIRED','严格员工模式只接受经审核的外部 RSA 身份');
       if(!externalClaims)identity=verifyToken(token,secret,issuer);
-      const body=req.method==='POST'?await readJson(req):null;
+      const body=req.method==='POST'?await readJson(req,v34Enabled&&route.op==='workspace'&&route.match[1].startsWith('workflow')?1_500_000:32768):null;
       const key=req.headers['idempotency-key'];
       if(req.method==='POST'&&(!KEY.test(key||'')))
         fail(422,'VALIDATION_ERROR','写入请求必须提供16至128位有效防重复编号');
@@ -616,7 +675,8 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         c=await pool.connect();
         await c.query('BEGIN');
         if(externalClaims)identity=await resolveExternalStaff(c,externalClaims);
-        ctx=await staffContext(c,identity);
+        ctx=await staffContext(c,identity);ctx.v34Enabled=v34Enabled;ctx.roleWorkspaces=roleWorkspaces;
+        guardWorkspaceRoute(ctx,route.op,route.match.slice(1));
       }
       // RLS tenant is bound to PostgreSQL SESSION_USER by a migration-owner
       // protected mapping; no request/session GUC can select another tenant.
@@ -700,3 +760,4 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
     } finally{if(c)c.release();}
   });
 }
+

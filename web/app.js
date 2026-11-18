@@ -1,12 +1,13 @@
 // Chinese-language demo UI. Data is always from the isolated API, never from
 // localStorage, hardcoded students, or a direct CRM/finance connection.
 const $=id=>document.getElementById(id);
-const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,campaignFinanceHandoffs:[],campaignFinanceLoadError:false,campaignFinanceIncidents:[],campaignIncidentLoadError:false,campaignIncidentHistory:[],campaignIncidentHistoryLoadError:false,campaignEscalationFollowups:[],campaignEscalationLoadError:false,campaignEscalationEvidence:[],campaignEvidenceLoadError:false,campaignAcceptancePrerequisites:[],campaignAcceptanceLoadError:false,campaignTrustFailureGates:[],campaignTrustFailureLoadError:false,campaignCompensationMatrix:[],campaignCompensationLoadError:false,campaignCompensationChecklist:[],campaignChecklistLoadError:false,campaignPacketFreezeGates:[],campaignPacketFreezeLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{}};
+const state={token:null,user:null,strict:false,view:'overview',channels:[],channelCatalog:null,channelLoadError:false,channelRequests:[],channelRequestLoadError:false,channelAuditHistory:[],channelAuditLoadError:false,campaignDrafts:[],campaignLoadError:false,campaignSalesReviews:[],campaignSalesLoadError:false,campaignFinanceHandoffs:[],campaignFinanceLoadError:false,campaignFinanceIncidents:[],campaignIncidentLoadError:false,campaignIncidentHistory:[],campaignIncidentHistoryLoadError:false,campaignEscalationFollowups:[],campaignEscalationLoadError:false,campaignEscalationEvidence:[],campaignEvidenceLoadError:false,campaignAcceptancePrerequisites:[],campaignAcceptanceLoadError:false,campaignTrustFailureGates:[],campaignTrustFailureLoadError:false,campaignCompensationMatrix:[],campaignCompensationLoadError:false,campaignCompensationChecklist:[],campaignChecklistLoadError:false,campaignPacketFreezeGates:[],campaignPacketFreezeLoadError:false,students:[],contacts:[],events:[],leads:[],opportunities:[],families:[],identityStaff:[],identityRequests:[],identityBindings:[],custodyRequests:[],custodyStaff:[],custodyActive:[],custodyReviews:[],relatedStudents:[],candidateConsultations:[],leadCandidates:[],readinessReviews:[],attributionDisputes:[],disputableCandidates:[],finalLeadConversions:[],leadStudentRequests:[],leadAdjustmentRequests:[],leadCorrectionNotes:[],studentLinkReviews:[],currentStudentLinks:[],downstreamCorrectionCases:[],downstreamCorrectionEligible:[],downstreamReconciliations:[],preferredEventId:null,preferredLeadId:null,capabilities:{},sessionExpiresAt:null,sessionLifetimeMs:0,countdownTimer:null,sessionWarn5m:false,sessionWarn1m:false,expiredDraft:null};
 const viewInfo={
   overview:['业务总览','工作概览'],channels:['获客管理','获客渠道'],campaigns:['获客管理','市场活动'],students:['客户管理','学生客户'],
   contacts:['客户管理','家长与联系人'],leads:['获客管理','咨询与线索'],
   opportunities:['销售管理','销售商机'],interactions:['客户沟通','跟进记录'],
-  families:['客户管理','家庭关系核实'],audit:['操作历史','业务变更记录'],identity:['访问安全','员工身份审批']
+  families:['客户管理','家庭关系核实'],audit:['操作历史','业务变更记录'],identity:['访问安全','员工身份审批'],
+  'business-workspace':['业务计划','业务计划与任务']
 };
 function toast(message,error=false){
   const el=$('toast');el.textContent=message;el.classList.toggle('error',error);el.hidden=false;
@@ -41,10 +42,63 @@ function localIso(value){
   return d.toISOString();
 }
 function setDefaultDate(){
+  if(!state.token)return;
   const d=new Date(),local=new Date(d.getTime()-d.getTimezoneOffset()*60000);
-  document.querySelectorAll('input[type="datetime-local"]').forEach(el=>{
+  document.querySelectorAll('#workspace input[type="datetime-local"]').forEach(el=>{
+    if(el.closest('#business-form')||el.closest('#campaign-workbench'))return;
     if(!el.value)el.value=local.toISOString().slice(0,16);
   });
+}
+function parseTokenExp(token){
+  if(typeof token!=='string')return null;
+  const parts=token.split('.');
+  if(parts.length<2)return null;
+  try{
+    const b64=parts[1].replace(/-/g,'+').replace(/_/g,'/');
+    const pad=b64+'==='.slice((b64.length+3)%4);
+    const bytes=Uint8Array.from(atob(pad),c=>c.charCodeAt(0));
+    const json=JSON.parse(new TextDecoder().decode(bytes));
+    return Number.isFinite(json?.exp)?json.exp*1000:null;
+  }catch{return null;}
+}
+function stopSessionCountdown(){
+  clearInterval(state.countdownTimer);state.countdownTimer=null;
+  state.sessionExpiresAt=null;state.sessionLifetimeMs=0;
+  state.sessionWarn5m=false;state.sessionWarn1m=false;
+  const pill=$('session-countdown');
+  if(pill){pill.hidden=true;pill.classList.remove('warning');pill.textContent='会话剩余 30:00';}
+}
+function updateSessionCountdown(){
+  const pill=$('session-countdown');
+  if(!state.token||!state.sessionExpiresAt){stopSessionCountdown();return;}
+  const remainingMs=Math.max(0,state.sessionExpiresAt-Date.now());
+  const secs=Math.ceil(remainingMs/1000);
+  if(pill){
+    pill.hidden=false;
+    pill.classList.toggle('warning',secs<=300);
+    if(secs<=0){
+      pill.textContent='会话已过期，请重新登录';
+    }else{
+      const mm=String(Math.floor(secs/60)).padStart(2,'0');
+      const ss=String(secs%60).padStart(2,'0');
+      pill.textContent='会话剩余 '+mm+':'+ss;
+    }
+  }
+  if(state.sessionLifetimeMs>360_000&&!state.sessionWarn5m&&remainingMs<=300_000&&remainingMs>60_000){
+    state.sessionWarn5m=true;
+    toast('演示登录将在 5 分钟内过期，请注意先保存当前草稿');
+  }else if(state.sessionLifetimeMs>120_000&&!state.sessionWarn1m&&remainingMs<=60_000&&remainingMs>0){
+    state.sessionWarn1m=true;
+    toast('演示登录即将于 1 分钟内过期，请尽快保存表单',true);
+  }
+}
+function startSessionCountdown(expiresAt){
+  stopSessionCountdown();
+  if(!Number.isFinite(expiresAt))return;
+  state.sessionExpiresAt=expiresAt;
+  state.sessionLifetimeMs=Math.max(0,expiresAt-Date.now());
+  updateSessionCountdown();
+  state.countdownTimer=setInterval(updateSessionCountdown,1000);
 }
 function option(value,text){
   const x=document.createElement('option');x.value=value;x.textContent=text;return x;
@@ -56,12 +110,54 @@ function setSelect(el,items,valueKey,labelFn,allowEmpty=false){
   for(const item of items)el.append(option(item[valueKey],labelFn(item)));
   if([...el.options].some(o=>o.value===previous))el.value=previous;
 }
+function syncLeadLinkCandidate(autoSelect=false){
+  const form=$('lead-link-form');if(!form)return;
+  const leadSelect=form.elements.lead_id,studentSelect=form.elements.student_id,hint=$('lead-link-candidate-hint');
+  const lead=state.leads.find(x=>x.lead_id===leadSelect.value);
+  if(!lead||!hint){if(hint){hint.hidden=true;hint.textContent='';}return;}
+  const linked=lead.linked_students||[];
+  const linkedIds=new Set(linked.map(s=>s.student_id));
+  const candidates=(lead.contact_linked_students||[]).filter(s=>!linkedIds.has(s.student_id));
+  if(candidates.length===1){
+    const only=candidates[0];
+    if(autoSelect&&[...studentSelect.options].some(o=>o.value===only.student_id)){
+      studentSelect.value=only.student_id;
+    }
+    hint.textContent='第一步已将该联系人关联至学生「'+only.display_name+'」（'+only.relation_type+'），已自动预选；仍须填写核实依据并保存（保留学生独立身份）。';
+    hint.hidden=false;
+  }else if(candidates.length>1){
+    hint.textContent='该联系人第一步已关联 '+candidates.length+' 名学生（'+candidates.map(s=>s.display_name).join('、')+'），请按本次咨询手动确认对应学生。';
+    hint.hidden=false;
+  }else if(linked.length>0){
+    hint.textContent='当前线索已关联学生：'+linked.map(s=>s.display_name+'（'+(s.confirmation_state==='verified'?'已核实':'待核实')+'）').join('、')+'。';
+    hint.hidden=false;
+  }else{
+    hint.hidden=true;hint.textContent='';
+  }
+}
+function openOpportunityForStudent(studentId,lead){
+  setView('opportunities');
+  const form=$('opportunity-form');
+  const select=form?.elements.student_id;
+  if(select&&[...select.options].some(o=>o.value===studentId))select.value=studentId;
+  const student=state.students.find(s=>s.student_id===studentId);
+  const hint=$('opportunity-carry-hint');
+  if(hint){
+    const parts=['已从销售线索带入学生「'+(student?.display_name||'已选学生')+'」'];
+    if(lead?.source_notes)parts.push('原咨询备注：'+lead.source_notes);
+    parts.push('可直接填写预计金额并创建独立销售商机。');
+    hint.textContent=parts.join('；');
+    hint.hidden=false;
+  }
+  form?.scrollIntoView({block:'start'});
+  form?.elements.predicted_yuan?.focus();
+}
 function fillOptions(){
   const defs={
     students:[state.students,'student_id',v=>v.display_name],
     contacts:[state.contacts,'contact_id',v=>v.display_name],
-    events:[state.events,'event_id',v=>(v.contact_display_name||'未知联系人')+' · '+v.event_type+' · '+formatDate(v.occurred_at)],
-    leads:[state.leads,'lead_id',v=>'线索 · '+(v.contact_display_name||'未指定联系人')+' · '+labelStatus(v.lead_state)],
+    events:[state.events,'event_id',v=>(v.contact_display_name||'未知联系人')+' · '+v.event_type+' · '+formatDate(v.occurred_at)+(v.original_source_text?'（'+(v.original_source_text.length>24?v.original_source_text.slice(0,24)+'…':v.original_source_text)+'）':'')],
+    leads:[state.leads,'lead_id',v=>'线索 · '+(v.contact_display_name||'未指定联系人')+' · '+(v.linked_students?.length?('已关联 '+v.linked_students.map(s=>s.display_name).join('、')):labelStatus(v.lead_state))],
     candidateConsultations:[state.candidateConsultations,'event_id',
       v=>v.contact_name+' · '+v.event_type+' · '+formatDate(v.occurred_at)],
     eligibleLeadCandidates:[state.leadCandidates.filter(v=>v.status==='reviewed_eligible'),
@@ -123,15 +219,20 @@ function fillOptions(){
     if([...select.options].some(o=>o.value===state.preferredEventId))select.value=state.preferredEventId;
     state.preferredEventId=null;
   }
+  let autoSelectCandidate=false;
   if(state.preferredLeadId){
     const select=document.querySelector('#lead-link-form select[name="lead_id"]');
-    if([...select.options].some(o=>o.value===state.preferredLeadId))select.value=state.preferredLeadId;
+    if([...select.options].some(o=>o.value===state.preferredLeadId)){
+      select.value=state.preferredLeadId;
+      autoSelectCandidate=true;
+    }
     state.preferredLeadId=null;
   }
   setSelect($('family-review-select'),
     state.families.filter(v=>v.verification_state==='pending'), 
     'family_group_id',v=>v.display_name+'（申请人：'+(v.requested_by_name||'待核实')+'）');
   fillAuditSelect();
+  syncLeadLinkCandidate(autoSelectCandidate);
 }
 function fillAuditSelect(){
   const ty=$('audit-type').value;
@@ -151,12 +252,23 @@ function node(tag,className,text){
   if(text!=null)el.textContent=String(text);
   return el;
 }
-function record(title,details,annotation,symbol='•'){
+function record(title,details,annotation,symbol='•',actions=[]){
   const el=node('div','record'),lhs=node('div','record-left');
   const icon=node('span','record-icon',symbol),b=node('div');
   b.append(node('div','record-name',title),node('div','record-meta',details));
   lhs.append(icon,b);
-  el.append(lhs,node('span','record-end',annotation));return el;
+  if(!actions.length){
+    el.append(lhs,node('span','record-end',annotation));return el;
+  }
+  const side=node('div','record-side'),actRow=node('div','record-actions');
+  for(const act of actions){
+    const btn=node('button','secondary compact-btn',act.label);
+    btn.type='button';
+    btn.addEventListener('click',act.onClick);
+    actRow.append(btn);
+  }
+  side.append(node('span','record-end',annotation),actRow);
+  el.append(lhs,side);return el;
 }
 function paint(id,items,make){
   const parent=$(id);parent.replaceChildren();
@@ -597,12 +709,82 @@ function render(){
       '本员工登记的实际咨询 · '+formatDate(x.occurred_at),
       '已登记，不代表已形成销售线索','询'));
   }
-  paint('leads-list',state.leads,x=>record(
-    x.contact_display_name||'未指定联系人','创建时间：'+formatDate(x.created_at),labelStatus(x.lead_state),'询'));
+  const demoEventsCard=$('demo-events-card');
+  if(demoEventsCard){
+    demoEventsCard.hidden=state.strict;
+    if($('events-total'))$('events-total').textContent=state.events.length+' 条';
+    if(!state.strict&&$('events-list'))paint('events-list',state.events,x=>{
+      const details=['咨询时间：'+formatDate(x.occurred_at)];
+      if(x.original_source_text)details.push('沟通备注：'+x.original_source_text);
+      return record(
+        (x.contact_display_name||'未指定联系人')+' · '+x.event_type,
+        details.join(' · '),
+        x.original_source_text?'已记备注':'已登记','询');
+    });
+  }
+  paint('leads-list',state.leads,x=>{
+    const linked=Array.isArray(x.linked_students)?x.linked_students:[];
+    const linkedIds=new Set(linked.map(s=>s.student_id));
+    const candidates=(Array.isArray(x.contact_linked_students)?x.contact_linked_students:[])
+      .filter(s=>!linkedIds.has(s.student_id));
+    const details=['创建时间：'+formatDate(x.created_at)];
+    if(x.source_event_type)details.push('来源咨询：'+x.source_event_type);
+    if(x.source_notes)details.push('咨询备注：'+x.source_notes);
+    if(linked.length){
+      details.push('已关联学生：'+linked.map(s=>s.display_name+'（'+(s.confirmation_state==='verified'?'已核实':'待核实')+'）').join('、'));
+    }else if(candidates.length===1){
+      details.push('联系人已关联学生：'+candidates[0].display_name+'（'+candidates[0].relation_type+'），请在“关联线索与具体学生”确认');
+    }else if(candidates.length>1){
+      details.push('联系人第一步已关联 '+candidates.length+' 名学生（'+candidates.map(s=>s.display_name).join('、')+'），请按本次咨询手动确认');
+    }
+    const badge=linked.length
+      ?(linked.some(s=>s.confirmation_state==='verified')?'已关联学生（已核实）':'已关联学生（待核实）')
+      :labelStatus(x.lead_state);
+    const actions=[];
+    if(!state.strict){
+      if(linked.length){
+        for(const s of linked){
+          actions.push({
+            label:'去建商机（'+s.display_name+'） →',
+            onClick:()=>openOpportunityForStudent(s.student_id,x)
+          });
+        }
+      }else{
+        actions.push({
+          label:'带入关联表单',
+          onClick:()=>{
+            const form=$('lead-link-form');if(!form)return;
+            form.elements.lead_id.value=x.lead_id;
+            syncLeadLinkCandidate(true);
+            form.scrollIntoView({block:'start'});
+            if(!form.elements.student_id.value)form.elements.student_id.focus();
+            else form.elements.evidence_ref.focus();
+          }
+        });
+      }
+    }
+    const card=record(x.contact_display_name||'未指定联系人',details.join(' · '),badge,'询',actions);
+    if(!state.strict){
+      const label=node('label','','当前来源'),source=node('select');
+      source.setAttribute('aria-label','当前线索来源');
+      source.append(option('','请选择来源'));
+      for(const name of ['市场转入','主动咨询','家长转介绍','到店','网络咨询','其他','待确认'])source.append(option(name,name));
+      source.value=x.current_source||'';
+      source.addEventListener('change',async()=>{const previous=x.current_source||'';source.disabled=true;
+        try{await api('/api/v1/leads/'+x.lead_id+'/source',{method:'POST',body:{source:source.value}});x.current_source=source.value;toast('来源已更新');}
+        catch(e){source.value=previous;toast(e.message,true);}finally{source.disabled=false;}});
+      label.append(source);card.append(label);
+    }
+    return card;
+  });
   paint('opportunities-list',state.opportunities,x=>record(
     (x.student_display_name||'指定学生')+'的商机',
     '负责人：'+(x.owner_display_name||'待确认')+' · 预计金额：'+yuan(x.predicted_amount_cents),
-    labelStatus(x.lifecycle_state),'商'));
+    labelStatus(x.lifecycle_state),'商',state.strict?[]:[
+      {label:'记跟进',onClick:()=>window.__openBusinessAction?.('tasks',x.student_id,x.opportunity_id)},
+      {label:'约试听',onClick:()=>window.__openBusinessAction?.('trials',x.student_id,x.opportunity_id)},
+      {label:'做报价',onClick:()=>window.__openBusinessAction?.('quotes',x.student_id,x.opportunity_id)}
+    ]));
   paint('families-list',state.families,x=>record(
     x.display_name,'关联学生：'+x.student_count+' 名 · 申请人：'+
       (x.requested_by_name||'原申请待查')+
@@ -732,12 +914,17 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
   const res=await fetch(path,{method,headers,cache:'no-store',...(body!==null?{body:JSON.stringify(body)}:{})});
   let result;try{result=await res.json();}catch{throw Error('服务器未返回可识别的业务结果');}
   if(!res.ok||result.code!=='OK'){
-    if(res.status===401&&token===state.token&&state.token){logout(false);throw Error('当前登录已过期，请重新进入演示工作台');}
-    throw Error(result.message||'操作未完成，请查看状态');
+    if(res.status===401&&token===state.token&&state.token){logout('expired');throw Error('当前登录已过期，请重新进入演示工作台');}
+    throw Object.assign(Error(result.message||'操作未完成，请查看状态'),{status:res.status});
   }
   return result.data;
 }
 async function refresh(){
+  if(state.user?.workspace_access?.enabled&&!state.strict){
+    state.students=[];state.contacts=[];state.events=[];state.leads=[];state.opportunities=[];
+    if(typeof window.__refreshBusinessWorkspace==='function')await window.__refreshBusinessWorkspace();
+    return;
+  }
   const endpoints=state.strict?[
     ['campaignDrafts','/api/v1/marketing-campaigns/drafts'],
     ['campaignSalesReviews','/api/v1/marketing-campaigns/sales-reviews'],
@@ -1173,18 +1360,111 @@ async function refresh(){
   }
   render();
   await refreshIdentity();
+  if(typeof window.__refreshBusinessWorkspace==='function'){
+    await window.__refreshBusinessWorkspace();
+  }else{
+    window.dispatchEvent(new Event('isolated-session-change'));
+  }
 }
 function setView(view){
   state.view=view;
   document.querySelectorAll('button[data-view]').forEach(x=>x.classList.toggle('active',x.dataset.view===view));
+  if($('workspace-business-nav'))$('workspace-business-nav').classList.toggle('active',view==='business-workspace');
   document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.dataset.panel===view));
   const [eyebrow,title]=viewInfo[view]||viewInfo.overview;
   $('page-eyebrow').textContent=eyebrow;$('page-title').textContent=title;
   document.title=title+' · 市场与销售工作台';
   if(view==='audit')$('audit-list').replaceChildren();
 }
+function snapshotMainForms(){
+  const out={};
+  document.querySelectorAll('#workspace form').forEach(form=>{
+    if(!form.id||form.id==='business-form'||form.id==='audit-form'||form.closest('#lead-desk, #sales-workflow'))return;
+    const touchedText=[...form.elements].some(el=>{
+      if(!el.name||el.disabled||el.type==='hidden'||el.type==='submit'||el.type==='button')return false;
+      if(el.type==='checkbox'||el.type==='radio')return el.checked!==el.defaultChecked;
+      if(el.tagName==='SELECT'||el.type==='datetime-local')return false;
+      return el.value!==el.defaultValue&&el.value.trim()!=='';
+    });
+    if(form.dataset.userDirty!=='1'&&!touchedText)return;
+    const fields={};
+    for(const el of form.elements){
+      if(!el.name||el.disabled||el.type==='hidden'||el.type==='submit'||el.type==='button')continue;
+      if(el.type==='checkbox')fields[el.name]=el.checked;
+      else if(el.tagName==='SELECT'&&el.multiple)continue;
+      else fields[el.name]=el.value;
+    }
+    if(Object.keys(fields).length)out[form.id]=fields;
+  });
+  return out;
+}
+async function restoreExpiredDraft(draft){
+  if(!draft)return false;
+  let restored=false;
+  if(draft.leadDraft&&typeof window.__restoreLeadDraft==='function'){
+    if(await window.__restoreLeadDraft(draft.leadDraft))restored=true;
+  }
+  if(draft.mainForms){
+    for(const [formId,fields] of Object.entries(draft.mainForms)){
+      const form=$(formId);if(!form)continue;
+      for(const [name,val] of Object.entries(fields)){
+        const el=form.elements[name];if(!el||el.disabled)continue;
+        if(el.type==='checkbox'){el.checked=!!val;restored=true;}
+        else if(el.tagName==='SELECT'){
+          if([...el.options].some(o=>o.value===val)){el.value=val;restored=true;}
+        }else{
+          el.value=String(val);restored=true;
+        }
+      }
+      if(restored)form.dataset.userDirty='1';
+      if(formId==='lead-link-form')syncLeadLinkCandidate(false);
+    }
+  }
+  if(draft.businessDraft&&typeof window.__restoreBusinessDraft==='function'){
+    if(await window.__restoreBusinessDraft(draft.businessDraft))restored=true;
+  }
+  if(restored&&draft.view){
+    if(draft.view==='business-workspace'){
+      if(!$('workspace-business-nav')?.hidden){
+        setView('business-workspace');
+      }
+    }else{
+      const navBtn=document.querySelector('button[data-view="'+draft.view+'"]');
+      if(navBtn&&!navBtn.hidden)setView(draft.view);
+    }
+  }
+  return restored;
+}
 function logout(notice=true){
+  stopSessionCountdown();
+  if(notice==='expired'&&state.user?.staff_id){
+    const businessDraft=typeof window.__snapshotBusinessDraft==='function'?window.__snapshotBusinessDraft():null;
+    const mainForms=snapshotMainForms();
+    const leadDraft=typeof window.__snapshotLeadDraft==='function'?window.__snapshotLeadDraft():null;
+    if(businessDraft||leadDraft||Object.keys(mainForms).length){
+      state.expiredDraft={
+        staffId:state.user.staff_id,strict:state.strict,
+        view:state.view,businessDraft,mainForms,leadDraft
+      };
+    }else state.expiredDraft=null;
+  }else{
+    state.expiredDraft=null;
+  }
+  const noticeEl=$('session-expired-notice');
+  if(noticeEl){
+    if(notice==='expired'){
+      const who=state.user?.display_name||'原员工';
+      noticeEl.textContent=state.expiredDraft
+        ?'当前演示登录已过期（30 分钟会话超时）。未保存的草稿已暂存本地内存；由原员工「'+who+'」重新登录后将自动恢复，切换其他账号会自动清空。'
+        :'当前演示登录已过期（30 分钟会话超时），请重新登录。';
+      noticeEl.hidden=false;
+    }else{
+      noticeEl.hidden=true;noticeEl.textContent='';
+    }
+  }
+  window.dispatchEvent(new Event('isolated-session-clear'));
   state.token=null;state.user=null;state.capabilities={};state.strict=false;
+  state.preferredEventId=null;state.preferredLeadId=null;
   state.channels=[];state.channelCatalog=null;state.channelLoadError=false;
   state.campaignDrafts=[];state.campaignLoadError=false;
   state.campaignSalesReviews=[];state.campaignSalesLoadError=false;
@@ -1263,12 +1543,24 @@ function logout(notice=true){
   $('channels-list').replaceChildren();
   $('channels-total').textContent='0 条';
   $('channels-status').textContent='未登录，渠道目录已清空。';
+  if($('events-list'))$('events-list').replaceChildren();
+  if($('events-total'))$('events-total').textContent='0 条';
+  if($('lead-link-candidate-hint')){$('lead-link-candidate-hint').hidden=true;$('lead-link-candidate-hint').textContent='';}
+  if($('opportunity-carry-hint')){$('opportunity-carry-hint').hidden=true;$('opportunity-carry-hint').textContent='';}
+  if($('student-access-note'))$('student-access-note').hidden=true;
+  if($('student-access-entry'))$('student-access-entry').setAttribute('aria-expanded','false');
   applyStrictLayout();
   for(const key of ['students','contacts','events','leads','opportunities','families','identityStaff','identityRequests','identityBindings','custodyRequests','custodyStaff','custodyActive','custodyReviews','relatedStudents','candidateConsultations','leadCandidates','readinessReviews','attributionDisputes','disputableCandidates','finalLeadConversions','leadStudentRequests','leadAdjustmentRequests','leadCorrectionNotes','studentLinkReviews','currentStudentLinks','downstreamCorrectionCases','downstreamCorrectionEligible','downstreamReconciliations'])state[key]=[];
+  document.querySelectorAll('#workspace form').forEach(form=>{
+    form.reset();
+    delete form.dataset.userDirty;
+  });
+  document.querySelectorAll('#workspace input[type="datetime-local"]').forEach(el=>{el.value='';});
   document.querySelectorAll('[data-manager-only]').forEach(el=>el.hidden=true);
   $('workspace').hidden=true;$('login-screen').hidden=false;
   $('login-form').reset();$('external-login-form').reset();$('audit-list').replaceChildren();
-  if(notice)toast('已退出演示账号');
+  if(notice==='expired')toast('当前登录已过期，请重新进入演示工作台',true);
+  else if(notice)toast('已退出演示账号');
 }
 function applyStrictLayout(){
   const allowed=new Set(['overview','students','contacts','leads','channels','campaigns']);
@@ -1278,6 +1570,14 @@ function applyStrictLayout(){
   }
   const contactLink=$('contact-link-form');
   if(contactLink)contactLink.closest('.panel').hidden=false;
+  const demoEvents=$('demo-events-card');
+  if(demoEvents)demoEvents.hidden=state.strict;
+  const notesRow=$('event-notes-row');
+  if(notesRow){
+    notesRow.hidden=state.strict;
+    const textarea=notesRow.querySelector('textarea');
+    if(textarea)textarea.disabled=state.strict;
+  }
   // Consultation is now migrated; generating leads and linking leads to
   // children remain blocked server-side and hidden in the strict test UI.
   const leadForm=$('lead-form');
@@ -1290,7 +1590,7 @@ function applyStrictLayout(){
     '先记录一次真实咨询，再形成线索；还不知道学生是谁时也可以登记。';
   $('strict-scope-note').hidden=!state.strict;
 }
-function register(id,action){
+function register(id,action,{postRefresh=true}={}){
   const form=$(id);
   form.addEventListener('submit',async e=>{
     e.preventDefault();
@@ -1299,7 +1599,9 @@ function register(id,action){
     try{
       const data=Object.fromEntries(new FormData(form).entries());
       const out=await action(data);
-      form.reset();setDefaultDate();await refresh();
+      form.reset();
+      delete form.dataset.userDirty;
+      if(postRefresh){setDefaultDate();await refresh();}
       toast(out||'操作已保存');
     }catch(err){toast(err.message||'操作未完成',true);}
     finally{submit.disabled=false;}
@@ -1313,40 +1615,58 @@ register('login-form',async data=>{
   });
   const payload=await res.json();
   if(!res.ok||payload.code!=='OK')throw Error(payload.message||'演示登录失败');
-  state.token=payload.data.token;
-  const profile=await api('/api/v1/me');
+  const nextToken=payload.data.token;
+  const profile=await api('/api/v1/me',{token:nextToken});
+  const pendingDraft=state.expiredDraft;
+  state.expiredDraft=null;
+  state.token=nextToken;
   state.user={...payload.data,...profile};
   state.capabilities=profile.capabilities||{};
   state.strict=false;applyStrictLayout();
+  const exp=parseTokenExp(nextToken)||(Number.isFinite(payload.data.expires_in_seconds)?Date.now()+payload.data.expires_in_seconds*1000:null);
+  startSessionCountdown(exp);
+  $('session-expired-notice').hidden=true;$('session-expired-notice').textContent='';
   $('staff-name').textContent=payload.data.display_name;
   $('staff-role').textContent=payload.data.role_label;
   $('avatar').textContent=payload.data.display_name.slice(0,1);
   $('login-screen').hidden=true;$('workspace').hidden=false;
   setView('overview');
+  setDefaultDate();
   await refresh();
+  if(pendingDraft&&pendingDraft.staffId===profile.staff_id&&pendingDraft.strict===state.strict){
+    const restored=await restoreExpiredDraft(pendingDraft);
+    if(restored)return '已恢复刚才未保存的草稿，请注意及时保存';
+  }
   return '已进入虚构数据演示工作台';
-});
+},{postRefresh:false});
 // A second, local-only test entrypoint to the same Chinese workbench.
  // It does NOT implement OIDC authorization-code/PKCE/MFA or production SSO.
 register('external-login-form',async d=>{
   const signed=d.signed_token?.trim();
   if(!signed||signed.length>8192)throw Error('员工测试签名凭据无效');
+  const profile=await api('/api/v1/me',{token:signed});
+  const pendingDraft=state.expiredDraft;
+  state.expiredDraft=null;
   state.token=signed;
-  let profile;
-  try{profile=await api('/api/v1/me');}
-  catch(e){state.token=null;throw e;}
   state.user=profile;
   state.capabilities=profile.capabilities||{};
   state.strict=state.capabilities.strict_employee_mode===true;
   applyStrictLayout();
+  startSessionCountdown(parseTokenExp(signed));
+  $('session-expired-notice').hidden=true;$('session-expired-notice').textContent='';
   $('staff-name').textContent=profile.display_name;
   $('staff-role').textContent=state.strict?'已核实测试员工 · 低权限模式':'已核实测试员工';
   $('avatar').textContent=profile.display_name.slice(0,1);
   $('login-screen').hidden=true;$('workspace').hidden=false;
   setView('overview');
+  setDefaultDate();
   await refresh();
+  if(pendingDraft&&pendingDraft.staffId===profile.staff_id&&pendingDraft.strict===state.strict){
+    const restored=await restoreExpiredDraft(pendingDraft);
+    if(restored)return '已恢复刚才未保存的草稿，请注意及时保存';
+  }
   return state.strict?'已进入员工专属数据库严格权限测试模式':'已通过外部签名验证（隔离环境）';
-});
+},{postRefresh:false});
 $('channel-request-form').elements.action.addEventListener('change',()=>{
   channelFormFields();
   renderChannelMaintenance();
@@ -1763,11 +2083,16 @@ register('downstream-second-review-form',async d=>{
     '已保留销售隔离，等待跨模块负责人另行完成实际纠错';
 });
 register('event-form',async d=>{
-  const created=await api('/api/v1/contact-events',{method:'POST',body:{
+  const body={
     contact_id:d.contact_id,event_type:d.event_type,occurred_at:localIso(d.occurred_at)
-  }});
+  };
+  const notes=typeof d.original_source_text==='string'?d.original_source_text.trim():'';
+  if(!state.strict&&notes)body.original_source_text=notes;
+  const created=await api('/api/v1/contact-events',{method:'POST',body});
   state.preferredEventId=created.event_id;
-  return '一次真实咨询已登记，已自动选中本次咨询用于下一步创建线索';
+  return notes
+    ?'一次真实咨询及沟通备注已登记，已自动选中本次咨询用于下一步创建线索'
+    :'一次真实咨询已登记，已自动选中本次咨询用于下一步创建线索';
 });
 register('lead-form',async d=>{
   const lead=await api('/api/v1/leads',{method:'POST',body:{source_event_ref:d.source_event_ref}});
@@ -1776,7 +2101,7 @@ register('lead-form',async d=>{
 });
 register('lead-link-form',async d=>{
   await api('/api/v1/leads/'+encodeURIComponent(d.lead_id)+'/students',{method:'POST',body:{
-    student_ids:[d.student_id],evidence_ref:d.evidence_ref,confirmation_state:'pending_review'
+    student_ids:[d.student_id],evidence_ref:d.evidence_ref.trim()||'依据未填写（待核实）',confirmation_state:'pending_review'
   }});
   return '线索与学生已建立待核实关联';
 });
@@ -1784,6 +2109,8 @@ register('opportunity-form',async d=>{
   const body={student_id:d.student_id};
   if(d.predicted_yuan.trim())body.predicted_amount_cents=cents(d.predicted_yuan.trim());
   await api('/api/v1/opportunities',{method:'POST',body});
+  const hint=$('opportunity-carry-hint');
+  if(hint){hint.hidden=true;hint.textContent='';}
   return '已建立该学生的独立销售商机';
 });
 register('interaction-form',async d=>{
@@ -1837,15 +2164,30 @@ $('family-review-select').addEventListener('change',()=>{
     !state.capabilities.decide_other_person_family_review||
     !chosen||chosen.verification_state!=='pending'||chosen.requested_by===state.user?.staff_id;
 });
+$('lead-link-form').elements.lead_id.addEventListener('change',()=>syncLeadLinkCandidate(true));
+$('student-access-entry')?.addEventListener('click',()=>{
+  const note=$('student-access-note'),btn=$('student-access-entry');
+  if(!note||!btn)return;
+  note.hidden=!note.hidden;
+  btn.setAttribute('aria-expanded',String(!note.hidden));
+});
+$('workspace').addEventListener('input',e=>{
+  const form=e.target?.closest?.('form');
+  if(form&&form.id!=='business-form'&&form.id!=='audit-form')form.dataset.userDirty='1';
+});
+$('workspace').addEventListener('change',e=>{
+  const form=e.target?.closest?.('form');
+  if(form&&form.id!=='business-form'&&form.id!=='audit-form')form.dataset.userDirty='1';
+});
 $('audit-type').addEventListener('change',fillAuditSelect);
 $('refresh-button').addEventListener('click',()=>refresh().then(()=>toast(
   state.channelLoadError?'渠道目录读取失败，已清空旧数据':'当前权限范围内的数据已刷新',
   state.channelLoadError)).catch(e=>toast(e.message,true)));
 $('logout-button').addEventListener('click',()=>logout());
-setDefaultDate();
 fetch('/api/v1/health',{cache:'no-store'}).then(r=>r.json()).then(r=>{
   if(r?.data?.strict_employee_mode){
     $('login-form').hidden=true;
     $('external-login-form').querySelector('h2').textContent='严格员工测试模式登录';
   }
 }).catch(()=>{});
+

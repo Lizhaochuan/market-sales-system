@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const passphrase='fictional-strong-ui-demo-passphrase-0001';
 async function login(page,account){
-  await page.goto('/');
+  await page.goto('/?workspace=legacy');
   await expect(page.getByRole('heading',{name:'登录演示工作台'})).toBeVisible();
   await page.locator('#login-form select[name="account_code"]').selectOption(account);
   await page.locator('#login-form input[name="passphrase"]').fill(passphrase);
@@ -222,3 +222,4 @@ test('真实 Chromium：双主管身份绑定和撤销审批，普通销售不�
   await expect(page.locator('#identity-binding-select')).toHaveCount(1);
   await expect(page.locator('#identity-binding-select option', {hasText:'https://fictional-browser-identity.example.invalid'})).toHaveCount(0);
 });
+

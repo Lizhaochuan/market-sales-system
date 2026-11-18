@@ -1,0 +1,69 @@
+name: V3.2-121 M02 isolated notice contract
+on:
+  push:
+    branches:
+      - chatgpt/v3-2-121-m02-revocation-notices
+  pull_request:
+    paths:
+      - 'src/cross-module-fixture-dual-approval-anchor.mjs'
+      - 'tests/contracts/v3-2-121-dual-approval-anchor.test.mjs'
+      - 'src/cross-module-fixture-authority-lease.mjs'
+      - 'tests/contracts/v3-2-121-authority-lease.test.mjs'
+      - 'src/cross-module-fixture-receipt-proof.mjs'
+      - 'tests/contracts/v3-2-121-signed-receipt-proof.test.mjs'
+      - 'src/cross-module-revocation-notice-contract.mjs'
+      - 'tests/contracts/v3-2-121-revocation-notices.test.mjs'
+      - 'tests/integration/v3-2-121-postgres-notices.test.mjs'
+      - 'tests/helpers/v3-2-121-fixture-recovery-issuance.mjs'
+      - 'tests/helpers/v3-2-121-fixture-external-audit-anchor.mjs'
+      - 'tests/helpers/v3-2-121-fixture-iam-key-external-anchor.mjs'
+      - 'tests/contracts/v3-2-121-iam-key-external-anchor.test.mjs'
+      - 'tests/contracts/v3-2-121-external-audit-anchor.test.mjs'
+      - 'tests/contracts/v3-2-121-release-readiness.test.mjs'
+      - 'tests/contracts/v3-2-121-production-handover.test.mjs'
+      - 'tests/contracts/v3-2-121-iam-evidence.test.mjs'
+      - 'tests/contracts/v3-2-121-iam-source-version.test.mjs'
+      - 'src/cross-module-v121-iam-source-version.mjs'
+      - 'src/cross-module-v121-iam-evidence.mjs'
+      - 'tests/fixtures/v3-2-121-ext001-iam-evidence-ledger.sql'
+      - 'docs/market-sales/v3-2-121-ext001-iam-evidence-intake.md'
+      - 'src/cross-module-v121-production-handover.mjs'
+      - 'docs/market-sales/v3-2-121-production-handover.json'
+      - 'docs/market-sales/v3-2-121-production-handover.md'
+      - 'src/cross-module-v121-release-readiness.mjs'
+      - 'docs/market-sales/v3-2-121-release-readiness.json'
+      - 'docs/market-sales/v3-2-121-m02-revocation-notices.md'
+      - 'tests/helpers/v3-2-121-m02-postgres-revocation-notices.mjs'
+      - 'tests/fixtures/v3-2-121-m02-revocation-notices.sql'
+      - 'tests/fixtures/v3-2-121-external-anchor-ledger.sql'
+      - '.github/workflows/v3-2-121-m02-notices.yml'
+jobs:
+  notice-unit-and-postgres:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: v106_isolated
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d v106_isolated"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      V106_ISOLATED_PG: YES_TEST_ONLY
+      PGHOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --no-package-lock --ignore-scripts
+      - run: node --test tests/contracts/v3-2-121-revocation-notices.test.mjs tests/contracts/v3-2-121-signed-receipt-proof.test.mjs tests/contracts/v3-2-121-authority-lease.test.mjs tests/contracts/v3-2-121-dual-approval-anchor.test.mjs tests/contracts/v3-2-121-external-audit-anchor.test.mjs tests/contracts/v3-2-121-release-readiness.test.mjs tests/contracts/v3-2-121-production-handover.test.mjs tests/contracts/v3-2-121-iam-evidence.test.mjs tests/contracts/v3-2-121-iam-source-version.test.mjs tests/contracts/v3-2-121-iam-key-external-anchor.test.mjs
+      - run: node --test tests/integration/v3-2-121-postgres-notices.test.mjs
