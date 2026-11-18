@@ -13,6 +13,8 @@ if(!secret||secret.length<32)throw new Error('Set a strong isolated-test-only AU
 const strictStaffMode=process.env.MS_STRICT_STAFF_MODE==='1';
 const workspaceEnabled=process.env.MS_ENABLE_ISOLATED_WORKSPACE==='1';
 const v34Enabled=process.env.MS_ENABLE_V34_WORKFLOW==='1';
+const roleWorkspaces=process.env.MS_ENABLE_ROLE_WORKSPACES==='1';
+if(roleWorkspaces&&!v34Enabled)throw Error('Role workspaces require V3.4');
 if(v34Enabled&&!workspaceEnabled)throw Error('V3.4 requires the isolated workspace');
 if(workspaceEnabled&&strictStaffMode)
  throw new Error('Use separate disposable demo and strict employee services; planning workspace cannot bypass strict mode');
@@ -67,8 +69,9 @@ if(strictStaffMode){
     throw e;
   }
 }
+if(roleWorkspaces&&!(await pool.query("SELECT to_regclass('ms_workspace.lead_directory') AS ready")).rows[0].ready)throw Error('Apply role workspace migration first');
 const server=createApp(pool,{
-  workspaceEnabled,v34Enabled,
+  workspaceEnabled,v34Enabled,roleWorkspaces,
   secret,issuer:process.env.AUTH_ISSUER||'market-sales-test-issuer',
   devLoginSecret:strictStaffMode?undefined:process.env.DEV_LOGIN_SECRET,
   externalIdentity,

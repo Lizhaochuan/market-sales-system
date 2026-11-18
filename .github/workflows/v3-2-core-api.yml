@@ -171,6 +171,7 @@ jobs:
           node --check web/business-workspace.js
           node --check web/lead-desk.js
           node --check src/lead-desk.mjs
+          node --check src/role-workspaces.mjs
           node --check src/sales-workflow.mjs
           node --check web/sales-workflow.js
           node --check scripts/upgrade-v34-workspace.mjs

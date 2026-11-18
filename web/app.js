@@ -920,6 +920,11 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
   return result.data;
 }
 async function refresh(){
+  if(state.user?.workspace_access?.enabled&&!state.strict){
+    state.students=[];state.contacts=[];state.events=[];state.leads=[];state.opportunities=[];
+    if(typeof window.__refreshBusinessWorkspace==='function')await window.__refreshBusinessWorkspace();
+    return;
+  }
   const endpoints=state.strict?[
     ['campaignDrafts','/api/v1/marketing-campaigns/drafts'],
     ['campaignSalesReviews','/api/v1/marketing-campaigns/sales-reviews'],

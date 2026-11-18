@@ -1,3 +1,4 @@
+import {workspaceAccess,guardWorkspaceRoute} from './role-workspaces.mjs';
 import { createServer } from 'node:http';
 import { randomUUID, createHash } from 'node:crypto';
 import { demoLogin } from './dev-login.mjs';
@@ -183,6 +184,7 @@ async function handle(c,ctx,op,p,body,requestUrl) {
       return {
         staff_id:actor,display_name:ctx.user.display_name,
         organization_id:org,role_codes:ctx.roles,
+        ...(ctx.roleWorkspaces?{workspace_access:workspaceAccess(ctx)}:{}),
         capabilities:{
           view_own_students:true,
           manage_own_leads:true,
@@ -590,9 +592,10 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false,workspaceEnabled=false,v34Enabled=false}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false,workspaceEnabled=false,v34Enabled=false,roleWorkspaces=false}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
+  if(roleWorkspaces&&!v34Enabled)throw new Error('Role workspaces require V3.4');
   if(v34Enabled&&!workspaceEnabled)throw new Error('V3.4 requires opt-in isolated workspace');
   if(workspaceEnabled&&(strictStaffMode||scopedReadPools!==undefined||scopedWritePools!==undefined))
     throw new Error('Fictional planning workspace requires a separate disposable demo; scoped/strict pools cannot be used');
@@ -626,7 +629,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         return;
       }
       if(url.pathname==='/api/v1/health'&&req.method==='GET'){
-        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode,isolated_workspace:workspaceEnabled,sales_workflow_v34:v34Enabled}},requestId);return;
+        send(res,200,{code:'OK',message:'隔离测试服务已启动',data:{stage:'isolated-test',strict_employee_mode:strictStaffMode,isolated_workspace:workspaceEnabled,sales_workflow_v34:v34Enabled,role_workspaces:roleWorkspaces}},requestId);return;
       }
       const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
         .find(x=>x.method===req.method&&x.match);
@@ -672,7 +675,8 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
         c=await pool.connect();
         await c.query('BEGIN');
         if(externalClaims)identity=await resolveExternalStaff(c,externalClaims);
-        ctx=await staffContext(c,identity);ctx.v34Enabled=v34Enabled;
+        ctx=await staffContext(c,identity);ctx.v34Enabled=v34Enabled;ctx.roleWorkspaces=roleWorkspaces;
+        guardWorkspaceRoute(ctx,route.op,route.match.slice(1));
       }
       // RLS tenant is bound to PostgreSQL SESSION_USER by a migration-owner
       // protected mapping; no request/session GUC can select another tenant.

@@ -28,10 +28,14 @@
           <option value="supervisor">销售主管（申请人）</option>
           <option id="demo-finance-option" value="finance" hidden>收款核实员（独立测试）</option>
           <option value="supervisor-2">第二位主管（独立审核）</option>
+          <option class="role-demo-option" value="market-a" hidden>市场人员 A</option>
+          <option class="role-demo-option" value="market-b" hidden>市场人员 B</option>
+          <option class="role-demo-option" value="market-manager" hidden>市场主管</option>
+          <option class="role-demo-option" value="general-admin" hidden>总管理者</option>
         </select>
       </label>
       <label>隔离演示访问口令
-        <input name="passphrase" type="password" autocomplete="off" required minlength="32" placeholder="由本地环境管理员设置">
+        <input name="passphrase" type="password" autocomplete="off" required placeholder="请输入隔离测试口令">
       </label>
       <button class="primary full" type="submit">进入工作台</button>
       <p class="fineprint">演示访问口令必须由运行者在本地配置。正式身份认证尚未实现。</p>
