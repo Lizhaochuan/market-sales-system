@@ -131,6 +131,31 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    const lead=await create();good(await act(lead,'appointment',{appointment:{type:'trial',due_at:when(2),place:'试听室',course:'数学'}}));let d=await detail(lead),trial=d.records.find(r=>r.kind==='appointments');good(await act(lead,'activity',{record_id:trial.id,transition:'cancelled',feedback:'家长请求改期，先联系确认',next:next()}));good(await act(lead,'followup',{method:'phone',result:'failed',failure_reason:'无人接听',next:next()}));assert.equal((await detail(lead)).workflow.stage,'trial_booked');
    good(await act(lead,'appointment',{appointment:{type:'meeting',due_at:when(2),place:'接待室'}}));d=await detail(lead);const meeting=d.records.find(r=>r.kind==='appointments'&&r.body.type==='meeting');good(await act(lead,'followup',{method:'campus',result:'failed',failure_reason:'未到场',next:next({action:'reschedule_visit'})}));assert.equal((await detail(lead)).records.find(r=>r.id===meeting.id).state,'no_show');
   });
+  await t.test('scheduled meeting completion records offline communication and advances stage; trial never regresses higher stage; enrolling requires order',async()=>{
+   const lead=await create();assert.equal((await act(lead,'followup',{method:'phone',result:'communicated',stage:'enrolling',next:next()})).status,422);
+   good(await act(lead,'appointment',{appointment:{type:'meeting',due_at:when(1),place:'校区面谈室'}}));let d=await detail(lead),m=d.records.find(r=>r.kind==='appointments'&&r.body.type==='meeting');
+   assert.equal((await act(lead,'activity',{record_id:m.id,transition:'no_show',feedback:'未到',stage:'courses_introduced',next:next()})).status,422);
+   good(await act(lead,'activity',{record_id:m.id,transition:'completed',feedback:'面谈已介绍课程方案并确认报名意向',stage:'enrollment_intent',next:next({action:'confirm_course'})}));
+   d=await detail(lead);assert.equal(d.workflow.stage,'enrollment_intent');assert.ok(d.events.some(e=>e.event_name==='V34_COMMUNICATION'&&e.after_business_json.appointment_id===m.id&&e.after_business_json.category==='offline'));
+   good(await act(lead,'appointment',{appointment:{type:'trial',due_at:when(2),place:'试听教室',course:'数学'}}));d=await detail(lead);assert.equal(d.workflow.stage,'enrollment_intent');
+   const extraTrial=d.records.find(r=>r.kind==='appointments'&&r.body.type==='trial');good(await act(lead,'activity',{record_id:extraTrial.id,transition:'completed',feedback:'二宝试听补充体验完成',next:next({action:'confirm_agreement'})}));
+   assert.equal((await detail(lead)).workflow.stage,'enrollment_intent');
+  });
+  await t.test('sibling student can be added on existing lead; manager pending approvals and discount/transfer/correction rejections work cleanly',async()=>{
+   const lead=await create();good(await act(lead,'quote',{student_name:'同家庭二宝',items:[{course_label:'数学',quantity:2,standard_unit_cents:10000,unit_cents:8000}]}));
+   let d=await detail(lead);assert.equal(d.students.length,2);let q=d.records.find(r=>r.kind==='quotes');assert.equal(q.body.discount_state,'pending');
+   const m1=good(await req('/metrics',undefined,M));assert.ok(m1.pending_approvals.some(a=>a.id===q.id&&a.kind==='discount'&&a.can_review===true));
+   good(await act(lead,'reject-discount',{record_id:q.id,reason:'折扣超出当期活动范围'},M));d=await detail(lead);q=d.records.find(r=>r.id===q.id);assert.equal(q.body.discount_state,'rejected');
+   assert.equal((await act(lead,'enroll',{quote_id:q.id,quote_version:q.version,agreement_ref:'退回方案不可报名'})).status,409);
+   good(await act(lead,'quote',{quote_id:q.id,quote_version:q.version,student_id:q.student_id,items:[{course_label:'数学',quantity:2,standard_unit_cents:10000,unit_cents:9000}]}));d=await detail(lead);q=d.records.find(r=>r.id===q.id);
+   good(await act(lead,'approve-discount',{record_id:q.id,reason:'调整后符合双科优惠标准'},M));d=await detail(lead);q=d.records.find(r=>r.id===q.id);
+   good(await act(lead,'enroll',{quote_id:q.id,quote_version:q.version,agreement_ref:'二宝正式协议'}));d=await detail(lead);const e=d.records.find(r=>r.kind==='enrollments');
+   good(await act(lead,'request-transfer',{owner_user_id:B,reason:'测试转交驳回'},M));d=await detail(lead);const tr=d.records.find(r=>r.kind==='corrections'&&r.body.type==='lead_transfer');
+   assert.equal((await act(lead,'reject-transfer',{record_id:tr.id,reason:'自审驳回'},M)).status,403);
+   good(await act(lead,'reject-transfer',{record_id:tr.id,reason:'当前阶段继续由原顾问跟进'},M2));assert.equal((await detail(lead)).records.find(r=>r.id===tr.id).state,'rejected');
+   good(await act(lead,'request-correction',{enrollment_id:e.id,reason:'误点纠正申请'}));d=await detail(lead);const cor=d.records.find(r=>r.kind==='corrections'&&r.body.type==='enrollment_correction');
+   good(await act(lead,'reject-correction',{record_id:cor.id,reason:'与家长核实订单无误无需取消'},M));assert.equal((await detail(lead)).records.find(r=>r.id===cor.id).state,'rejected');
+  });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);
    await assert.rejects(pool.query('UPDATE ms_workspace.history SET state=\'bad\' WHERE record_id=$1',[trial.id]),/append only/);

@@ -26,8 +26,9 @@ async function update(c,ctx,r,state,body){const n=(await c.query('UPDATE ms_work
 async function record(c,l,id,kind){if(!uuid(id))fail(422,'VALIDATION_ERROR','业务编号错误');const r=(await c.query('SELECT * FROM ms_workspace.records WHERE id=$1 AND lead_id=$2 AND organization_id=$3 FOR UPDATE',[id,l.id,l.organization_id])).rows[0];if(!r||kind&&r.kind!==kind)fail(404,'NOT_FOUND','未找到该客户的业务记录');return r;}
 async function linked(c,ctx,l,b={}){
  let rows=(await c.query('SELECT s.id,s.display_name FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=$1 AND s.organization_id=$2 AND s.archived_at IS NULL ORDER BY s.id',[l.id,l.organization_id])).rows;
- let s=b.student_id?rows.find(s=>s.id===b.student_id):rows.length===1?rows[0]:null;
- if(!s){if(rows.length||!b.student_name)fail(422,'STUDENT_REQUIRED','请选择学生，或补充一次学生姓名');s=(await c.query('INSERT INTO ms.students(organization_id,owner_user_id,display_name) VALUES($1,$2,$3) RETURNING id,display_name',[l.organization_id,l.owner_user_id,text(b.student_name,120)])).rows[0];await c.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'pending_review')",[l.id,s.id]);}
+ const newName=typeof b.student_name==='string'&&b.student_name.trim()?text(b.student_name,120):null;if(b.student_id&&newName)fail(422,'VALIDATION_ERROR','已有学生无需重复填写姓名');
+ let s=b.student_id?rows.find(s=>s.id===b.student_id):!newName&&rows.length===1?rows[0]:null;
+ if(!s){if(b.student_id||!newName)fail(422,'STUDENT_REQUIRED','请选择学生，或补充一次学生姓名');s=(await c.query('INSERT INTO ms.students(organization_id,owner_user_id,display_name) VALUES($1,$2,$3) RETURNING id,display_name',[l.organization_id,l.owner_user_id,newName])).rows[0];await c.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'pending_review')",[l.id,s.id]);}
  if((await c.query("SELECT 1 FROM ms.lead_student_downstream_correction_cases WHERE student_id=$1 AND status IN('pending','hold_active')",[s.id])).rowCount)fail(409,'HOLD_ACTIVE','学生关联正在核查，不能推进下游业务');
  let o=(await c.query('SELECT id FROM ms.opportunities WHERE originating_lead_id=$1 AND student_id=$2 AND owner_user_id=$3 ORDER BY created_at LIMIT 1',[l.id,s.id,l.owner_user_id])).rows[0];
  if(!o)o=(await c.query('INSERT INTO ms.opportunities(student_id,owner_user_id,originating_lead_id) VALUES($1,$2,$3) RETURNING id',[s.id,l.owner_user_id,l.id])).rows[0];return {student:s.id,opp:o.id};
@@ -47,9 +48,11 @@ async function next(c,ctx,l,w,b,{required=false,except=null}={}){
 }
 async function bump(c,ctx,l,w,name,body={}){const n=(await c.query('UPDATE ms_workspace.lead_workflow SET version=version+1,stage=$2,terminal_state=$3,primary_activity_id=$4,do_not_contact=$5,pause_reason=$6,updated_at=now() WHERE lead_id=$1 RETURNING *',[l.id,w.stage,w.terminal_state,w.primary_activity_id,w.do_not_contact,w.pause_reason])).rows[0];await audit(c,ctx,l,name,{...body,stage:n.stage,terminal_state:n.terminal_state,primary_activity_id:n.primary_activity_id,workflow_version:n.version});return {...flags,workflow:n};}
 async function closeActivities(c,ctx,l,why){for(const r of (await c.query("SELECT * FROM ms_workspace.records WHERE lead_id=$1 AND kind='corrections' AND state IN('pending','approved') AND body->>'type'='lead_transfer' FOR UPDATE",[l.id])).rows)await update(c,ctx,r,'cancelled',{...r.body,close_reason:why});for(const r of (await c.query("SELECT * FROM ms_workspace.records WHERE lead_id=$1 AND kind IN('tasks','appointments') AND state IN('open','in_progress','pending','confirmed','rescheduled') ORDER BY id FOR UPDATE",[l.id])).rows)await update(c,ctx,r,'cancelled',{...r.body,close_reason:why});}
+const advanceTrialStage=(cur,target)=>['enrollment_intent','enrolling'].includes(cur)?cur:cur==='trial_completed'&&target==='trial_booked'?cur:target;
 async function validateStage(c,l,stage){
  if(!stages.some(s=>s.id===stage)&&stage!=='unclassified')fail(422,'VALIDATION_ERROR','请选择销售进展');
  if(stage==='declined')fail(422,'CLOSURE_REQUIRED','明确不报名请使用有原因和反馈的结案确认');
+ if(stage==='enrolling'&&!(await c.query("SELECT 1 FROM ms_workspace.records WHERE lead_id=$1 AND kind='enrollments' AND state<>'cancelled'",[l.id])).rowCount)fail(422,'ORDER_FACT_REQUIRED','请先提交报名协议与订单');
  if(['trial_booked','trial_completed'].includes(stage)){
   const r=await c.query(`SELECT 1 FROM ms_workspace.records WHERE lead_id=$1 AND kind='appointments' AND body->>'type'='trial' AND state=ANY($2::text[])`,[l.id,stage==='trial_completed'?['completed']:['confirmed','rescheduled','completed']]);
   if(!r.rowCount)fail(422,'TRIAL_FACT_REQUIRED',stage==='trial_completed'?'请先记录实际试听完成及反馈':'请先保存具体试听预约');
@@ -75,9 +78,9 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
   const created=await leadDesk(c,ctx,{method:'POST',parts:['leads'],body:intake});
   const l=(await c.query('SELECT * FROM ms.leads WHERE id=$1 FOR UPDATE',[created.lead_id])).rows[0];
   if(student_id){const s=await ownsStudent(c,ctx,student_id);if(s.owner_user_id!==l.owner_user_id)fail(403,'FORBIDDEN','已有学生须由当前负责人接单，转交需独立复核');await c.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'pending_review')",[l.id,student_id]);}
-  const initialStage=initial_communication?await initialCommunication(c,ctx,l,initial_communication):'needs_discovery';
   const r=await activity(c,ctx,l,arrangement);
-  const w=(await c.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,contact_info,stage) VALUES($1,$2,$3,$4,$5) RETURNING *',[l.id,org,r.id,contact_info?text(contact_info,200):null,r.kind==='appointments'&&r.body.type==='trial'&&r.state==='confirmed'?'trial_booked':initialStage])).rows[0];
+  const initialStage=initial_communication?await initialCommunication(c,ctx,l,initial_communication,r):'needs_discovery';
+  const w=(await c.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,contact_info,stage) VALUES($1,$2,$3,$4,$5) RETURNING *',[l.id,org,r.id,contact_info?text(contact_info,200):null,r.kind==='appointments'&&r.body.type==='trial'&&r.state==='confirmed'?advanceTrialStage(initialStage,'trial_booked'):initialStage])).rows[0];
   if(ctx.roleWorkspaces)await c.query("INSERT INTO ms_workspace.lead_directory(lead_id,organization_id,phone,department) VALUES($1,$2,$3,'sales')",[l.id,org,normalizedPhone]);
   await audit(c,ctx,l,'INTAKE',{primary_activity_id:r.id});return {...flags,lead_id:l.id,workflow:w};
  }
@@ -100,7 +103,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
   if(!l.owner_user_id||!(await c.query("SELECT 1 FROM ms.staff_users WHERE id=$1 AND status='active'",[l.owner_user_id])).rowCount){if(!ctx.manager||!body.owner_user_id)fail(422,'ASSIGNEE_REQUIRED','待分配客户需要主管指定有效负责人');await sameOrgStaff(c,ctx,body.owner_user_id);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,body.owner_user_id);const previous=l.owner_user_id;l.owner_user_id=body.owner_user_id;await c.query('UPDATE ms.leads SET owner_user_id=$2 WHERE id=$1',[id,l.owner_user_id]);await audit(c,ctx,l,'LEGACY_ASSIGNMENT_REPAIRED',{previous_owner:previous,new_owner:l.owner_user_id});}
   const r=await activity(c,ctx,l,body.next);w=(await c.query("INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,stage,terminal_state) VALUES($1,$2,$3,'unclassified','open') RETURNING *",[id,org,r.id])).rows[0];await audit(c,ctx,l,'ARRANGEMENT_REPAIRED',{activity_id:r.id});return {...flags,workflow:w};}
  if(body?.expected_version!==w.version)fail(409,'VERSION_CONFLICT','客户或任务已更新，请刷新后再保存');
- if(w.terminal_state!=='open'&&!['reopen','request-correction','approve-correction','submit-refund','verify-refund'].includes(action))fail(409,'LEAD_CLOSED','已结案记录只能走有审计的纠正或重新开启流程');
+ if(w.terminal_state!=='open'&&!['reopen','request-correction','approve-correction','reject-correction','submit-refund','verify-refund'].includes(action))fail(409,'LEAD_CLOSED','已结案记录只能走有审计的纠正或重新开启流程');
  if(action==='contact'){fields(body,['expected_version','contact_info']);const value=ctx.roleWorkspaces?phoneNumber(body.contact_info):text(body.contact_info,200);if(ctx.roleWorkspaces){await lockPhone(c,org,value);if((await c.query('SELECT 1 FROM ms_workspace.lead_directory WHERE organization_id=$1 AND phone=$2 AND lead_id<>$3',[org,value,id])).rowCount)fail(409,'PHONE_MATCH_FOUND','该电话已有其他线索，请主管核实');await c.query("INSERT INTO ms_workspace.lead_directory(lead_id,organization_id,phone,department) VALUES($1,$2,$3,'sales') ON CONFLICT(lead_id) DO UPDATE SET phone=EXCLUDED.phone",[id,org,value]);}await c.query('UPDATE ms_workspace.lead_workflow SET contact_info=$2 WHERE lead_id=$1',[id,value]);await audit(c,ctx,l,'CONTACT_UPDATED',{previous:w.contact_info,current:value});return bump(c,ctx,l,w,'CONTACT_SAVED');}
  if(action==='source'){fields(body,['expected_version','source']);await leadDesk(c,ctx,{method:'POST',parts:['leads',id,'source'],body:{source:body.source}});return bump(c,ctx,l,w,'SOURCE_CORRECTED',{source:body.source});}
  if(action==='draft'){
@@ -137,27 +140,32 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
    await audit(c,ctx,l,actualMeeting.body.was_scheduled===false?'WALK_IN_MEETING_COMPLETED':'ACTIVITY_COMPLETED',{record_id:actualMeeting.id,method:body.method,actual_at:at,was_scheduled:actualMeeting.body.was_scheduled!==false});
   }else if(body.meeting_actual)fail(422,'VALIDATION_ERROR','本次方式不应包含实际线下面谈资料');
   let stage=body.stage??w.stage;if(body.result!=='communicated'&&stage!==w.stage)fail(422,'STAGE_UNCHANGED','未完成沟通不能在本条记录中推进销售进展');if(stage!==w.stage)await validateStage(c,l,stage);if(stage==='paused'){w.pause_reason=text(body.pause_reason??w.pause_reason);}
-  if(successor.kind==='appointments'&&successor.body.type==='trial'&&successor.state==='confirmed'&&following?.appointment)stage='trial_booked';w.stage=stage;
+  if(successor.kind==='appointments'&&successor.body.type==='trial'&&successor.state==='confirmed'&&following?.appointment)stage=advanceTrialStage(stage,'trial_booked');w.stage=stage;
   if(current?.kind==='tasks'&&active(current))await update(c,ctx,current,'completed',{...current.body,completion:{method:body.method,result:body.result,notes},completed_at:new Date().toISOString(),completed_by:actor});
   const linkedIds=(await c.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[id])).rows.map(s=>s.student_id);const subjects=body.student_ids??(linkedIds.length<=1?linkedIds:null);if(!Array.isArray(subjects)||subjects.some(s=>!linkedIds.includes(s))||new Set(subjects).size!==subjects.length||linkedIds.length>1&&!subjects.length)fail(422,'STUDENT_REQUIRED','请选择本次实际沟通涉及的学生');
   await audit(c,ctx,l,'COMMUNICATION',{method:body.method,category:offline(body.method)?'offline':'online',result:body.result,failure_reason:body.failure_reason??null,notes,purpose:body.purpose??null,invite_result:body.invite_result??null,student_ids:subjects,stage,appointment_id:actualMeeting?.id??null,primary_activity_id:w.primary_activity_id});
   return bump(c,ctx,l,w,'FOLLOWUP_COMPLETED');
  }
  if(action==='appointment'){
-  fields(body,['expected_version','appointment','next']);const prev=w.primary_activity_id?await record(c,l,w.primary_activity_id):null;const r=await makeAppointment(c,ctx,l,body.appointment);w.primary_activity_id=r.id;if(prev&&prev.id!==r.id&&prev.kind==='tasks'&&active(prev))await update(c,ctx,prev,'completed',{...prev.body,completion:{method:prev.body.method,result:'communicated',notes:'已直接确认并保存预约，原联系待办自动完成'},completed_at:new Date().toISOString(),completed_by:actor});if(r.body.type==='trial'&&r.state==='confirmed')w.stage='trial_booked';return bump(c,ctx,l,w,'APPOINTMENT_CREATED',{record_id:r.id});
+  fields(body,['expected_version','appointment','next']);const prev=w.primary_activity_id?await record(c,l,w.primary_activity_id):null;const r=await makeAppointment(c,ctx,l,body.appointment);w.primary_activity_id=r.id;if(prev&&prev.id!==r.id&&prev.kind==='tasks'&&active(prev))await update(c,ctx,prev,'completed',{...prev.body,completion:{method:prev.body.method,result:'communicated',notes:'已直接确认并保存预约，原联系待办自动完成'},completed_at:new Date().toISOString(),completed_by:actor});if(r.body.type==='trial'&&r.state==='confirmed')w.stage=advanceTrialStage(w.stage,'trial_booked');return bump(c,ctx,l,w,'APPOINTMENT_CREATED',{record_id:r.id});
  }
  if(action==='activity'){
-  fields(body,['expected_version','record_id','transition','due_at','reason','feedback','next']);
+  fields(body,['expected_version','record_id','transition','due_at','reason','feedback','next','stage','pause_reason']);
   const r=await record(c,l,body.record_id);if(!['tasks','appointments'].includes(r.kind)||!active(r))fail(409,'TASK_FINISHED','活动已结束');
   const t=body.transition;
   if(t==='start'){await update(c,ctx,r,'in_progress',r.body);return bump(c,ctx,l,w,'ACTIVITY_STARTED',{record_id:r.id});}
   if(t==='reschedule'){const when=date(body.due_at),reason=text(body.reason);await update(c,ctx,r,'rescheduled',{...r.body,due_at:when,rescheduled_from:r.body.due_at,reschedule_reason:reason});return bump(c,ctx,l,w,'ACTIVITY_RESCHEDULED',{record_id:r.id,from:r.body.due_at,to:when,reason});}
   if(!['completed','cancelled','no_show','confirmed'].includes(t)||r.kind==='tasks'&&t==='completed')fail(422,'VALIDATION_ERROR','沟通待办须记录本次结果后完成');
-  if(t==='confirmed'){if(r.kind!=='appointments')fail(422,'VALIDATION_ERROR','不是预约');await update(c,ctx,r,'confirmed',r.body);if(r.body.type==='trial')w.stage='trial_booked';return bump(c,ctx,l,w,'APPOINTMENT_CONFIRMED',{record_id:r.id});}
+  if(t==='confirmed'){if(r.kind!=='appointments')fail(422,'VALIDATION_ERROR','不是预约');await update(c,ctx,r,'confirmed',r.body);if(r.body.type==='trial')w.stage=advanceTrialStage(w.stage,'trial_booked');return bump(c,ctx,l,w,'APPOINTMENT_CONFIRMED',{record_id:r.id});}
+  if(t!=='completed'&&body.stage&&body.stage!==w.stage)fail(422,'STAGE_UNCHANGED','未完成预约不能在本条记录中推进销售进展');
   const successor=await next(c,ctx,l,w,body.next,{required:r.id===w.primary_activity_id,except:r.id});
   const feedback=text(body.feedback??body.reason);await update(c,ctx,r,t,{...r.body,actual_attendance:t==='completed'?'attended':t==='no_show'?'absent':'not_recorded',feedback,finished_at:new Date().toISOString(),finished_by:actor});
-  if(r.kind==='appointments'&&r.body.type==='trial'&&t==='completed')w.stage='trial_completed';
-  if(body.next?.appointment&&successor.body.type==='trial'&&successor.state==='confirmed')w.stage='trial_booked';
+  if(t==='completed'){
+   if(body.stage){if(body.stage!==w.stage)await validateStage(c,l,body.stage);w.stage=r.kind==='appointments'&&r.body.type==='trial'&&body.stage==='trial_booked'?'trial_completed':body.stage;if(w.stage==='paused')w.pause_reason=text(body.pause_reason??w.pause_reason);}
+   else if(r.kind==='appointments'&&r.body.type==='trial')w.stage=advanceTrialStage(w.stage,'trial_completed');
+   if(r.kind==='appointments'&&r.body.type==='meeting'){const linkedIds=(await c.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[id])).rows.map(s=>s.student_id),subjects=r.body.student_ids?.length?r.body.student_ids:r.student_id?[r.student_id]:linkedIds;await audit(c,ctx,l,'COMMUNICATION',{method:r.body.method||'campus',category:'offline',result:'communicated',failure_reason:null,notes:feedback,purpose:null,invite_result:null,student_ids:subjects,stage:w.stage,appointment_id:r.id,primary_activity_id:w.primary_activity_id});}
+  }
+  if(body.next?.appointment&&successor.body.type==='trial'&&successor.state==='confirmed')w.stage=advanceTrialStage(w.stage,'trial_booked');
   return bump(c,ctx,l,w,'ACTIVITY_'+t.toUpperCase(),{record_id:r.id,type:r.body.type,feedback});
  }
  if(action==='quote'){
@@ -172,10 +180,13 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
  if(action==='approve-discount'){
   fields(body,['expected_version','record_id','reason']);if(!ctx.manager)fail(403,'FORBIDDEN','需要主管独立批准优惠');const q=await record(c,l,body.record_id,'quotes');if(q.body.quoted_by===actor)fail(403,'FORBIDDEN','不能批准自己提交的优惠');await update(c,ctx,q,q.state,{...q.body,discount_state:'approved',discount_approved_by:actor,discount_reason:text(body.reason)});return bump(c,ctx,l,w,'DISCOUNT_APPROVED',{quote_id:q.id});
  }
+ if(action==='reject-discount'){
+  fields(body,['expected_version','record_id','reason']);if(!ctx.manager)fail(403,'FORBIDDEN','需要主管独立复核优惠');const q=await record(c,l,body.record_id,'quotes');if(q.body.quoted_by===actor||q.body.discount_state!=='pending')fail(403,'FORBIDDEN','不能退回自己提交或非待审的优惠方案');await update(c,ctx,q,q.state,{...q.body,discount_state:'rejected',discount_rejected_by:actor,discount_reject_reason:text(body.reason)});return bump(c,ctx,l,w,'DISCOUNT_REJECTED',{quote_id:q.id,reason:body.reason});
+ }
  if(action==='enroll'){
   fields(body,['expected_version','quote_id','quote_version','agreement_ref','next']);const q=await record(c,l,body.quote_id,'quotes');
   if(q.body.total_cents<=0)fail(422,'ZERO_ORDER','零金额报名需要另行明确的业务政策');
-  if(q.state!=='draft'||q.version!==body.quote_version||Date.parse(q.body.valid_until)<=Date.now()||q.body.discount_state==='pending')fail(409,'QUOTE_NOT_VALID','方案已更新、到期或优惠未获批准');
+  if(q.state!=='draft'||q.version!==body.quote_version||Date.parse(q.body.valid_until)<=Date.now()||['pending','rejected'].includes(q.body.discount_state))fail(409,'QUOTE_NOT_VALID','方案已更新、到期或优惠未获批准');
   const old=await c.query("SELECT id FROM ms_workspace.records WHERE lead_id=$1 AND kind='enrollments' AND state<>'cancelled' AND body->>'quote_id'=$2 AND (body->>'quote_version')::int=$3",[id,q.id,q.version]);if(old.rowCount)fail(409,'DUPLICATE_ENROLLMENT','本版课程方案已办理报名，请查看已有订单');
   const o=(await c.query('INSERT INTO ms.sales_orders(student_id,opportunity_id,amount_due_cents,order_state) VALUES($1,$2,$3,\'submitted\') RETURNING *',[q.student_id,q.opportunity_id,q.body.total_cents])).rows[0];
   const r=await save(c,ctx,l,'enrollments','awaiting_agreement',{order_id:o.id,quote_id:q.id,quote_version:q.version,quote_snapshot:q.body,amount_cents:q.body.total_cents,agreement_ref:text(body.agreement_ref,500),agreement_confirmed:false,net_cents:0,balance_cents:q.body.total_cents,payment_state:'unpaid',submitted_by:actor},{student:q.student_id,opp:q.opportunity_id});
@@ -225,22 +236,35 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
   fields(body,['expected_version','record_id','reason']);if(!ctx.manager)fail(403,'FORBIDDEN','需要独立主管复核');const r=await record(c,l,body.record_id,'corrections');if(r.body.type!=='lead_transfer'||r.state!=='pending'||[r.body.requested_by,r.body.target_owner].includes(actor))fail(403,'FORBIDDEN','复核人必须独立于申请和接收人');await sameOrgStaff(c,ctx,r.body.target_owner);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,r.body.target_owner);
   await update(c,ctx,r,'approved',{...r.body,approved_by:actor,review_reason:text(body.reason)});return bump(c,ctx,l,w,'TRANSFER_AWAITING_ACCEPTANCE',{request_id:r.id,target_owner:r.body.target_owner});
  }
+ if(action==='reject-transfer'){
+  fields(body,['expected_version','record_id','reason']);if(!ctx.manager)fail(403,'FORBIDDEN','需要独立主管复核');const r=await record(c,l,body.record_id,'corrections');if(r.body.type!=='lead_transfer'||r.state!=='pending'||r.body.requested_by===actor)fail(403,'FORBIDDEN','复核人必须独立于申请人且申请须处于待处理状态');
+  await update(c,ctx,r,'rejected',{...r.body,rejected_by:actor,reject_reason:text(body.reason)});return bump(c,ctx,l,w,'TRANSFER_REJECTED',{request_id:r.id,reason:body.reason});
+ }
  if(action==='accept-transfer'){
   fields(body,['expected_version','record_id']);const r=await record(c,l,body.record_id,'corrections');if(r.body.type!=='lead_transfer'||r.state!=='approved'||r.body.target_owner!==actor)fail(403,'FORBIDDEN','仅已批准的接收人可确认接手');await sameOrgStaff(c,ctx,actor);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,actor);
   await c.query('UPDATE ms.leads SET owner_user_id=$2 WHERE id=$1',[id,actor]);await c.query('UPDATE ms.opportunities SET owner_user_id=$2,version=version+1 WHERE originating_lead_id=$1',[id,actor]);
   for(const a of (await c.query('SELECT * FROM ms_workspace.records WHERE lead_id=$1 ORDER BY id FOR UPDATE',[id])).rows){if(['tasks','appointments'].includes(a.kind)){await c.query('UPDATE ms_workspace.records SET owner_user_id=$2 WHERE id=$1',[a.id,actor]);await update(c,ctx,a,a.state,{...a.body,previous_owner:l.owner_user_id,assignee_user_id:actor});}else if(a.id===r.id)await update(c,ctx,a,'completed',{...a.body,accepted_by:actor});}
   return bump(c,ctx,l,w,'TRANSFER_ACCEPTED',{old_owner:l.owner_user_id,old_owner_name:(await c.query('SELECT display_name FROM ms.staff_users WHERE id=$1',[l.owner_user_id])).rows[0]?.display_name,new_owner:actor,new_owner_name:ctx.user.display_name});
  }
- if(['request-correction','approve-correction','submit-refund','verify-refund'].includes(action))return corrections(c,ctx,l,w,action,body);
+ if(['request-correction','approve-correction','reject-correction','submit-refund','verify-refund'].includes(action))return corrections(c,ctx,l,w,action,body);
  fail(404,'NOT_FOUND','未找到业务操作');
 }
-async function initialCommunication(c,ctx,l,b){
- fields(b,['method','at','place','notes','stage']);if(!methods.some(m=>m.id===b.method))fail(422,'VALIDATION_ERROR','请选择实际沟通方式');
+async function initialCommunication(c,ctx,l,b,nextActivity=null){
+ fields(b,['method','result','failure_reason','at','place','notes','stage']);if(!methods.some(m=>m.id===b.method))fail(422,'VALIDATION_ERROR','请选择实际沟通方式');
+ const res=b.result??'communicated';if(!['communicated','failed'].includes(res))fail(422,'VALIDATION_ERROR','请核对初次沟通结果');
  const at=date(b.at);if(Date.parse(at)>Date.now()+300000)fail(422,'ACTUAL_MEETING_REQUIRED','已经发生的沟通不能填未来时间');
+ const notes=b.notes?text(b.notes):null,students=(await c.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[l.id])).rows.map(r=>r.student_id);
+ if(res==='failed'){
+  if(!(reasons[b.method]||reasons[offline(b.method)?'offline':'phone']).includes(b.failure_reason))fail(422,'VALIDATION_ERROR','请选择对应的未联系成功原因');
+  if(b.failure_reason==='其他'&&!notes)fail(422,'VALIDATION_ERROR','选择其他时说明必填');
+  if(b.stage&&b.stage!=='needs_discovery')fail(422,'STAGE_UNCHANGED','未完成沟通不能推进销售进展');
+  if(nextActivity?.kind==='appointments')fail(422,'APPOINTMENT_UNCONFIRMED','尚未完成沟通，不能确认本次新的预约；请安排下一次联系');
+  await audit(c,ctx,l,'COMMUNICATION',{method:b.method,category:offline(b.method)?'offline':'online',result:'failed',failure_reason:b.failure_reason,notes,student_ids:students,stage:'needs_discovery',actual_at:at,appointment_id:null,purpose:null,invite_result:null});return 'needs_discovery';
+ }
  const stage=b.stage??'needs_discovery';if(!['needs_discovery','needs_confirmed','courses_introduced','enrollment_intent'].includes(stage))fail(422,'VALIDATION_ERROR','初次沟通进展不能替代试听或报名事实');
- const notes=b.notes?text(b.notes):null,students=(await c.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[l.id])).rows.map(r=>r.student_id);let appointment_id=null;
+ let appointment_id=null;
  if(['campus','visit'].includes(b.method)){const place=text(b.place,200);const r=await save(c,ctx,l,'appointments','completed',{type:'meeting',title:'现场实际面谈',action:'invite',method:b.method,due_at:at,finished_at:at,place,actual_attendance:'attended',feedback:notes||'录入时确认面谈已完成',student_ids:students,was_scheduled:false,source:'WALK_IN_ACTUAL',recorded_by:ctx.user.id,assignee_user_id:l.owner_user_id},{student:students.length===1?students[0]:null});appointment_id=r.id;await audit(c,ctx,l,'WALK_IN_MEETING_COMPLETED',{record_id:r.id,actual_at:at,was_scheduled:false});}
- await audit(c,ctx,l,'COMMUNICATION',{method:b.method,category:offline(b.method)?'offline':'online',result:'communicated',notes,student_ids:students,stage,actual_at:at,appointment_id,purpose:null,invite_result:null});return stage;
+ await audit(c,ctx,l,'COMMUNICATION',{method:b.method,category:offline(b.method)?'offline':'online',result:'communicated',failure_reason:null,notes,student_ids:students,stage,actual_at:at,appointment_id,purpose:null,invite_result:null});return stage;
 }
 async function makeAppointment(c,ctx,l,b){
  fields(b,['type','student_id','student_name','due_at','place','course','state']);if(!['meeting','trial'].includes(b.type)||!['pending','confirmed'].includes(b.state??'confirmed'))fail(422,'VALIDATION_ERROR','请核对预约类型与状态');
@@ -256,6 +280,10 @@ async function corrections(c,ctx,l,w,action,b){
   fields(b,['expected_version','record_id','reason','next','cancel_enrollment']);if(!ctx.manager)fail(403,'FORBIDDEN','需要主管独立复核纠正申请');const r=await record(c,l,b.record_id,'corrections');if(r.state!=='pending'||r.body.requested_by===ctx.user.id||r.body.type!=='enrollment_correction')fail(403,'FORBIDDEN','不能复核自己或已处理的申请');
   if(w.terminal_state!=='open'){w.terminal_state='open';w.do_not_contact=false;await next(c,ctx,l,w,b.next,{required:true});}
   await update(c,ctx,r,'approved',{...r.body,approved_by:ctx.user.id,review_reason:text(b.reason)});const e=await record(c,l,r.body.enrollment_id,'enrollments');if(b.cancel_enrollment===true){if(e.body.net_cents!==0)fail(409,'BALANCE_REMAINS','须先核实退款，才可取消有有效收款的报名');await update(c,ctx,e,'cancelled',{...e.body,correction_id:r.id,cancel_reason:b.reason});await c.query("UPDATE ms.sales_orders SET order_state='cancelled',version=version+1 WHERE id=$1",[e.body.order_id]);await update(c,ctx,{...r,version:r.version+1},'completed',{...r.body,completed_by:ctx.user.id});}else await update(c,ctx,e,'exception',{...e.body,correction_id:r.id});return bump(c,ctx,l,w,'CORRECTION_APPROVED',{request_id:r.id});
+ }
+ if(action==='reject-correction'){
+  fields(b,['expected_version','record_id','reason']);if(!ctx.manager)fail(403,'FORBIDDEN','需要主管独立复核纠正申请');const r=await record(c,l,b.record_id,'corrections');if(r.state!=='pending'||r.body.requested_by===ctx.user.id||r.body.type!=='enrollment_correction')fail(403,'FORBIDDEN','不能复核自己或已处理的申请');
+  await update(c,ctx,r,'rejected',{...r.body,rejected_by:ctx.user.id,reject_reason:text(b.reason)});return bump(c,ctx,l,w,'CORRECTION_REJECTED',{request_id:r.id,reason:b.reason});
  }
  if(action==='submit-refund'){
   fields(b,['expected_version','payment_id','correction_id','amount_cents','refund_ref','reason','evidence_ref','attachment']);const p=await record(c,l,b.payment_id,'payments'),cor=await record(c,l,b.correction_id,'corrections');if(p.state!=='verified'||cor.state!=='approved'||cor.body.enrollment_id!==p.body.enrollment_id)fail(409,'CORRECTION_REQUIRED','退款须有对应订单的独立批准纠正申请');
@@ -274,7 +302,7 @@ async function corrections(c,ctx,l,w,action,b){
 }
 async function listing(c,ctx){
  const rows=(await c.query(`SELECT l.id,l.lead_state,l.owner_user_id,l.created_at,c.display_name AS contact_name,u.display_name AS owner_name,u.status AS owner_status,e.event_type AS original_source,(SELECT a.after_business_json->>'source' FROM ms.audit_events a WHERE a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='LEAD_SOURCE_UPDATED' ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS current_source,
-  w.stage,w.version,w.updated_at,w.terminal_state,w.primary_activity_id,w.do_not_contact,
+  w.stage,w.version,w.updated_at,w.terminal_state,w.primary_activity_id,w.do_not_contact,w.contact_info,
   a.body AS next_action,a.state AS activity_state,
   (SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.display_name)) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id) AS students,
   (SELECT x.after_business_json->>'origin_group' FROM ms.audit_events x WHERE x.organization_id=l.organization_id AND x.target_type='lead' AND x.target_id=l.id AND x.event_name='LEAD_DESK_CREATED' ORDER BY x.happened_at LIMIT 1) AS origin_group
@@ -285,7 +313,7 @@ async function listing(c,ctx){
  return {...flags,incoming,items:rows.map(r=>({...r,terminal_state:r.terminal_state??(['closed','invalid'].includes(r.lead_state)?'legacy_closed':'open'),needs_arrangement:!r.version&&!['closed','invalid'].includes(r.lead_state),needs_assignment:!r.owner_user_id||r.owner_status!=='active',overdue:r.next_action?.due_at?Date.parse(r.next_action.due_at)<Date.now()&&r.terminal_state==='open':false})),staff:ctx.manager?(await c.query(`SELECT u.id,u.display_name FROM ms.staff_users u WHERE u.organization_id=$1 AND u.status='active' ${ctx.roleWorkspaces?"AND EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('sales_staff','sales_consultant','sales_manager','super_admin')) AND NOT EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('marketing','marketing_staff','marketing_manager','finance_verifier'))":''} ORDER BY u.display_name`,[ctx.user.organization_id])).rows:[]};
 }
 async function metrics(c,ctx){
- const list=await listing(c,ctx),ids=list.items.map(l=>l.id);if(!ids.length)return {...flags,counts:{leads:0},by_owner:[],lost_reasons:[]};
+ const list=await listing(c,ctx),ids=list.items.map(l=>l.id);if(!ids.length)return {...flags,counts:{leads:0},by_owner:[],lost_reasons:[],pending_approvals:[]};
  const records=(await c.query('SELECT * FROM ms_workspace.records WHERE lead_id=ANY($1::uuid[])',[ids])).rows;
  const events=(await c.query("SELECT * FROM ms.audit_events WHERE organization_id=$1 AND target_type='lead' AND target_id=ANY($2::uuid[]) AND event_name LIKE 'V34_%' ORDER BY happened_at,id",[ctx.user.organization_id,ids])).rows;
  const comm=events.filter(e=>e.event_name==='V34_COMMUNICATION'),appointments=records.filter(r=>r.kind==='appointments'),enroll=records.filter(r=>r.kind==='enrollments');
@@ -310,6 +338,11 @@ async function metrics(c,ctx){
   due_today:pending.filter(r=>r.body.due_at&&day(r.body.due_at)===today).length,completed_today:completed.filter(r=>(r.body.completed_at||r.body.finished_at)&&day(r.body.completed_at||r.body.finished_at)===today).length,overdue:pending.filter(r=>Date.parse(r.body.due_at)<now).length,missing_next:list.items.filter(l=>l.needs_arrangement).length,continuous_failed_leads:list.items.filter(l=>l.terminal_state==='open'&&failureStreak(l)>=2).length,stale_open_leads:list.items.filter(l=>l.terminal_state==='open'&&Date.parse(l.updated_at||l.created_at)<now-14*86400000).length,paused_leads:list.items.filter(l=>l.stage==='paused'&&l.terminal_state==='open').length,
   appointment_result_due:appointments.filter(r=>active(r)&&Date.parse(r.body.due_at)<now).length,unassigned_leads:list.items.filter(l=>l.needs_assignment&&l.terminal_state==='open').length,pending_transfer:records.filter(r=>r.kind==='corrections'&&r.body.type==='lead_transfer'&&['pending','approved'].includes(r.state)).length};
  const meetingSet=new Set(appointments.filter(r=>r.body.type==='meeting'&&r.body.actual_attendance==='attended').flatMap(r=>r.body.student_ids??(r.student_id?[r.student_id]:[]))),trialSet=new Set(appointments.filter(r=>r.body.type==='trial'&&r.state==='completed').map(r=>r.student_id));count.meeting_to_enrollment_students=apStudents(successful.filter(r=>meetingSet.has(r.student_id)&&appointments.some(a=>(a.student_id===r.student_id||a.body.student_ids?.includes(r.student_id))&&a.body.type==='meeting'&&a.state==='completed'&&Date.parse(a.body.finished_at)<=Date.parse(r.body.first_success_at))));count.trial_to_enrollment_students=apStudents(successful.filter(r=>trialSet.has(r.student_id)&&appointments.some(a=>(a.student_id===r.student_id||a.body.student_ids?.includes(r.student_id))&&a.body.type==='trial'&&a.state==='completed'&&Date.parse(a.body.finished_at)<=Date.parse(r.body.first_success_at))));
- const reasons={};for(const e of events.filter(e=>e.event_name==='V34_CLOSED_LOST'))reasons[e.after_business_json.reason]=(reasons[e.after_business_json.reason]||0)+1;
- return {...flags,timezone:'Asia/Shanghai',counts:count,activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(l=>l.overdue).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:reasons,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,overdue:Date.parse(r.body.due_at)<now})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
+ const lostReasons={};for(const e of events.filter(e=>e.event_name==='V34_CLOSED_LOST'))lostReasons[e.after_business_json.reason]=(lostReasons[e.after_business_json.reason]||0)+1;
+ const pending_approvals=ctx.manager?[
+  ...records.filter(r=>r.kind==='quotes'&&r.state==='draft'&&r.body.discount_state==='pending'&&leadBy(r.lead_id)?.terminal_state==='open').map(r=>({id:r.id,lead_id:r.lead_id,kind:'discount',title:'优惠/非标课程方案待审批',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.quoted_by!==ctx.user.id})),
+  ...enroll.filter(r=>r.state!=='cancelled'&&!r.body.agreement_confirmed).map(r=>({id:r.id,lead_id:r.lead_id,kind:'agreement',title:'报名协议待独立核实',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.submitted_by!==ctx.user.id})),
+  ...records.filter(r=>r.kind==='corrections'&&r.state==='pending').map(r=>({id:r.id,lead_id:r.lead_id,kind:r.body.type,title:r.body.type==='lead_transfer'?'客户转交待独立复核':'报名退款/取消纠正待审批',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.requested_by!==ctx.user.id&&r.body.target_owner!==ctx.user.id}))
+ ]:[];
+ return {...flags,timezone:'Asia/Shanghai',counts:count,activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(l=>l.overdue).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:lostReasons,pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,overdue:Date.parse(r.body.due_at)<now})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
 }
