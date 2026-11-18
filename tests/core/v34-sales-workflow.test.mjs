@@ -156,6 +156,15 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    good(await act(lead,'request-correction',{enrollment_id:e.id,reason:'误点纠正申请'}));d=await detail(lead);const cor=d.records.find(r=>r.kind==='corrections'&&r.body.type==='enrollment_correction');
    good(await act(lead,'reject-correction',{record_id:cor.id,reason:'与家长核实订单无误无需取消'},M));assert.equal((await detail(lead)).records.find(r=>r.id===cor.id).state,'rejected');
   });
+  await t.test('offline meetings omit location while trial classes require classroom name',async()=>{
+   const lead=await create();
+   good(await act(lead,'appointment',{appointment:{type:'meeting',due_at:when(1)}}));
+   let d=await detail(lead);assert.equal(d.records.find(r=>r.kind==='appointments'&&r.body.type==='meeting').body.place,null);
+   assert.equal((await act(lead,'appointment',{appointment:{type:'trial',due_at:when(2),course:'数学'}})).status,422);
+   good(await act(lead,'appointment',{appointment:{type:'trial',due_at:when(2),place:'203教室',course:'数学'}}));
+   good(await act(lead,'followup',{method:'campus',result:'communicated',meeting_actual:{confirmed_completed:true,at:new Date(Date.now()-30000).toISOString()},notes:'到校面谈无需填写地点',next:next()}));
+   d=await detail(lead);assert.equal(d.records.find(r=>r.kind==='appointments'&&r.body.was_scheduled===false).body.place,null);
+  });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);
    await assert.rejects(pool.query('UPDATE ms_workspace.history SET state=\'bad\' WHERE record_id=$1',[trial.id]),/append only/);

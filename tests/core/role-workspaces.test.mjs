@@ -35,6 +35,8 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
    assert.equal((await w('/'+mk+'/claim',{phone:'13900000047',initial_communication:{method:'phone',result:'failed',failure_reason:'无人接听',at:new Date().toISOString()},next:{appointment:ap}})).status,422);
    good(await w('/'+mk+'/claim',{phone:'13900000047',initial_communication:{method:'phone',result:'failed',failure_reason:'被拒接',at:new Date().toISOString()},next:next(1)}));
    assert.equal(good(await w('/'+mk)).events.find(e=>e.event_name==='V34_COMMUNICATION').after_business_json.failure_reason,'被拒接');
+   const f3=good(await w('',{contact_name:'面谈免填地点家长',student_name:'面谈免填地点学生',contact_info:'13900000048',origin_group:'sales',source:'到店',initial_communication:{method:'campus',at:new Date().toISOString(),stage:'needs_confirmed'},next:{appointment:{type:'meeting',due_at:new Date(Date.now()+2*86400000).toISOString()}}})).lead_id;
+   assert.equal(good(await w('/'+f3)).records.filter(r=>r.kind==='appointments').every(r=>r.body.place===null),true);
   });
  }finally{if(app)await new Promise(r=>app.close(r));await pool.end();}
 });
