@@ -184,7 +184,7 @@
   $('business-extra-lines').append(row);
   renumberExtraLines();updateQuotePreview();
  }
- function active(){return enabled&&state.token&&!state.strict;}
+ function active(){return enabled&&state.token&&!state.strict&&!state.user?.workspace_access?.enabled;}
  function clear(){
   generation++;sessionEpoch++;saving=false;records=[];summary=null;editing=null;atDirty=false;nav.hidden=true;
   for(const id of ['business-records','business-summary','business-pipeline','business-history','business-student','business-opportunity','business-quote','business-interactions'])$(id).replaceChildren();

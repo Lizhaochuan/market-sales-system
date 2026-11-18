@@ -23,24 +23,25 @@
  function layout(){if(options?.access?.enabled){legacy=false;for(const b of box.querySelectorAll('[data-workflow-nav]')){const v=b.dataset.workflowNav,g=b.dataset.workflowGroup;if(g==='sales')b.textContent='销售 · 新建 / 查询 Leads';if(v==='tasks')b.textContent='我的待办';b.hidden=g==='market'?!options.access.market:v==='finance'?!options.can_verify&&!options.manager:!options.access.sales;}box.querySelector('.text-button').hidden=true;}if(!enabled||!state.token||state.strict){box.hidden=true;return;}box.hidden=false;for(const b of oldNav)b.hidden=!legacy||(b.dataset.managerOnly!==undefined&&!state.capabilities.manage_identity_requests);$('workspace-business-nav').hidden=!legacy;$('student-access-entry').hidden=!legacy;const hint=$('student-access-note')?.nextElementSibling;if(hint?.classList.contains('fineprint'))hint.hidden=!legacy;if(!legacy)$('student-access-note').hidden=true;}
  for(const [v,g,title]of[['leads','market','市场 · 市场 Leads'],['leads','sales','销售 · 销售 Leads'],['tasks',null,'销售待办'],['metrics',null,'统计与提醒'],['finance',null,'收款核实']]){const b=btn(box,title,()=>{card=null;claim=null;lookupResult=null;view=v;if(g)group=g;selected=null;detail=null;refresh(true);},'nav-item');b.dataset.workflowNav=v;b.dataset.workflowGroup=g||'';}
  btn(box,'历史与管理',()=>{legacy=!legacy;layout();if(legacy)setView('overview');else display();},'text-button');
- async function refresh(force=false){if(!enabled||!state.token||state.strict)return;const token=state.token,ticket=++seq;
+ async function refresh(force=false){if(!enabled||!state.token||state.strict)return;const token=state.token,ticket=++seq,keepForm=!force&&session===state.token&&!!panel.querySelector('form[data-user-dirty="1"]');
   try{const o=await api(root+'/options');const access=o.access;const l=access?.enabled&&!access.sales?{items:[],staff:[],incoming:[]}:await api(root);if(access?.market){const m=await api(root+'/market');if(ticket!==seq||token!==state.token)return;marketRows=m.items;}if(ticket!==seq||token!==state.token)return;options=o;rows=l.items;staff=l.staff;incoming=l.incoming;
    box.querySelector('[data-workflow-nav="finance"]').hidden=!o.can_verify&&!o.manager;
    if(session!==token){card=null;claim=null;lookupResult=null;lookupPhone='';if(access?.enabled){view=access.admin?'metrics':access.sales?'tasks':access.market?'leads':access.finance?'finance':'leads';group=access.sales?'sales':'market';}else if(o.can_verify)view='finance';}layout();
    if(selected){const d=await api(root+'/'+selected);if(ticket!==seq||token!==state.token)return;detail=d;}
    if(view==='metrics'||view==='tasks'){const r=await api(root+'/metrics');if(ticket!==seq||token!==state.token)return;report=r;}
    if(view==='finance'){const q=await api(root+'/finance');if(ticket!==seq||token!==state.token)return;queue=q.items;}
-   if(force||session!==token&&!legacy||state.view==='sales-workflow')display();session=token;
-  }catch(e){if(ticket===seq&&token===state.token){rows=[];detail=null;queue=[];report=null;panel.replaceChildren(node('p','','读取失败：'+e.message));}}
+   if(!keepForm&&(force||session!==token&&!legacy||state.view==='sales-workflow'))display();session=token;
+  }catch(e){if(ticket===seq&&token===state.token){if(keepForm&&![401,403,404].includes(e.status)){announce('刷新失败，未保存的输入已保留：'+e.message);return;}rows=[];detail=null;queue=[];report=null;panel.replaceChildren(node('p','','读取失败：'+e.message));}}
  }
  async function openLead(id){card=null;claim=null;const token=state.token,ticket=++seq;selected=id;detail=null;display();try{const d=await api(root+'/'+id);if(token!==state.token||ticket!==seq)return;detail=d;display();}catch(e){if(token===state.token&&ticket===seq)announce(e.message);}}
  async function mutate(run){if(busy)return;busy=true;const token=state.token,ticket=epoch;panel.querySelectorAll('button').forEach(b=>b.disabled=true);try{await run();if(token!==state.token||ticket!==epoch)return;if(options?.access?.enabled&&selected)card=null;await refresh(true);if(token===state.token&&ticket===epoch)announce('已保存，后续安排已保留');}catch(e){if(token===state.token&&ticket===epoch){announce(e.message);panel.querySelectorAll('button').forEach(b=>b.disabled=false);}}finally{if(ticket===epoch)busy=false;}}
  const post=(id,action,b)=>api(root+'/'+id+'/'+action,{method:'POST',body:{...b,expected_version:Number(b.expected_version)}});
- function timePresets(p,i){const row=node('div','trial-preset-row');for(const [title,days]of[['明天',1],['三天后',3],['一周后',7]])btn(row,title,()=>{const d=new Date();d.setDate(d.getDate()+days);d.setHours(10,0,0,0);i.value=local(d);});p.append(row);}
+ function timePresets(p,i){const row=node('div','trial-preset-row');for(const [title,days]of[['明天',1],['三天后',3],['一周后',7]])btn(row,title,()=>{const d=new Date();d.setDate(d.getDate()+days);d.setHours(10,0,0,0);i.value=local(d);i.dispatchEvent(new Event('input',{bubbles:true}));});p.append(row);}
  function nextFields(p,{allowExisting=true,exclude=null,defaultAction='call'}={}){
   const fieldset=node('fieldset','v34-next');fieldset.append(node('legend','','下一步怎么办？'));p.append(fieldset);
   const eligible=(detail?.records||[]).filter(r=>['tasks','appointments'].includes(r.kind)&&isActive(r)&&r.id!==exclude);
   const existing=select(fieldset,'下一步活动','next_existing',[{id:'',label:'安排新动作'},...(allowExisting?eligible.map(r=>({id:r.id,label:r.body.title+' · '+dateText(r.body.due_at)})):[])],'');
+  if(existing.options.length===1){existing.closest('label').hidden=true;existing.disabled=true;}
   const custom=node('div','field-stack');fieldset.append(custom);const a=select(custom,'下一步做什么','next_action',options.actions,defaultAction,true);
   const m=select(custom,'下次通过什么方式','next_method',options.methods,'phone',true);
   const title=input(custom,'具体事项','next_title','text','了解学生需求，确认方便沟通的时间',true);title.maxLength=300;

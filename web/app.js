@@ -915,7 +915,7 @@ async function api(path,{method='GET',body=null,token=state.token}={}){
   let result;try{result=await res.json();}catch{throw Error('服务器未返回可识别的业务结果');}
   if(!res.ok||result.code!=='OK'){
     if(res.status===401&&token===state.token&&state.token){logout('expired');throw Error('当前登录已过期，请重新进入演示工作台');}
-    throw Error(result.message||'操作未完成，请查看状态');
+    throw Object.assign(Error(result.message||'操作未完成，请查看状态'),{status:res.status});
   }
   return result.data;
 }
