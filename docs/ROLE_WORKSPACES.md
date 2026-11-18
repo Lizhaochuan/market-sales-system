@@ -2,6 +2,17 @@
 
 本轮实施用户确认的页面与接单流程，建立在 V3.4 独立销售工作流之上，不新开 PR、不另建 Lead 系统，不接入 CRM。
 
+## 接手 Agent 的最新入口（2026-11-18）
+
+本文件是本轮页面、角色、电话接单及连续销售流程的最新说明；README 已链接到这里。请先同步 GitHub 分支 `chatgpt/v3-2-121-m02-revocation-notices`，再阅读本文件。仅打开其他工作目录里的旧副本不会自动取得新版本。
+
+- 最近已验证的业务代码提交：`d1dcbdc36848c8a5aa717f345fd9e77a3742fc38`。后续只改本说明的提交不代表业务代码重新改动。
+- 该代码提交验证：接口/权限/安全 **717/717**，Chromium **32/32**，独立 LOGIN/RLS **12/12**，既有设计合约 **8/8**；[完整业务 CI](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44244991694)、[V121 契约/PG 集成](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44244991727)、[跨阶段隔离审计](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44244991582)均成功。
+- 原 [PR #129](https://github.com/Lizhaochuan/market-sales-system/pull/129) 继续 Draft / CI-only；`EXT-001=UNVERIFIED`、`HOLD=true`、`release_eligible=false`，未合并、未部署。
+- 本机入口 `http://127.0.0.1:3100`，虚构演示口令 `0`。开启 V3.4 与部门工作台两个开关；代码、数据升级及权限边界见下文。该地址只在运行本机服务的电脑可用。
+
+阅读顺序：本文件 → `docs/V3.4_SALES_WORKFLOW.md`（基础业务/数据约束）→ `docs/V3.4_DEVELOPMENT_REPORT.md`（原交付快照与人工依赖）。本文件后面的“连续销售卡片与简化待办”和“UAT”章节包括最后两轮反馈；旧报告的历史测试数字不代表当前版本。`LOCAL-SNAPSHOT.md` 是不上传 GitHub 的本机运行记录，不能作为跨环境交接的唯一说明；本机 snapshot Git 提交号也不能替代远程提交号。
+
 ## 登录后看到什么
 
 | 角色 | 首页 | 数据范围 |
@@ -60,8 +71,8 @@
 
 ## 本轮本地验证记录
 
-- 完整接口/权限/安全回归：714/714；新部门/电话/并发/机构隔离专项：10/10（含总测试）。
-- Chromium 全部新旧页面：29/29，其中本轮新页面场景3/3，含预约结果与改期分卡、过期草稿及窄屏。
+- 完整接口/权限/安全回归：717/717；新部门/电话/并发/机构隔离专项：13/13（含总测试）。
+- Chromium 全部新旧页面：32/32，其中本轮新页面场景6/6，含预约结果与改期分卡、过期草稿及窄屏。
 - 本机升级前已停库一致备份；13张原表的34条记录逐条核对均保留，新增的演示角色和授权有独立编号，不覆盖旧记录。
 - 最终远程提交与对应 GitHub CI 见 PR #129。CI 成功不解除 HOLD。
 
