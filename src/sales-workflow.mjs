@@ -118,6 +118,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body}){
   if(body.purpose==='invite'&&!['waiting','agreed_unscheduled','confirmed','unavailable','declined','other'].includes(body.invite_result))fail(422,'VALIDATION_ERROR','请选择邀约结果');
   if(body.result==='waiting'&&body.invite_result&&body.invite_result!=='waiting')fail(422,'INVITE_UNCONFIRMED','尚未回复的邀约不能认定家长已同意或确认');
   if(body.invite_result==='other'&&!notes)fail(422,'VALIDATION_ERROR','请说明邀约情况');
+  if(body.next?.appointment&&body.result!=='communicated')fail(422,'APPOINTMENT_UNCONFIRMED','尚未完成沟通，不能确认本次新的预约；请安排下一次联系');
   let following=body.next;
   if(body.invite_result==='confirmed'){
    if(body.appointment?.type!=='meeting')fail(422,'VALIDATION_ERROR','请填写已确定的面谈预约');
