@@ -8,7 +8,7 @@
 |---|---|---|
 | GitHub 仓库访问 | 已通过 GitHub 连接读取 repository metadata、PR #129、开发分支原始文档 | 读取成功 |
 | 新交接分支 | 从 `chatgpt/v3-2-121-m02-revocation-notices` 创建 `chatgpt/ms-ai-handoff-20261119` | 成功（独立文档分支） |
-| 交接文档写入 | 新增 4 份 `handoff/*.md`；需要最终回读核验 | 待回读 |
+| 交接文档写入 | 新增 4 份 `handoff/*.md`；四份均已从远程分支成功回读 | 通过 |
 | 后端 API、权限、安全测试 | 本次**没有运行** | 未验证 |
 | Chromium/UI 或微信小程序真机测试 | 本次**没有运行** | 未验证 |
 | PostgreSQL 与迁移验证 | 本次**没有运行** | 未验证 |
