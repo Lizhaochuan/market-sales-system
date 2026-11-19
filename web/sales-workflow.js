@@ -1,7 +1,7 @@
 // Standalone V3.4 daily workspace, opt-in only. All session/draft state is memory-only.
 (()=>{
  const root='/api/v1/isolated-workspace/workflow',nav=document.querySelector('nav[aria-label="模块导航"]'),oldNav=[...nav.children].filter(n=>n.tagName==='BUTTON');
- const box=node('div');box.hidden=true;nav.prepend(box);
+ const box=node('div');box.id='v35-sales-box';box.hidden=true;nav.prepend(box);
  const panel=node('section','view');panel.id='sales-workflow';panel.dataset.panel='sales-workflow';document.querySelector('main.main').append(panel);
  let detailHost=panel,enabled=false,view='leads',group='sales',rows=[],staff=[],options=null,selected=null,detail=null,report=null,queue=[],epoch=0,seq=0,busy=false,session=null,incoming=[],legacy=new URLSearchParams(location.search).get('workspace')==='legacy';
  let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine',taskFilter='all',myLeadSearch='',myLeadState='all',myLeadSort='default',listScrollTop=0,winScrollTop=0;

@@ -289,16 +289,16 @@ test('PC-02b: 390px narrow layout, 403 role revocation cleanup, and cross-employ
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
  await expect(page.locator('#v35-side-detail')).toHaveCount(0);
  await expect(page.locator('#sales-workflow')).toContainText('角色已撤销');
- await expect(page.locator('nav[aria-label="模块导航"] > div')).toBeHidden();
+ await expect(page.locator('#v35-sales-box')).toBeHidden();
  await expect(page.locator('#v35-my-leads')).toHaveCount(0);
  await page.unroute('**/api/v1/isolated-workspace/workflow/options');
 
- // 401/404 safe cleanup
- await page.route('**/api/v1/isolated-workspace/workflow/options',route=>route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({code:'UNAUTHORIZED',message:'未登录或登录已过期'})}));
+ // 404 safe cleanup
+ await page.route('**/api/v1/isolated-workspace/workflow/options',route=>route.fulfill({status:404,contentType:'application/json',body:JSON.stringify({code:'NOT_FOUND',message:'工作台端点未找到'})}));
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
  await expect(page.locator('#v35-side-detail')).toHaveCount(0);
- await expect(page.locator('nav[aria-label="模块导航"] > div')).toBeHidden();
- await expect(page.locator('#sales-workflow')).toContainText('未登录或登录已过期');
+ await expect(page.locator('#v35-sales-box')).toBeHidden();
+ await expect(page.locator('#sales-workflow')).toContainText('工作台端点未找到');
  await page.unroute('**/api/v1/isolated-workspace/workflow/options');
 
  // Cross-employee isolation: sales-b cannot see sales-a leads or list search state or drafts
