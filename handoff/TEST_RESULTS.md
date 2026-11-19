@@ -25,42 +25,37 @@
 ## 二、PC-03 客户列表紧凑列式视图与联系方式脱敏验证记录（chatgpt/ms-ui-003-pc-03）
 
 - **开发分支**：`chatgpt/ms-ui-003-pc-03`（基于 PC-02 已验收文档 HEAD `09af1155092b6e8322359c4f29e5677d4dbc32b2` / 代码 `a36ba3984df6c3ae7962cc30698c2d43fa42fd46`）
-- **最新受测代码 Commit SHA**：`3cfea70d831990bb5e7ba0b5f4d1df17e49e12a8`
+- **最新受测代码 Commit SHA**：`0eb982d7b7981b69a82aa38506bb8289a22adbf0`
 - **当前状态**：`REVIEW_REQUIRED`（最新增量代码已通过 GitHub Actions 全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED` / `merge_authorized=false` / `deploy_authorized=false`，待 ChatGPT 最终审核）
 
-### 1. 本轮增量实现与安全边界
+### 1. 本轮增量实现与安全边界（含电话号码数据最小化修复）
 
-1. **后端最小化只读字段补充（`src/sales-workflow.mjs` `listing()`）**：
-   - 在既有授权与组织隔离查询 `GET /workflow` 中只读补充：`a.kind AS activity_kind`、`last_communication`（取自 `ms.audit_events` 最新 `V34_COMMUNICATION`）、`latest_appointment`（取自 `ms_workspace.records WHERE kind='appointments'`，按活跃状态优先）。
-   - 严格使用结构化业务事实，不从标题猜测面谈/试听/报名/到账；`ms_workspace.lead_directory.marketing_notes` 仍严禁进入销售列表与详情接口。
+1. **后端接口数据最小化与服务端搜索（`src/app.mjs`、`src/isolated-business-workspace.mjs`、`src/sales-workflow.mjs`）**：
+   - `src/app.mjs` 与 `src/isolated-business-workspace.mjs` 将 URL `query` 参数透传至 `salesWorkflow(..., { query })`。
+   - `src/sales-workflow.mjs` `listing(c, ctx, query)` 从 `GET /workflow` 响应中彻底剥离明文 `contact_info`，仅返回 `contact_info_masked`（如 `139****0045`，无电话返回 `""`）；同时只读补充 `a.kind AS activity_kind`、`last_communication`、`latest_appointment`。
+   - 支持可选 `?q=` 参数在服务端 SQL 层匹配联系人/学生姓名及（`>=4` 位数字时）电话号码，严格在既有 `organization_id`、非市场部门与 `owner_user_id = actor OR manager` 隔离范围内查询，返回结果同样仅含 `contact_info_masked`、不含明文 `contact_info`。
+   - 完整原始电话号码仅通过经权限校验的 `GET /workflow/:id` 详情接口按需获取；`ms_workspace.lead_directory.marketing_notes` 仍严禁进入销售列表与详情接口。
 2. **紧凑列式视图与卡片视图切换（`web/sales-workflow.js`、`web/styles.css`）**：
-   - 在 `renderPhoneIntake()` 的“我的客户列表”新增 `列式视图`（默认）与 `卡片视图` 切换按钮（`aria-pressed`），切换视图不丢失搜索、状态筛选、排序、选中客户、滚动位置及未保存草稿。
-   - 展示学生（含多学生串联）、销售阶段与终态、获客来源、最近一次实际沟通结果、面谈/试听当前状态、明确下一步及执行时间、真实逾期红标（`.badge.warning`）。
-   - `>=1080px` 非分栏时展示 6 列对齐表头与列表；分栏或 `390px` 窄屏自动折叠为无横向溢出紧凑布局。
-   - 修复编辑中即时显现“放弃未保存修改”按钮（`#v35-discard-draft`）。
-3. **联系方式默认脱敏与详情按需展示**：
-   - 列表与卡片视图统一通过 `maskPhone()` 脱敏展示电话（如 `138****1122`），无电话显示 `未留电话`；不在列表 DOM 文本、`title`、`aria-label`、`data-*` 或隐藏元素输出明文电话。
-   - 完整电话仅在经服务端权限校验的授权客户详情 `renderLead()` 中按需展示。
-4. **Playwright 扩展回归（`tests/browser/zz-role-workspaces.spec.mjs`）**：
-   - `PC-03a`：列式/卡片双视图切换与状态/草稿保持、结构化沟通/面谈试听/报价非误标、列表脱敏与无市场内部备注泄露、多学生/无电话/空状态、1440/1280/390px 零横向溢出。
-   - `PC-03b`：授权详情展示完整电话且不含市场备注、跨员工 `sales-b` 列表及 API 403 隔离、403 fail-closed 清理。
+   - `renderPhoneIntake()` 列表与卡片均改用 `l.contact_info_masked` 展示脱敏电话，不在前端列表状态、DOM、隐藏属性或本地存储保留明文电话。
+   - 搜索框输入 `>=4` 位数字时自动触发 `GET /api/v1/isolated-workspace/workflow?q=...` 服务端检索（带 `token` / `epoch` / `searchSeq` 并发护栏及 401/403/404 `handleAuthFailure`），姓名/学生关键字仍走本地快速过滤；切换列式/卡片视图保留搜索、筛选、排序、选中客户、滚动位置及未保存草稿。
+3. **API 与 Playwright 扩展回归（`tests/core/role-workspaces.test.mjs`、`tests/browser/zz-role-workspaces.spec.mjs`）**：
+   - `tests/core/role-workspaces.test.mjs`：断言 `GET /workflow` 列表及 `?q=` 响应不含明文 `contact_info` 且仅含 `contact_info_masked`，`GET /workflow/:id` 授权详情返回完整 `contact_info`，跨员工 `sales-b` 查询 `?q=` 返回 0 条。
+   - `PC-03a`/`PC-03b`：拦截并断言 `GET /api/v1/isolated-workspace/workflow` 及 `?q=` 响应 JSON 绝不含原始电话号码，验证按完整电话搜索命中自身客户且不泄露明文，验证跨员工 `?q=` 隔离、授权详情显示完整电话、1440/1280/390px 零横向溢出及 403 fail-closed 清理。
 
 ### 2. 本地静态检查与合约测试
-- `node --check src/sales-workflow.mjs`：退出码 **`0`**
-- `node --check web/sales-workflow.js`：退出码 **`0`**
-- `node --check tests/browser/zz-role-workspaces.spec.mjs`：退出码 **`0`**
+- `node --check src/app.mjs src/isolated-business-workspace.mjs src/sales-workflow.mjs web/sales-workflow.js tests/core/role-workspaces.test.mjs tests/browser/zz-role-workspaces.spec.mjs`：退出码 **`0`**
 - `node --test tests/contracts/contracts.test.mjs`：退出码 **`0`**（**8 passed, 0 failed**）
 
 ### 3. GitHub Actions 验证记录
-- **最新实测代码 CI（通过）**：[Run 44525579636](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44525579636)
-  - 对应提交：`3cfea70d831990bb5e7ba0b5f4d1df17e49e12a8`
-  - 运行结果：`status=completed`, `conclusion=success`, 耗时 5m12s，全部步骤 `success`。
-  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**38 passed / 0 failed**（3.5m，含全部 PC-01、PC-02a/b 与新增 PC-03a/b）。
+- **最新实测代码 CI（通过）**：[Run 44534751901](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44534751901)
+  - 对应提交：`0eb982d7b7981b69a82aa38506bb8289a22adbf0`
+  - 运行结果：`status=completed`, `conclusion=success`, 耗时 4m59s，全部 21/21 步 `success`。
+  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**38 passed / 0 failed**（2.6m，含全部 PC-01、PC-02a/b 与更新后 PC-03a/b）。
   - `Core API, authorization, idempotency and Chinese audit E2E`：**exit 0**（全量通过）。
   - `Restricted actual LOGIN and tenant row-level security E2E`：**exit 0**（全量通过）。
   - `Check frontend JavaScript syntax`：**exit 0**。
   - `Existing design contract regression`：**exit 0**（**8 passed / 0 failed**）。
-- *历史失败尝试（已修复，不得混淆）*：`Run 44515061076`（`08bfa80`，测试 quote 传参多字段）、`Run 44516401867`/`44517094967`（`5a998bc`/`0798e5e`，测试 fixture `lead_state` 与 SQL 参数数）、`Run 44517946646`/`44520293271`/`44523324555`（GitHub runner 依赖安装超时/环境故障）、`Run 44521232808`/`44524377333`（`d6faecd` 缺少即时 unhide `#v35-discard-draft`）。
+- *历史阶段 CI（已 superseded，不得混淆）*：`Run 44525579636`（`3cfea70d831990bb5e7ba0b5f4d1df17e49e12a8`，修复列表 API 明文电话前）。
 
 ---
 
