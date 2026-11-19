@@ -125,7 +125,16 @@ test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and
  await expect(page.locator('#v35-task-count')).toBeHidden();
  await expect(page.locator('#v35-approvals')).toHaveCount(0);
  await expect(page.locator('#v35-handover-tasks')).toBeVisible();
- await expect(page.locator('#v35-handover-tasks')).toContainText('暂无待审批或待接手事项');
+ const handoverRows=page.locator('#v35-handover-tasks article');
+ const handoverCount=await handoverRows.count();
+ if(handoverCount){
+  for(let i=0;i<handoverCount;i++)await expect(handoverRows.nth(i)).toContainText(/待补安排|待确认接手|待主管独立复核/);
+  await expect(page.locator('#v35-handover-tasks')).not.toContainText('暂无待审批或待接手事项');
+ }else{
+  await expect(page.locator('#v35-handover-tasks')).toContainText('暂无待审批或待接手事项');
+ }
+ await expect(page.locator('#v35-handover-tasks')).not.toContainText(callName);
+ await expect(page.locator('#v35-handover-tasks')).not.toContainText(trialName);
 
  // Refresh preserves handover filter
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
@@ -209,13 +218,32 @@ test('PC-02a: wide-screen side-detail preserves list search/filter/sort and unsa
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
  await expect(follow.locator('[name="notes"]')).toHaveValue('PC02未保存草稿保护');
 
- // Back to list preserves search, filter, sort
+ // Back to list preserves search, filter, sort and retains in-memory draft
  await side.getByRole('button',{name:'返回客户列表',exact:true}).click();
  await expect(page.locator('#v35-side-detail')).toHaveCount(0);
  await expect(list).toBeVisible();
  await expect(list.locator('[name="my_lead_search"]')).toHaveValue('PC02测试');
  await expect(list.locator('[name="my_lead_state"]')).toHaveValue('open');
  await expect(list.locator('[name="my_lead_sort"]')).toHaveValue('name_asc');
+
+ // Re-open customer: unsaved draft is NOT silently lost
+ await list.locator('.v35-lead-compact').filter({hasText:'PC02测试A'}).getByRole('button',{name:'打开客户'}).click();
+ await expect(page.locator('#v35-side-detail')).toBeVisible();
+ await expect(page.locator('#v34-followup [name="notes"]')).toHaveValue('PC02未保存草稿保护');
+
+ // Actively confirm discard: clears draft and resets card
+ page.once('dialog',d=>d.accept());
+ await page.locator('#v35-side-detail').getByRole('button',{name:'放弃未保存修改',exact:true}).click();
+ await expect(page.locator('#v34-followup')).toHaveCount(0);
+
+ // Normal return without modifications is unaffected
+ await page.locator('#v35-side-detail').getByRole('button',{name:'返回客户列表',exact:true}).click();
+ await expect(page.locator('#v35-side-detail')).toHaveCount(0);
+ await expect(list).toBeVisible();
+ await list.locator('.v35-lead-compact').filter({hasText:'PC02测试A'}).getByRole('button',{name:'打开客户'}).click();
+ await expect(page.locator('#v35-side-detail')).toBeVisible();
+ await expect(page.locator('#v34-followup')).toHaveCount(0);
+ await page.locator('#v35-side-detail').getByRole('button',{name:'返回客户列表',exact:true}).click();
 
  // Tasks view side-detail + back to tasks
  await page.getByRole('button',{name:'我的待办',exact:true}).click();
@@ -254,21 +282,32 @@ test('PC-02b: 390px narrow layout, 403 role revocation cleanup, and cross-employ
  await expect(page.locator('#v35-my-leads')).toBeVisible();
  await expect(page.locator('#v35-my-leads [name="my_lead_search"]')).toHaveValue('PC02隔离测试');
 
- // Role revocation (403) clears open detail and unsaved form
+ // Role revocation (403) clears open detail, hides nav, and prevents restoring old leads
  await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02隔离测试'}).getByRole('button',{name:'打开客户'}).click();
  await expect(page.locator('#v35-side-detail')).toBeVisible();
  await page.route('**/api/v1/isolated-workspace/workflow/options',route=>route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({code:'FORBIDDEN',message:'角色已撤销'})}));
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
  await expect(page.locator('#v35-side-detail')).toHaveCount(0);
  await expect(page.locator('#sales-workflow')).toContainText('角色已撤销');
+ await expect(page.locator('nav[aria-label="模块导航"] > div')).toBeHidden();
+ await expect(page.locator('#v35-my-leads')).toHaveCount(0);
  await page.unroute('**/api/v1/isolated-workspace/workflow/options');
 
- // Cross-employee isolation: sales-b cannot see sales-a leads or list search state
+ // 401/404 safe cleanup
+ await page.route('**/api/v1/isolated-workspace/workflow/options',route=>route.fulfill({status:401,contentType:'application/json',body:JSON.stringify({code:'UNAUTHORIZED',message:'未登录或登录已过期'})}));
+ await page.evaluate(()=>window.__refreshBusinessWorkspace());
+ await expect(page.locator('#v35-side-detail')).toHaveCount(0);
+ await expect(page.locator('nav[aria-label="模块导航"] > div')).toBeHidden();
+ await expect(page.locator('#sales-workflow')).toContainText('未登录或登录已过期');
+ await page.unroute('**/api/v1/isolated-workspace/workflow/options');
+
+ // Cross-employee isolation: sales-b cannot see sales-a leads or list search state or drafts
  await page.setViewportSize({width:1280,height:720});
  await login(page,'sales-b');
  await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
  await expect(page.locator('#v35-my-leads [name="my_lead_search"]')).toHaveValue('');
  await expect(page.locator('#v35-my-leads')).not.toContainText('PC02隔离测试');
+ await expect(page.locator('#v35-side-detail')).toHaveCount(0);
 });
 
 

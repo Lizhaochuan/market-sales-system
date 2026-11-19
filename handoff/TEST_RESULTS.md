@@ -13,10 +13,10 @@
 | **PR #129 HEAD 对应 GitHub Actions CI 查询** | `gh pr checks 129` 与 `gh run list --branch chatgpt/v3-2-121-m02-revocation-notices -L 5` | `exit 0` | `fda4ceb8063248caed0a5f55f7c69d17fbaa8e74` 对应 4/4 检查 `pass`（见第二节完整链接）；**绿色 CI 不解除 HOLD** |
 | **最新业务源码与迁移逐文件核读** | 读取 `docs/ROLE_WORKSPACES.md`、`docs/V3.4_SALES_WORKFLOW.md`、`docs/V3.4_DEVELOPMENT_REPORT.md`、`db/workspace-migrations/039`–`040`、`src/sales-workflow.mjs`、`src/role-workspaces.mjs`、`web/sales-workflow.js` 及 V3.4/角色测试清单 | 完成 | 核实防断链 DB 触发器、独立面谈/试听、标准 B 与 Won 分离、角色隔离与待办已落地；确认无 `miniprogram/` 及独立 Boss 驾驶舱文件 |
 | **仓库工作区与隔离检查** | `git status -sb`（`market-sales-system` 与 `edu-management-system`） | `exit 0` | 仅更新 `chatgpt/ms-ai-handoff-20261119` 下 `handoff/*.md`；未触碰业务代码，未触碰 `edu-management-system` |
-| **本地后端 API / 权限 / 安全测试** | `npm test`（本地因新容器无 `node_modules` 报 `ERR_MODULE_NOT_FOUND`；GitHub Actions CI [44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746) 中全绿通过） | `exit 0` (CI) | **全部通过**：CI 独立 PostgreSQL 16 环境完整跑通 |
+| **后端 API / 权限 / 安全测试（本地受阻，CI 验证）** | `npm test` 在新容器因缺 `pg` 包无法运行；[GitHub Actions Run 44467955779](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955779) 在隔离 PostgreSQL 16/Node 22 Runner 执行完整核心测试 | CI `exit 0`；`722 passed / 0 failed` | **CI 实测通过**，本地未复跑；不能混淆两种环境 |
 | **本地合约语法与设计测试** | 独立运行 `node --check src/sales-workflow.mjs` (exit 0)、`node --check web/sales-workflow.js` (exit 0)、`node --check tests/browser/zz-role-workspaces.spec.mjs` (exit 0) 与 `node --test tests/contracts/contracts.test.mjs` (exit 0, 8 passed) | `exit 0` | **全部通过**：逐文件语法检查与设计不变量无误 |
-| **本地 PostgreSQL 迁移执行** | GitHub Actions CI [44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746) 执行完整迁移与测试数据播种 | `exit 0` | **全部通过** |
-| **Chromium 浏览器 UAT (PC-01)** | GitHub Actions CI [44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746) 官方 Runner 执行 `npx playwright test` | `exit 0` (33 passed, 22.2s) | **实测全绿通过**：涵盖 `tests/browser/zz-role-workspaces.spec.mjs` 全部 8 项用例及全仓 33 项浏览器回归 |
+| **PostgreSQL 迁移执行（GitHub Actions CI）** | [Run 44467955779](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955779) 中创建完整隔离 Schema 和 fixture | CI `exit 0` | **CI 通过**，未执行本地迁移 |
+| **Chromium 浏览器 UAT (PC-01)** | [Run 44467955779](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955779)，提交 `77c532977049311a70e45332c4e4f3a7cdccbd91`，执行 `npx playwright test` | CI `exit 0`，`34 passed / 0 failed`，约 2.4 分钟 | **全部通过**：含 8 项角色工作台浏览器用例及 PC-01；旧 Run 44465869746 实为失败，不得混淆 |
 | **微信小程序开发者工具 / 真机测试** | 仓库无小程序工程，本轮**没有运行** | — | **未验证** |
 | **生产环境 / 外部系统集成** | 本轮**没有接触** | — | 不适用；禁止部署 |
 
@@ -24,21 +24,30 @@
 
 ## 二、PC-02 客户列表与侧边详情优化验证记录（chatgpt/ms-ui-002-pc-02）
 
-- **开发分支**：`chatgpt/ms-ui-002-pc-02`（基于 `chatgpt/ms-ui-001-pc-01` @ `06c1a7f7c291490ab6cc68e464da93178914e648`）
-- **实测代码 Commit SHA**：`2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`
-- **当前状态**：`REVIEW_REQUIRED`（已通过全流程 CI，待 ChatGPT 最终审核；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`）
+- **开发分支**：`chatgpt/ms-ui-002-pc-02`（基于 `chatgpt/ms-ui-001-pc-01` 已验收基线）
+- **基线实测代码 Commit SHA**：`2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`（历史基线 CI：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)）
+- **当前状态**：`REVIEW_REQUIRED`（待本轮增量修复 CI 运行验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`）
 
-### 1. 本轮改动与协同修复
-1. **`web/sales-workflow.js`**：
-   - 新增分栏与列表状态（`detailHost`、`myLeadSearch`、`myLeadState`、`myLeadSort`、`listScrollTop`、`winScrollTop`），在 `view==='tasks'` 或 `view==='leads' && lookupResult===null` 时渲染 `#v35-split-workspace` 与 `#v35-side-detail`。
-   - 复用 `renderLead(side)`、`renderCardOperations` 及单项操作卡片，提供上下文返回按钮（`返回客户列表` / `返回我的待办`）并保留搜索、筛选、排序与滚动位置。
-   - 维持 `keepForm` 未保存草稿保护；在退出登录（`isolated-session-clear`）、切换员工及 `refresh()` 遇 401/403/404 撤权时彻底清空客户详情、草稿目标与列表筛选状态。
-   - 修复 `renderHandover()`：`待补安排`（`needs_arrangement`）仅在 `全部当日` 视图显示，确保 `待审批/待接手` 筛选在无待审批/待接手时稳定展示空状态。
-2. **`web/styles.css`**：
-   - 新增 `.v35-list-controls`、`.v35-lead-compact` / `.active`、`.v35-side-detail`，`@media(min-width:1280px)` 启用双栏分栏，`@media(max-width:1279px)` 打开详情时隐藏列表，`@media(max-width:600px)` 切换单列筛选控件。
-3. **`tests/browser/zz-role-workspaces.spec.mjs`**：
-   - 新增 `PC-02a`（宽屏 1280px 侧边详情、列表搜索/筛选/排序/返回保持、单项卡片、未保存草稿刷新保护、待办侧边详情往返）与 `PC-02b`（390px 窄屏切换与无横向溢出、403 撤权清理、跨员工隔离）。
-   - 修复 PC-01 用例中 `ms.leads` 缺少 `contact_name` 列的问题（改为 `JOIN ms.contacts c ON c.id=l.contact_id WHERE ... c.display_name=$1`）。
+### 1. 本轮增量修复与代码改进
+
+针对 ChatGPT 静态代码审查指出的两处遗漏进行针对性增强：
+
+1. **未保存表单导航保护（内存安全暂存与主动放弃确认）**：
+   - 在 `web/sales-workflow.js` 中引入会话级内存暂存结构 `leadDrafts = new Map()` 与辅助函数 `hasDirtyForm()`、`snapshotLead(leadId)`、`restoreLeadDraft(draft)`。
+   - 用户在侧边详情编辑跟进备注、变更状态或操作卡片表单未保存时，点击“返回客户列表”或“返回我的待办”，前端自动将草稿快照安全保存在当前员工会话内存中（不持久化至 `localStorage` 或 `sessionStorage`，杜绝 XSS 泄露与跨会话残留）。
+   - 再次点击打开该客户时，自动恢复未保存的卡片、意向、备注内容并提示“已恢复本客户未保存的临时草稿”。
+   - 在操作卡片区域显式提供“放弃未保存修改”按钮，点击触发 `confirm('确定放弃本次未保存的修改吗？')` 弹窗；用户主动确认后清除草稿并重置表单；未确认则保持原样。表单提交成功后（`mutate` 成功）自动清理该客户的草稿条目。普通无修改返回不受影响。
+
+2. **401/403/404 权限异常 fail-closed 彻底清理**：
+   - 提取全局安全清理函数 `wipeState()`，遇 401/403/404 权限撤回或失效时，除了清空 `rows`、`selected`、`detail` 外，彻底清理 `lookupPhone`、`lookupResult`、`claim`、`marketRows`、`incoming`、`options`、`staff`、`pendingLostFeedback` 及 `leadDrafts`，并显式隐藏 `#v35-sales-box` 工作台导航。
+   - 在导航点击回调和 `display()` 中强制校验 `options?.access?.enabled`，权限撤回后 fail-closed 阻断任何导航切换与数据展示。
+   - 严格保留 503 与临时网络断网时的 `keepForm` 保护，避免偶发网络波动误伤正在编辑的表单。
+   - 在退出登录广播（`isolated-session-clear`）中同样调用 `wipeState()`，确保新员工登录后无法继承旧员工客户列表、详情或草稿。
+
+3. **测试用例扩展（`tests/browser/zz-role-workspaces.spec.mjs`）**：
+   - **`PC-02a`**：增加输入未保存跟进备注 -> 返回客户列表 -> 再次打开该客户 -> 断言未保存备注内容完整恢复；点击“放弃未保存修改”确认弹窗 -> 断言表单已清空；普通无修改返回正常流畅。
+   - **`PC-02b`**：增加 403 权限撤权后工作台导航隐藏、旧客户详情清空断言；401/404 安全报错断言；切换至新员工 `sales-b` 登录断言无法看到 `sales-a` 客户、侧边详情与草稿。
+   - 修复 PC-01 用例中 `ms.leads` 缺少 `contact_name` 列的问题（通过 `JOIN ms.contacts c ON c.id=l.contact_id` 关联）。
 
 ### 2. 本地静态检查与合约测试
 - `node --check src/sales-workflow.mjs`：退出码 **`0`**
@@ -46,17 +55,9 @@
 - `node --check tests/browser/zz-role-workspaces.spec.mjs`：退出码 **`0`**
 - `node --test tests/contracts/contracts.test.mjs`：退出码 **`0`**（**8 passed, 0 failed**）
 
-### 3. GitHub Actions 全流程 CI 实测结果
-- **Workflow**：`V3.2 isolated core business API`（`v3-2-core-api.yml`）
-- **CI 运行链接**：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)（Job ID `135399140279`，耗时 4m44s，退出码 **`0`**）
-- **对应 Commit SHA**：`2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`
-- **关键步骤结论**：
-  - `Restricted runtime role and forbidden finance operations`：pass
-  - `Restricted actual LOGIN and tenant row-level security E2E`：pass
-  - `Check frontend JavaScript syntax`：pass
-  - `Core API, authorization, idempotency and Chinese audit E2E`：pass
-  - `Real headless Chromium workflow and responsive UI` (`npx playwright test`)：pass（含 PC-01 与 PC-02a/PC-02b 全部浏览器回归）
-  - `Existing design contract regression` (`node --test tests/contracts/contracts.test.mjs`)：pass
+### 3. GitHub Actions 验证记录
+- **历史基线 CI**：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)（提交 `2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`，耗时 4m44s，17 步全绿通过）。
+- **本轮最新代码 CI**：将在提交推送后实时触发并回填 Run 链接、耗时与各步骤结论。
 
 ---
 
@@ -67,52 +68,42 @@
 根据 ChatGPT 对第一版 PC-01 真实代码审核反馈，完成了以下精准修改：
 
 1. **`src/sales-workflow.mjs`（第 347 行）**：
-   - **修复**：在 `metrics()` 返回的 `reminders` 中显式输出已有数据库记录真实类型：
-     ```javascript
-     kind: r.kind,
-     type: r.kind === 'appointments' ? r.body.type : (r.body.action || 'call'),
-     appointment_type: r.kind === 'appointments' ? r.body.type : null
-     ```
-   - **效果**：不破坏已有预约数据结构，不新建第二套任务体系，前端获得稳定的结构化类型判别依据，消除标题关键字模糊匹配。
-
+   - 在 `metrics()` 返回的 `reminders` 中显式输出已有数据库记录真实类型（`kind`、`type`、`appointment_type`），消除标题关键字模糊匹配。
 2. **`web/sales-workflow.js`（第 178–247 行）**：
-   - **修复**：
-     - 创建独立受控容器 `#v35-handover-tasks`，将审批、接手、待补安排统一由 `renderHandover()` 动态管理。
-     - 在 `taskFilter==='handover'` 时，彻底隐藏当日普通待办（`#v35-day-tasks`）、逾期待办（`#v35-overdue-tasks`）、概览统计与日期标题，仅显示 `#v35-handover-tasks`；无事项时渲染语义化空状态：“暂无待审批或待接手事项”。
-     - 严格遵守 `options.manager` 权限控制，普通销售（`sales-a`）永不渲染 `#v35-approvals`，不越权暴露主管独立复核区块。
-     - 在 `taskFilter==='appointments'` 时，依据结构化字段排他过滤，无预约时渲染空状态：“当天没有面谈或试听安排”。
-     - 胶囊切换至 `all` 时恢复一体化视图，且在自动/手动刷新（`__refreshBusinessWorkspace()`）及草稿保护下维持筛选态。
-
-3. **`tests/browser/zz-role-workspaces.spec.mjs`（用例 8 时区稳定化与强制断言）**：
-   - **消除跨时区/跨午夜风险**：摒弃使用本地运行环境时区计算“今日”，改为通过 `Intl.DateTimeFormat(..., {timeZone:'Asia/Shanghai'})` 显式计算上海自然日（如 `shTodayStr`），并以 UTC 04:00 构造上海正午 12:00 基准时间戳。无论测试在 UTC、PST 还是北京时间运行，均稳定对应同一自然日。
-   - **排他性正反断言**：同一天内同时生成“普通电话跟进”与“试听预约”，筛选后正向断言试听预约存在，反向断言普通电话被严格过滤（`not.toContainText`）；切换至无预约日期断言显示空状态；刷新后断言筛选状态依然保持。
-   - **强制主管独立复核权限断言（拒绝静默跳过）**：取消原 `if(leadRow)` 可选分支，改为明确依据当日创建的客户检索 `lead_id`，强制断言检索成功（`expect(leadRes.rows.length).toBe(1)`）；插入待复核记录后以 `supervisor` 登录断言 `#v35-approvals` 呈现“待主管独立复核”且当日待办隐藏；再切回 `sales-a` 强制断言复核区块不存在（count 0）。
-   - **390px 移动端断言**：无横向滚动溢出断言。
+   - 创建独立受控容器 `#v35-handover-tasks`，将审批、接手、待补安排统一由 `renderHandover()` 动态管理；
+   - 在 `taskFilter==='handover'` 时排他显示待审批/待接手，无事项时渲染语义化空状态；严格遵守 `options.manager` 权限控制；
+   - 在 `taskFilter==='appointments'` 时依据结构化字段排他过滤；
+   - 保持 60 秒刷新及草稿保护。
+3. **`tests/browser/zz-role-workspaces.spec.mjs`**：
+   - 消除跨时区/跨午夜风险（按 Asia/Shanghai 锚定自然日）；
+   - 增加排他性正反断言及空状态断言；
+   - 强制主管独立复核权限断言（拒绝静默跳过）；
+   - 390px 移动端无横向溢出断言。
 
 ### 2. 逐文件静态检查结果
-
-逐一执行 `node --check` 命令（无批量跳过）：
 - `node --check src/sales-workflow.mjs`：退出码 **`0`**
 - `node --check web/sales-workflow.js`：退出码 **`0`**
 - `node --check tests/browser/zz-role-workspaces.spec.mjs`：退出码 **`0`**
 - `node --test tests/contracts/contracts.test.mjs`：退出码 **`0`**（8 passed，0 failed）
 
-### 3. GitHub Actions CI 真实运行与验证证据
+### 3. GitHub Actions CI 真实运行与验证证据（含失败复盘）
 
-在具备完整依赖环境的 GitHub Actions 官方 Runner 上针对分支 `chatgpt/ms-ui-001-pc-01` 成功触发全流程 CI：
-- **CI 运行链接**：[Run 44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746)（Job ID `135363397698`，耗时 3m11s）
-- **对应 Commit SHA**：`ed2b188c0119e8cf9698d254589d318359b3d2b2`
-- **实际执行结果**：
-  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` 退出码 `0`，**`33 passed (22.2s)`**（包含全部 8 项 `zz-role-workspaces.spec.mjs` 角色工作台测试）
-  - `Restricted actual LOGIN and tenant row-level security E2E`：退出码 `0`，**`12 passed, 0 failed`**
-  - `Core API, authorization, idempotency and Chinese audit E2E`：退出码 `0`，全部通过
-  - `Check frontend JavaScript syntax`：31 个前端/后端关键脚本 `node --check` 退出码 `0`
-  - `Existing design contract regression`：退出码 `0`，**`8 passed, 0 failed`**
-- **当前状态评定**：依据 GitHub Actions 官方独立环境实测全绿证据，正式将 PC-01 标为 **`DONE`**。
+**严格按每次运行的真实状态记录；旧失败不得被后续成功覆盖或冒称已通过。**
+
+- **首次失败**：[Run 44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746)；对应代码 `ed2b1884ab776e51bb1ff8584da5a9ee2e4ddd99`，结论 **failure**。Playwright **33 passed / 1 failed**；PC-01 测试错误假定待审批/待接手容器为空，而既有 fixture 含真实待补安排客户。
+- **第二次失败**：[Run 44467709039](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467709039)；对应 `aafeffd89af60f0142844fe3d390c09d3cce0c26`，结论 **failure**。Playwright **33 passed / 1 failed**；修正空列表假设后，新用例查询不存在的 `ms.leads.contact_name` 数据库列而失败。
+- **最终通过**：[Run 44467955779](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955779)（Job ID `135370195511`），**`status=completed`、`conclusion=success`、`head_sha=77c532977049311a70e45332c4e4f3a7cdccbd91`**：
+  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**34 passed / 0 failed**（约 2.4m；含全部 8 项 `zz-role-workspaces.spec.mjs` 用例）。
+  - `Core API, authorization, idempotency and Chinese audit E2E`：**exit 0**，**722 passed / 0 failed**。
+  - `Restricted actual LOGIN and tenant row-level security E2E`：**exit 0**，**12 passed / 0 failed**。
+  - `Check frontend JavaScript syntax`：**exit 0**。
+  - `Existing design contract regression`：**exit 0**，**8 passed / 0 failed**。
+  - 关联 [跨阶段隔离审计 Run 44467955638](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955638) 与 [通知契约 Run 44467955661](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955661) 均为 **success**。
+- **代码与日志对应关系**：PC-01 原开发分支 `chatgpt/ms-ui-001-pc-01` 已安全快进到该 CI 验证的代码提交 `77c5329`，经 ChatGPT 验收。所有原始 CI 输出、退出状态和失败证据均保存在上述 GitHub Actions Run 页面。
 
 ---
 
-## 三、PR #129 当前 HEAD (`fda4ceb8063248caed0a5f55f7c69d17fbaa8e74`) 远端 GitHub Actions CI 实查结果
+## 四、PR #129 当前 HEAD (`fda4ceb8063248caed0a5f55f7c69d17fbaa8e74`) 远端 GitHub Actions CI 实查结果
 
 以下为 2026-11-19 通过 `gh pr checks 129` 与 `gh run list` 实时查询的远端 CI 记录（均对应 `headSha = fda4ceb8063248caed0a5f55f7c69d17fbaa8e74`，触发时间 `2026-11-18T09:57Z`）：
 
