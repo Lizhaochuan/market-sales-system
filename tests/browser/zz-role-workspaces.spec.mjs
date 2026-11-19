@@ -164,7 +164,7 @@ test('PC-02: side-detail preserves list state, protects unsaved drafts, and enfo
  await login(page,'sales-a');
 
  // Create two leads for sales-a
- for(const name of ['PC02测试乙','PC02测试甲']){
+ for(const name of ['PC02测试B','PC02测试A']){
   await lookup(page,phone());
   const f=page.locator('#v34-intake');
   await f.locator('[name="contact_name"]').fill(name);
@@ -187,17 +187,17 @@ test('PC-02: side-detail preserves list state, protects unsaved drafts, and enfo
 
  const rowsText=await list.locator('.v35-lead-compact strong').allTextContents();
  expect(rowsText.length).toBeGreaterThanOrEqual(2);
- const idxA=rowsText.findIndex(t=>t.includes('PC02测试甲'));
- const idxB=rowsText.findIndex(t=>t.includes('PC02测试乙'));
+ const idxA=rowsText.findIndex(t=>t.includes('PC02测试A'));
+ const idxB=rowsText.findIndex(t=>t.includes('PC02测试B'));
  expect(idxA).toBeGreaterThanOrEqual(0);
  expect(idxB).toBeGreaterThan(idxA);
 
- // Open PC02测试甲 in side-detail on 1280px wide screen
- await list.locator('.v35-lead-compact').filter({hasText:'PC02测试甲'}).getByRole('button',{name:'打开客户'}).click();
+ // Open PC02测试A in side-detail on 1280px wide screen
+ await list.locator('.v35-lead-compact').filter({hasText:'PC02测试A'}).getByRole('button',{name:'打开客户'}).click();
  const side=page.locator('#v35-side-detail');
  await expect(side).toBeVisible();
  await expect(list).toBeVisible();
- await expect(list.locator('.v35-lead-compact.active')).toContainText('PC02测试甲');
+ await expect(list.locator('.v35-lead-compact.active')).toContainText('PC02测试A');
 
  // Single-operation card inside side-detail + unsaved draft protection on refresh
  await side.locator('#v34-primary').getByRole('button',{name:'去跟进 / 记录沟通结果',exact:true}).click();
@@ -224,7 +224,7 @@ test('PC-02: side-detail preserves list state, protects unsaved drafts, and enfo
  const day=await page.evaluate(()=>{const d=new Date();d.setDate(d.getDate()+1);return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);});
  await page.locator('#v34-tasks [name="task_day"]').fill(day);
  await page.locator('#v34-tasks [name="task_day"]').dispatchEvent('change');
- await page.locator('#v34-tasks article').filter({hasText:'PC02测试甲'}).first().getByRole('button',{name:'查看进展 / 继续跟进'}).click();
+ await page.locator('#v34-tasks article').filter({hasText:'PC02测试A'}).first().getByRole('button',{name:'查看进展 / 继续跟进'}).click();
  await expect(page.locator('#v35-side-detail')).toBeVisible();
  await expect(page.locator('#v34-tasks')).toBeVisible();
  await page.locator('#v35-side-detail').getByRole('button',{name:'返回我的待办',exact:true}).click();
@@ -233,22 +233,22 @@ test('PC-02: side-detail preserves list state, protects unsaved drafts, and enfo
  // 390px narrow screen: opening detail hides list, back restores list with search preserved, no horizontal overflow
  await page.setViewportSize({width:390,height:844});
  await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
- await page.locator('#v35-my-leads [name="my_lead_search"]').fill('PC02测试甲');
- await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02测试甲'}).getByRole('button',{name:'打开客户'}).click();
+ await page.locator('#v35-my-leads [name="my_lead_search"]').fill('PC02测试A');
+ await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02测试A'}).getByRole('button',{name:'打开客户'}).click();
  await expect(page.locator('#v35-side-detail')).toBeVisible();
  await expect(page.locator('#v35-my-leads')).toBeHidden();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.locator('#v35-side-detail').getByRole('button',{name:'返回客户列表',exact:true}).click();
  await expect(page.locator('#v35-my-leads')).toBeVisible();
- await expect(page.locator('#v35-my-leads [name="my_lead_search"]')).toHaveValue('PC02测试甲');
+ await expect(page.locator('#v35-my-leads [name="my_lead_search"]')).toHaveValue('PC02测试A');
 
  // Role revocation (403) clears open detail and unsaved form
- await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02测试甲'}).getByRole('button',{name:'打开客户'}).click();
+ await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02测试A'}).getByRole('button',{name:'打开客户'}).click();
  await expect(page.locator('#v35-side-detail')).toBeVisible();
- await page.route('**/api/v1/isolated-workspace/workflow/options',route=>route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({error:{message:'角色已撤回'}})}));
+ await page.route('**/api/v1/isolated-workspace/workflow/options',route=>route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({code:'FORBIDDEN',message:'角色已撤销'})}));
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
  await expect(page.locator('#v35-side-detail')).toHaveCount(0);
- await expect(page.locator('#sales-workflow')).toContainText('读取失败');
+ await expect(page.locator('#sales-workflow')).toContainText('角色已撤销');
  await page.unroute('**/api/v1/isolated-workspace/workflow/options');
 
  // Cross-employee isolation: sales-b cannot see sales-a leads or list search state
@@ -256,8 +256,8 @@ test('PC-02: side-detail preserves list state, protects unsaved drafts, and enfo
  await login(page,'sales-b');
  await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
  await expect(page.locator('#v35-my-leads [name="my_lead_search"]')).toHaveValue('');
- await expect(page.locator('#v35-my-leads')).not.toContainText('PC02测试甲');
- await expect(page.locator('#v35-my-leads')).not.toContainText('PC02测试乙');
+ await expect(page.locator('#v35-my-leads')).not.toContainText('PC02测试A');
+ await expect(page.locator('#v35-my-leads')).not.toContainText('PC02测试B');
 });
 
 
