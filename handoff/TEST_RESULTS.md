@@ -24,11 +24,14 @@
 
 ## 二、PC-02 客户列表与侧边详情优化验证记录（chatgpt/ms-ui-002-pc-02）
 
+**2026-11-19 ChatGPT 最终复审勘误与验收签收**：交付报告把 CI 对应提交错写为 `a36ba392070e7e1f41b2c45ee2b1462ce4aa4533`（GitHub 不存在该提交）；实查 GitHub Actions [Run 44510026815](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44510026815) 的实际 `head_sha=a36ba3984df6c3ae7962cc30698c2d43fa42fd46`，状态 `completed/success`。该代码通过 Node/PG **722/722**、Chromium **36/36**、LOGIN/RLS **12/12**、合约 **8/8**。静态复审确认跨客户/导航保存当前内存草稿、独立恢复、主动放弃，以及 refresh/openLead/mutate/history 四类异步请求的 401/403/404 fail-closed 清理。新 PC-02b 实测 POST 400/503/403、GET 403/404；401 分支代码逻辑核查通过，但本次新增用例并未单独模拟 401，不得夸大。仅有 handoff 文档提交发生在上述受测代码后，不修改受测业务代码。结论：**PC-02=DONE（开发/测试验收）**，全局仍保持 `HOLD=true`、`EXT-001=UNVERIFIED`、`merge_authorized=false`、`deploy_authorized=false`。
+
+
 - **开发分支**：`chatgpt/ms-ui-002-pc-02`（基于 `chatgpt/ms-ui-001-pc-01` 已验收基线）
 - **基线实测代码 Commit SHA**：`2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`（历史基线 CI：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)）
 - **前期增量代码 Commit SHA**：`797fbc0156bcbcc3b5d62d357ceab8293e5ac2d5`（前期 CI：[Run 44496152941](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44496152941)）
-- **最新实测代码 Commit SHA**：`a36ba392070e7e1f41b2c45ee2b1462ce4aa4533`
-- **当前状态**：`REVIEW_REQUIRED`（最新修复与扩展测试已通过 GitHub Actions 17/17 全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`，待 ChatGPT 最终审核）
+- **最新实测代码 Commit SHA**：`a36ba3984df6c3ae7962cc30698c2d43fa42fd46`
+- **当前状态**：`DONE`（ChatGPT 复核源码及 GitHub Actions 原始日志通过；仅代表 PC-02 开发测试验收完成。仍保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`；不合并、不部署）
 
 ### 1. 本轮增量修复与代码改进
 
@@ -57,7 +60,7 @@
      - 增加 POST 400 业务错误断言：表单与输入内容安全保留，不被清空；
      - 增加 POST 503 服务端暂时不可用断言：表单与输入内容安全保留，不被清空；
      - 增加 POST 403 权限撤销断言：立即 fail-closed 清理，工作台导航隐藏，旧客户详情清空；
-     - 增加 GET 403 权限撤权后工作台导航隐藏、旧客户详情清空断言；401/404 安全报错断言；
+     - 增加 POST 403、GET 403 与 GET 404 导致工作台清空及导航隐藏的断言；401 走同一 `handleAuthFailure` 代码分支，但本次新增 PC-02b 用例没有单独模拟 401，不能将其误报为已单独实测；
      - 切换至新员工 `sales-b` 登录断言无法看到 `sales-a` 客户、侧边详情与草稿。
    - 修复 PC-01 用例中 `ms.leads` 缺少 `contact_name` 列的问题（通过 `JOIN ms.contacts c ON c.id=l.contact_id` 关联）。
 
@@ -71,9 +74,9 @@
 - **历史基线 CI**：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)（提交 `2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`，耗时 4m44s，17 步全绿通过）。
 - **前期增量代码 CI（通过）**：[Run 44496152941](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44496152941)（提交 `797fbc0156bcbcc3b5d62d357ceab8293e5ac2d5`，耗时 5m01s，17 步全绿）。
 - **最新增量代码 CI（通过）**：[Run 44510026815](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44510026815)
-  - 对应提交：`a36ba392070e7e1f41b2c45ee2b1462ce4aa4533`
+  - 对应提交：`a36ba3984df6c3ae7962cc30698c2d43fa42fd46`
   - 运行结果：`status=completed`, `conclusion=success`, 耗时 5m07s，17/17 步骤全部通过。
-  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**36 passed / 0 failed**（约 2.6m；含全部 8 项 `zz-role-workspaces.spec.mjs` 用例，涵盖 PC-01 与全面增强的 PC-02a、PC-02b）。
+  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**36 passed / 0 failed**（约 2.6m；含全部 10 项 `zz-role-workspaces.spec.mjs` 用例，涵盖 PC-01 与全面增强的 PC-02a、PC-02b）。
   - `Core API, authorization, idempotency and Chinese audit E2E`：**exit 0**，**722 passed / 0 failed**。
   - `Restricted actual LOGIN and tenant row-level security E2E`：**exit 0**，**12 passed / 0 failed**。
   - `Check frontend JavaScript syntax`：**exit 0**。
