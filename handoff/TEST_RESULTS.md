@@ -24,9 +24,13 @@
 
 ## 二、PC-03 客户列表紧凑列式视图与联系方式脱敏验证记录（chatgpt/ms-ui-003-pc-03）
 
+**ChatGPT 复审签收（2026-11-19）**：直接核实 [Run 44534751901](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44534751901) `status=completed/conclusion=success`，实测代码 SHA `0eb982d7b7981b69a82aa38506bb8289a22adbf0`。真实日志：Chromium **38/38**、核心 API/权限/安全 **722/722**、LOGIN/RLS **12/12**、合约 **8/8**。审阅 `src/sales-workflow.mjs` 确认列表查询内临时使用 `w.contact_info` 完成服务端匹配，但返回前通过 `({contact_info,...r})` 删除明文，仅返回 `contact_info_masked`；授权详情接口仍单独校验权限。核实 API 与 Playwright 断言已验证普通列表、`?q=` 搜索列表原始 JSON 不含完整电话，并验证跨员工搜索无结果、市场备注不可见和草稿/视图回归。该 SHA 后仅更新交接 Markdown，未修改受测代码。**PC-03=DONE**。注意：搜索时用户输入的完整电话仍随 `GET ?q=` 请求 URL 发送，未来正式部署前需单独评估 HTTP 访问日志、代理日志与监控中的敏感参数脱敏/改用受控 POST 查询；这一项不是列表 API 响应泄露，亦不构成本轮开发验收的合并/上线授权。
+
+
+
 - **开发分支**：`chatgpt/ms-ui-003-pc-03`（基于 PC-02 已验收文档 HEAD `09af1155092b6e8322359c4f29e5677d4dbc32b2` / 代码 `a36ba3984df6c3ae7962cc30698c2d43fa42fd46`）
 - **最新受测代码 Commit SHA**：`0eb982d7b7981b69a82aa38506bb8289a22adbf0`
-- **当前状态**：`REVIEW_REQUIRED`（最新增量代码已通过 GitHub Actions 全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED` / `merge_authorized=false` / `deploy_authorized=false`，待 ChatGPT 最终审核）
+- **当前状态**：`DONE`（ChatGPT 对源码、JSON 返回、权限约束及 CI 原始日志核验通过；仅代表 PC-03 开发与测试验收完成。Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED` / `merge_authorized=false` / `deploy_authorized=false` 不变。）
 
 ### 1. 本轮增量实现与安全边界（含电话号码数据最小化修复）
 
