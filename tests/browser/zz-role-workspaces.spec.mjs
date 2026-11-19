@@ -307,6 +307,7 @@ test('PC-02b: 390px narrow layout, 403 role revocation cleanup, and cross-employ
  await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02隔离测试'}).getByRole('button',{name:'打开客户'}).click();
  await page.locator('#v34-primary').getByRole('button',{name:'去跟进 / 记录沟通结果',exact:true}).click();
  const follow=page.locator('#v34-followup');
+ await follow.locator('[name="result"]').selectOption('communicated');
  await follow.locator('[name="notes"]').fill('未提交跟进记录');
 
  // Save POST returns 400: preserves form and uncommitted input
