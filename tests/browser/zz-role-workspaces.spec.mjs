@@ -858,18 +858,17 @@ test('PC-04b: week calendar navigation, cross-month/year & Asia/Shanghai midnigh
 
 
 
-test('PC-05: a manually chosen follow-up time is saved and appears at that time in the to-do list', async ({page}) => {
+test('PC-05: manually scheduled late follow-up keeps its exact time after sign-in', async ({page}) => {
  const student = '手动安排学生' + Date.now();
  const title = '按约定时间电话回访';
  const {manualTime, taskDay, displayTime} = await page.evaluate(() => {
-  const due = new Date();
-  due.setDate(due.getDate() + 2);
-  due.setHours(15, 37, 0, 0);
+  const todayInShanghai = new Intl.DateTimeFormat('en-CA', {
+   timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const due = new Date(Date.parse(todayInShanghai + 'T22:37:00+08:00') + 2 * 86400000);
   return {
    manualTime: new Date(due.getTime() - due.getTimezoneOffset() * 60000).toISOString().slice(0, 16),
-   taskDay: new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
-   }).format(due),
+   taskDay: new Date(due.getTime() + 8 * 3600000).toISOString().slice(0, 10),
    displayTime: due.toLocaleString('zh-CN', {hour12: false}),
   };
  });
@@ -880,12 +879,27 @@ test('PC-05: a manually chosen follow-up time is saved and appears at that time 
  await form.locator('[name="contact_name"]').fill('手动安排家长');
  await form.locator('[name="student_name"]').fill(student);
  await form.locator('[name="next_title"]').fill(title);
- await nextTomorrow(page, form);
+
+ const presetButtons = form.locator('.v34-next .trial-preset-row button');
+ await expect(presetButtons).toHaveText(['明天', '三天后', '一周后']);
  const time = form.locator('[name="next_at"]');
+ await nextTomorrow(page, form);
+ await expect(time).toHaveValue(/^\d{4}-\d{2}-\d{2}T10:00$/);
+ await expect(time).not.toHaveValue(manualTime);
  await time.fill(manualTime);
  await expect(time).toHaveValue(manualTime);
- await form.getByRole('button', {name: '保存客户及首次安排'}).click();
- await expect(page.locator('#v34-message')).toHaveText('已保存，后续安排已保留');
+
+ const [saved] = await Promise.all([
+  page.waitForResponse(response =>
+   response.request().method() === 'POST' &&
+   new URL(response.url()).pathname === '/api/v1/isolated-workspace/workflow'
+  ),
+  form.getByRole('button', {name: '保存客户及首次安排'}).click(),
+ ]);
+ expect(saved.ok()).toBe(true);
+ const primary = page.locator('#v34-primary');
+ await expect(primary).toContainText(title);
+ await expect(primary).toContainText(displayTime);
 
  await login(page);
  const day = page.locator('#v34-tasks [name="task_day"]');
