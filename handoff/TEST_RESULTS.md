@@ -26,27 +26,39 @@
 
 - **开发分支**：`chatgpt/ms-ui-002-pc-02`（基于 `chatgpt/ms-ui-001-pc-01` 已验收基线）
 - **基线实测代码 Commit SHA**：`2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`（历史基线 CI：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)）
-- **最新实测代码 Commit SHA**：`797fbc0156bcbcc3b5d62d357ceab8293e5ac2d5`
-- **当前状态**：`REVIEW_REQUIRED`（最新增量代码已通过全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`，待 ChatGPT 最终审核）
+- **前期增量代码 Commit SHA**：`797fbc0156bcbcc3b5d62d357ceab8293e5ac2d5`（前期 CI：[Run 44496152941](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44496152941)）
+- **最新实测代码 Commit SHA**：`a36ba392070e7e1f41b2c45ee2b1462ce4aa4533`
+- **当前状态**：`REVIEW_REQUIRED`（最新修复与扩展测试已通过 GitHub Actions 17/17 全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`，待 ChatGPT 最终审核）
 
 ### 1. 本轮增量修复与代码改进
 
-针对 ChatGPT 静态代码审查指出的两处遗漏进行针对性增强：
+针对 ChatGPT 最终验收指出的一“客户间直接切换导致未保存草稿丢失”与二“401/403/404 fail-closed 清理覆盖所有异步入口”两处遗漏进行针对性增强：
 
-1. **未保存表单导航保护（内存安全暂存与主动放弃确认）**：
-   - 在 `web/sales-workflow.js` 中引入会话级内存暂存结构 `leadDrafts = new Map()` 与辅助函数 `hasDirtyForm()`、`snapshotLead(leadId)`、`restoreLeadDraft(draft)`。
-   - 用户在侧边详情编辑跟进备注、变更状态或操作卡片表单未保存时，点击“返回客户列表”或“返回我的待办”，前端自动将草稿快照安全保存在当前员工会话内存中（不持久化至 `localStorage` 或 `sessionStorage`，杜绝 XSS 泄露与跨会话残留）。
-   - 再次点击打开该客户时，自动恢复未保存的卡片、意向、备注内容并提示“已恢复本客户未保存的临时草稿”。
+1. **未保存表单导航保护与客户直接切换隔离（内存安全暂存、独立草稿与主动放弃确认）**：
+   - 在 `web/sales-workflow.js` 中引入会话级内存暂存结构 `leadDrafts = new Map()` 与辅助函数 `hasDirtyForm()`、`snapshotLead(leadId)`、`restoreLeadDraft(draft)`，并通过输入监听实时标记表单 `data-user-dirty`。
+   - 用户在侧边详情编辑跟进备注、变更状态或操作卡片表单未保存时，点击“返回客户列表”、“返回我的待办”、顶部导航或**在客户间直接切换（A -> B）**时，`openLead(id, recordId)` 与各导航入口自动通过 `saveCurrentLeadDraft()` 将草稿快照安全保存在当前员工会话内存中（不持久化至 `localStorage` 或 `sessionStorage`，杜绝 XSS 泄露与跨会话残留）。
+   - 切换到客户 B 时不会混淆或恢复客户 A 的表单草稿；再次点击打开客户 A 时，自动恢复客户 A 未保存的卡片、意向、备注内容并提示“已恢复本客户未保存的临时草稿”。
+   - 操作卡片提交成功（如安排试听、记录到访、推进后续）进入的延续界面（`scheduled` / `recorded` / `trial-next`）不被作为未保存草稿暂存，避免掩盖后续正常操作卡片。
    - 在操作卡片区域显式提供“放弃未保存修改”按钮，点击触发 `confirm('确定放弃本次未保存的修改吗？')` 弹窗；用户主动确认后清除草稿并重置表单；未确认则保持原样。表单提交成功后（`mutate` 成功）自动清理该客户的草稿条目。普通无修改返回不受影响。
 
-2. **401/403/404 权限异常 fail-closed 彻底清理**：
-   - 提取全局安全清理函数 `wipeState()`，遇 401/403/404 权限撤回或失效时，除了清空 `rows`、`selected`、`detail` 外，彻底清理 `lookupPhone`、`lookupResult`、`claim`、`marketRows`、`incoming`、`options`、`staff`、`pendingLostFeedback` 及 `leadDrafts`，并显式隐藏 `#v35-sales-box` 工作台导航。
-   - 严格保留 503 与临时网络断网时的 `keepForm` 保护，避免偶发网络波动误伤正在编辑的表单。
+2. **401/403/404 权限异常 fail-closed 彻底清理覆盖全异步入口**：
+   - 提取全局安全清理函数 `wipeState()` 与 `handleAuthFailure(e)`，统一接管 `refresh()`、`openLead()`、`mutate()` 及 `history()` 异步调用。
+   - 遇 401/403/404 权限撤回或失效时，除了清空 `rows`、`selected`、`detail` 外，递增 `epoch++; seq++; busy=false;` 拦截并使任何在途滞后的异步响应彻底失效，彻底清理 `lookupPhone`、`lookupResult`、`claim`、`marketRows`、`incoming`、`options`、`staff`、`pendingLostFeedback` 及 `leadDrafts`，并显式隐藏 `#v35-sales-box` 工作台导航。
+   - 严格保留 400（业务/参数错误）、503（服务端暂时不可用）与临时网络断网时的 `keepForm` 保护，保留正在编辑的表单与输入内容，并显示明确错误提示。
    - 在退出登录广播（`isolated-session-clear`）中同样调用 `wipeState()`，确保新员工登录后无法继承旧员工客户列表、详情或草稿。
 
 3. **测试用例扩展（`tests/browser/zz-role-workspaces.spec.mjs`）**：
-   - **`PC-02a`**：增加输入未保存跟进备注 -> 返回客户列表 -> 再次打开该客户 -> 断言未保存备注内容完整恢复；点击“放弃未保存修改”确认弹窗 -> 断言表单已清空；普通无修改返回正常流畅。
-   - **`PC-02b`**：增加 403 权限撤权后工作台导航隐藏、旧客户详情清空断言；401/404 安全报错断言；切换至新员工 `sales-b` 登录断言无法看到 `sales-a` 客户、侧边详情与草稿。
+   - **`PC-02a`**：
+     - 增加输入未保存跟进备注 -> 返回客户列表 -> 再次打开该客户 -> 断言未保存备注内容完整恢复；
+     - 增加客户间直接切换：客户 A 输入未保存跟进备注 -> 直接点击客户 B -> 断言客户 B 处于干净初始状态无客户 A 的草稿；再次点击客户 A -> 断言客户 A 的未保存备注完整恢复；
+     - 增加在编辑中直接点击顶部“我的待办”/“客户概览”安全保留草稿；
+     - 点击“放弃未保存修改”确认弹窗 -> 断言表单已清空；普通无修改返回正常流畅。
+   - **`PC-02b`**：
+     - 增加 POST 400 业务错误断言：表单与输入内容安全保留，不被清空；
+     - 增加 POST 503 服务端暂时不可用断言：表单与输入内容安全保留，不被清空；
+     - 增加 POST 403 权限撤销断言：立即 fail-closed 清理，工作台导航隐藏，旧客户详情清空；
+     - 增加 GET 403 权限撤权后工作台导航隐藏、旧客户详情清空断言；401/404 安全报错断言；
+     - 切换至新员工 `sales-b` 登录断言无法看到 `sales-a` 客户、侧边详情与草稿。
    - 修复 PC-01 用例中 `ms.leads` 缺少 `contact_name` 列的问题（通过 `JOIN ms.contacts c ON c.id=l.contact_id` 关联）。
 
 ### 2. 本地静态检查与合约测试
@@ -57,10 +69,11 @@
 
 ### 3. GitHub Actions 验证记录
 - **历史基线 CI**：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)（提交 `2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`，耗时 4m44s，17 步全绿通过）。
-- **最新增量代码 CI（通过）**：[Run 44496152941](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44496152941)
-  - 对应提交：`797fbc0156bcbcc3b5d62d357ceab8293e5ac2d5`
-  - 运行结果：`status=completed`, `conclusion=success`, 耗时 5m01s，17/17 步骤全部通过。
-  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**36 passed / 0 failed**（约 2.5m；含全部 8 项 `zz-role-workspaces.spec.mjs` 用例，涵盖 PC-01 与新增 PC-02a、PC-02b）。
+- **前期增量代码 CI（通过）**：[Run 44496152941](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44496152941)（提交 `797fbc0156bcbcc3b5d62d357ceab8293e5ac2d5`，耗时 5m01s，17 步全绿）。
+- **最新增量代码 CI（通过）**：[Run 44510026815](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44510026815)
+  - 对应提交：`a36ba392070e7e1f41b2c45ee2b1462ce4aa4533`
+  - 运行结果：`status=completed`, `conclusion=success`, 耗时 5m07s，17/17 步骤全部通过。
+  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**36 passed / 0 failed**（约 2.6m；含全部 8 项 `zz-role-workspaces.spec.mjs` 用例，涵盖 PC-01 与全面增强的 PC-02a、PC-02b）。
   - `Core API, authorization, idempotency and Chinese audit E2E`：**exit 0**，**722 passed / 0 failed**。
   - `Restricted actual LOGIN and tenant row-level security E2E`：**exit 0**，**12 passed / 0 failed**。
   - `Check frontend JavaScript syntax`：**exit 0**。
