@@ -389,4 +389,200 @@ test('PC-02b: 390px narrow layout, 403 role revocation cleanup, and cross-employ
  await expect(page.locator('#v35-side-detail')).toHaveCount(0);
 });
 
+test('PC-03a: compact columnar view, card toggle, structured facts, phone masking, and responsive layout',async({page})=>{
+ await page.setViewportSize({width:1440,height:900});
+ const suffix=String(Date.now()).slice(-4);
+ const pMarket='13899'+suffix+'11';
+ const pOverdue='13988'+suffix+'22';
+ const pTrial='13777'+suffix+'33';
+ const pMarketMask=pMarket.slice(0,3)+'****'+pMarket.slice(-4);
+ const pOverdueMask=pOverdue.slice(0,3)+'****'+pOverdue.slice(-4);
+ const pTrialMask=pTrial.slice(0,3)+'****'+pTrial.slice(-4);
+
+ // 1. Market creates a lead with confidential market notes
+ await login(page,'market-a');
+ const mf=page.locator('#v35-market-intake');
+ await mf.locator('..').locator('summary').click();
+ await mf.locator('[name="phone"]').fill(pMarket);
+ await mf.locator('[name="contact_name"]').fill('PC03交接家长'+suffix);
+ await mf.locator('[name="student_name"]').fill('PC03交接学生'+suffix);
+ await mf.locator('[name="notes"]').fill('市场内部机密备注PC03-'+suffix);
+ await mf.getByRole('button',{name:'保存并提交销售交接'}).click();
+ await expect(page.locator('#v35-market')).toContainText('PC03交接家长'+suffix);
+
+ // 2. Sales-a claims market lead with a task titled "联系家长确定试听时间" (must NOT mislabel as 试听预约)
+ await login(page,'sales-a');
+ await page.evaluate(async({pMarket,pOverdue,pTrial,suffix})=>{
+  const tom=new Date(Date.now()+86400000).toISOString();
+  const past=new Date(Date.now()-2*86400000).toISOString();
+  const lkp=await api('/api/v1/isolated-workspace/workflow/lookup',{method:'POST',body:{phone:pMarket}});
+  const mItem=lkp.items.find(i=>i.status==='market_available');
+  await api('/api/v1/isolated-workspace/workflow/'+mItem.lead_id+'/claim',{method:'POST',body:{phone:pMarket,initial_communication:{method:'phone',at:new Date(Date.now()-3600000).toISOString(),stage:'courses_introduced',notes:'初次电话沟通'},next:{action:'confirm_trial',method:'phone',title:'联系家长确定试听时间',due_at:tom}}});
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'PC03逾期家长'+suffix,student_name:'PC03逾期学生'+suffix,contact_info:pOverdue,origin_group:'sales',source:'网络咨询',initial_communication:{method:'phone',result:'failed',failure_reason:'无人接听',at:new Date(Date.now()-3600000).toISOString()},next:{action:'call',method:'phone',title:'逾期回访'+suffix,due_at:past}}});
+  const tr=await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'PC03试听家长'+suffix,student_name:'PC03试听学生'+suffix,contact_info:pTrial,origin_group:'sales',source:'转介绍',initial_communication:{method:'phone',at:new Date(Date.now()-3600000).toISOString(),stage:'courses_introduced'},next:{appointment:{type:'trial',due_at:tom,place:'101教室',course:'数学'}}}});
+  // Add a quote/enrollment intent on trial lead (must NOT mislabel as 已收款/已全款结案)
+  const det=await api('/api/v1/isolated-workspace/workflow/'+tr.lead_id);
+  const sid=det.students[0].id;
+  await api('/api/v1/isolated-workspace/workflow/'+tr.lead_id+'/quote',{method:'POST',body:{expected_version:det.workflow.version,student_id:sid,items:[{course_label:'数学',unit_cents:10000,quantity:10,discount_cents:0}]}});
+ },{pMarket,pOverdue,pTrial,suffix});
+
+ // Add a multi-student & no-contact lead via DB to cover edge cases
+ const noContactId='36000000-0000-4000-8000-'+String(Date.now()).slice(-12).padStart(12,'0');
+ const cId='36000000-0000-4000-8001-'+String(Date.now()).slice(-12).padStart(12,'0');
+ const s1Id='36000000-0000-4000-8002-'+String(Date.now()).slice(-12).padStart(12,'0');
+ const s2Id='36000000-0000-4000-8003-'+String(Date.now()).slice(-12).padStart(12,'0');
+ const org='20000000-0000-4000-8000-000000000001';
+ const owner='20000000-0000-4000-8000-000000000011';
+ await pool.query("INSERT INTO ms.contacts(id,organization_id,display_name) VALUES($1,$2,$3)",[cId,org,'PC03无电话家长'+suffix]);
+ await pool.query("INSERT INTO ms.leads(id,organization_id,contact_id,owner_user_id,lead_state) VALUES($1,$2,$3,$4,'assigned')",[noContactId,org,cId,owner]);
+ await pool.query("INSERT INTO ms.students(id,organization_id,display_name,owner_user_id) VALUES($1,$2,$3,$4),($5,$2,$6,$4)",[s1Id,org,'PC03大宝'+suffix,owner,s2Id,org,'PC03二宝'+suffix]);
+ await pool.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'confirmed'),($1,$3,'confirmed')",[noContactId,s1Id,s2Id]);
+ await pool.query("INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,stage,terminal_state,contact_info) VALUES($1,$2,'needs_discovery','open',NULL)",[noContactId,org]);
+
+ await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
+ const list=page.locator('#v35-my-leads');
+ await expect(list).toBeVisible();
+
+ // 3. Default compact columnar view assertions
+ await expect(list.getByRole('button',{name:'列式视图'})).toHaveAttribute('aria-pressed','true');
+ await expect(list.locator('.v35-table-head')).toBeVisible();
+ await list.locator('[name="my_lead_search"]').fill(suffix);
+
+ // Verify masked phones and NO raw phones anywhere in #v35-my-leads HTML (text, title, aria-label, data-*)
+ const listHtml=await list.innerHTML();
+ expect(listHtml).toContain(pMarketMask);
+ expect(listHtml).toContain(pOverdueMask);
+ expect(listHtml).toContain(pTrialMask);
+ expect(listHtml).not.toContain(pMarket);
+ expect(listHtml).not.toContain(pOverdue);
+ expect(listHtml).not.toContain(pTrial);
+ expect(listHtml).not.toContain('市场内部机密备注PC03');
+
+ // Verify structured fields & non-mislabeling
+ const marketRow=list.locator('.v35-lead-compact').filter({hasText:'PC03交接学生'+suffix});
+ await expect(marketRow).toContainText('市场活动');
+ await expect(marketRow).toContainText('已沟通（电话）');
+ await expect(marketRow).toContainText('未预约面谈/试听');
+ await expect(marketRow).toContainText('联系家长确定试听时间');
+
+ const overdueRow=list.locator('.v35-lead-compact').filter({hasText:'PC03逾期学生'+suffix});
+ await expect(overdueRow).toContainText('网络咨询');
+ await expect(overdueRow).toContainText('未接通（无人接听）');
+ await expect(overdueRow).toContainText('未预约面谈/试听');
+ await expect(overdueRow.locator('.badge.warning')).toContainText('已逾期');
+
+ const trialRow=list.locator('.v35-lead-compact').filter({hasText:'PC03试听学生'+suffix});
+ await expect(trialRow).toContainText('转介绍');
+ await expect(trialRow).toContainText('试听 · 已预约');
+ await expect(trialRow).toContainText('跟进中');
+ await expect(trialRow).not.toContainText('已全款结案');
+ await expect(trialRow).not.toContainText('已收款');
+
+ const multiRow=list.locator('.v35-lead-compact').filter({hasText:'PC03大宝'+suffix+'、PC03二宝'+suffix});
+ await expect(multiRow).toContainText('未留电话');
+ await expect(multiRow).toContainText('待补安排');
+
+ // 4. Preserve search, filter, sort, selected lead, and unsaved card draft when toggling views
+ await list.locator('[name="my_lead_state"]').selectOption('open');
+ await list.locator('[name="my_lead_sort"]').selectOption('name_asc');
+ await marketRow.getByRole('button',{name:'打开客户'}).click();
+ const side=page.locator('#v35-side-detail');
+ await expect(side).toBeVisible();
+ await side.locator('#v34-primary').getByRole('button',{name:'去跟进 / 记录沟通结果',exact:true}).click();
+ await side.locator('#v34-followup [name="notes"]').fill('PC03切换视图保留草稿');
+
+ // Switch to Card View
+ await list.getByRole('button',{name:'卡片视图'}).click();
+ await expect(list.getByRole('button',{name:'卡片视图'})).toHaveAttribute('aria-pressed','true');
+ await expect(list.locator('.v35-table-head')).toHaveCount(0);
+ await expect(list.locator('[name="my_lead_search"]')).toHaveValue(suffix);
+ await expect(list.locator('[name="my_lead_state"]')).toHaveValue('open');
+ await expect(list.locator('[name="my_lead_sort"]')).toHaveValue('name_asc');
+ await expect(list.locator('.v35-lead-compact.active')).toContainText('PC03交接学生'+suffix);
+ await expect(side.locator('#v34-followup [name="notes"]')).toHaveValue('PC03切换视图保留草稿');
+ const cardHtml=await list.innerHTML();
+ expect(cardHtml).toContain(pMarketMask);
+ expect(cardHtml).not.toContain(pMarket);
+ expect(cardHtml).not.toContain('市场内部机密备注PC03');
+
+ // Switch back to Columnar View
+ await list.getByRole('button',{name:'列式视图'}).click();
+ await expect(list.getByRole('button',{name:'列式视图'})).toHaveAttribute('aria-pressed','true');
+ await expect(side.locator('#v34-followup [name="notes"]')).toHaveValue('PC03切换视图保留草稿');
+
+ // Discard draft and close side detail for clean responsive check
+ page.once('dialog',d=>d.accept());
+ await side.getByRole('button',{name:'放弃未保存修改',exact:true}).click();
+ await side.getByRole('button',{name:'返回客户列表',exact:true}).click();
+
+ // Empty state check
+ await list.locator('[name="my_lead_search"]').fill('绝对不存在的客户关键字XYZ');
+ await expect(list).toContainText('暂无匹配客户');
+ await list.locator('[name="my_lead_search"]').fill(suffix);
+
+ // 5. Responsive check on 1280px and 390px (zero horizontal overflow in both views)
+ await page.setViewportSize({width:1280,height:720});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await list.getByRole('button',{name:'卡片视图'}).click();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('PC-03b: authorized detail shows full phone without market notes, cross-employee & 403 isolation',async({page})=>{
+ await page.setViewportSize({width:1280,height:720});
+ const suffix=String(Date.now()).slice(-4);
+ const pAuth='13655'+suffix+'44';
+ const pAuthMask=pAuth.slice(0,3)+'****'+pAuth.slice(-4);
+
+ await login(page,'market-a');
+ const mf=page.locator('#v35-market-intake');
+ await mf.locator('..').locator('summary').click();
+ await mf.locator('[name="phone"]').fill(pAuth);
+ await mf.locator('[name="contact_name"]').fill('PC03授权家长'+suffix);
+ await mf.locator('[name="student_name"]').fill('PC03授权学生'+suffix);
+ await mf.locator('[name="notes"]').fill('市场绝密备注不得泄露-'+suffix);
+ await mf.getByRole('button',{name:'保存并提交销售交接'}).click();
+ await expect(page.locator('#v35-market')).toContainText('PC03授权家长'+suffix);
+
+ await login(page,'sales-a');
+ const leadId=await page.evaluate(async({pAuth})=>{
+  const tom=new Date(Date.now()+86400000).toISOString();
+  const lkp=await api('/api/v1/isolated-workspace/workflow/lookup',{method:'POST',body:{phone:pAuth}});
+  const mItem=lkp.items.find(i=>i.status==='market_available');
+  const r=await api('/api/v1/isolated-workspace/workflow/'+mItem.lead_id+'/claim',{method:'POST',body:{phone:pAuth,next:{action:'call',method:'phone',title:'初次联系',due_at:tom}}});
+  return r.lead_id;
+ },{pAuth});
+
+ await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
+ const list=page.locator('#v35-my-leads');
+ await list.locator('[name="my_lead_search"]').fill(suffix);
+ const row=list.locator('.v35-lead-compact').filter({hasText:'PC03授权学生'+suffix});
+ await expect(row).toContainText(pAuthMask);
+ expect(await list.innerHTML()).not.toContain(pAuth);
+
+ // Authorized detail shows full phone, never market notes
+ await row.getByRole('button',{name:'打开客户'}).click();
+ const side=page.locator('#v35-side-detail');
+ await expect(side).toBeVisible();
+ await expect(side).toContainText('联系方式：'+pAuth);
+ await expect(side).not.toContainText('市场绝密备注不得泄露');
+
+ // Cross-employee isolation: sales-b cannot see lead in list or via API
+ await login(page,'sales-b');
+ await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
+ await expect(page.locator('#v35-my-leads')).not.toContainText('PC03授权学生'+suffix);
+ await expect(page.locator('#v35-my-leads')).not.toContainText(pAuthMask);
+ const status=await page.evaluate(async(id)=>{try{await api('/api/v1/isolated-workspace/workflow/'+id);return 200;}catch(e){return e.status;}},leadId);
+ expect(status).toBe(403);
+
+ // 403 fail-closed wipes list and nav
+ await page.route('**/api/v1/isolated-workspace/workflow/options',r=>r.fulfill({status:403,contentType:'application/json',body:JSON.stringify({code:'FORBIDDEN',message:'角色已撤销'})}));
+ await page.getByRole('button',{name:'刷新数据',exact:true}).click();
+ await expect(page.locator('#sales-workflow')).toContainText('角色已撤销');
+ await expect(page.locator('#v35-sales-box')).toBeHidden();
+ await page.unroute('**/api/v1/isolated-workspace/workflow/options');
+});
+
+
 
