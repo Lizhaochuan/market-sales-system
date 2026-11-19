@@ -434,10 +434,9 @@ test('PC-03a: compact columnar view, card toggle, structured facts, phone maskin
  const org='20000000-0000-4000-8000-000000000001';
  const owner='20000000-0000-4000-8000-000000000011';
  await pool.query("INSERT INTO ms.contacts(id,organization_id,display_name) VALUES($1,$2,$3)",[cId,org,'PC03无电话家长'+suffix]);
- await pool.query("INSERT INTO ms.leads(id,organization_id,contact_id,owner_user_id,lead_state) VALUES($1,$2,$3,$4,'assigned')",[noContactId,org,cId,owner]);
+ await pool.query("INSERT INTO ms.leads(id,organization_id,contact_id,owner_user_id,lead_state) VALUES($1,$2,$3,$4,'working')",[noContactId,org,cId,owner]);
  await pool.query("INSERT INTO ms.students(id,organization_id,display_name,owner_user_id) VALUES($1,$2,$3,$4),($5,$2,$6,$4)",[s1Id,org,'PC03大宝'+suffix,owner,s2Id,org,'PC03二宝'+suffix]);
  await pool.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'confirmed'),($1,$3,'confirmed')",[noContactId,s1Id,s2Id]);
- await pool.query("INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,stage,terminal_state,contact_info) VALUES($1,$2,'needs_discovery','open',NULL)",[noContactId,org]);
 
  await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
  const list=page.locator('#v35-my-leads');
