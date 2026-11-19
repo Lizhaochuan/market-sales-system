@@ -145,7 +145,7 @@ test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and
  await expect(page.locator('#v35-handover-tasks')).toBeVisible();
 
  // 5. Supervisor privilege separation: non-skippable assertion ensuring lead exists
- const leadRes=await pool.query("SELECT id FROM ms.leads WHERE organization_id='20000000-0000-4000-8000-000000000001' AND contact_name=$1",[callName]);
+ const leadRes=await pool.query("SELECT l.id FROM ms.leads l JOIN ms.contacts c ON c.id=l.contact_id WHERE l.organization_id='20000000-0000-4000-8000-000000000001' AND c.display_name=$1",[callName]);
  expect(leadRes.rows.length).toBe(1);
  const leadId=leadRes.rows[0].id;
  const corrId='35000000-0000-4000-8000-'+String(Date.now()).slice(-12).padStart(12,'0');
