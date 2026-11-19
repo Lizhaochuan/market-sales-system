@@ -63,14 +63,22 @@ test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and
  const callName='当日电话'+Date.now();
  const trialName='当日试听'+Date.now();
  const overdueName='逾期日常'+Date.now();
- await page.evaluate(async({cName,tName,oName})=>{
-  const now=new Date();
-  const dToday=new Date(now.getFullYear(),now.getMonth(),now.getDate(),12,0,0);
-  const dOverdue=new Date(now.getFullYear(),now.getMonth(),now.getDate()-2,12,0,0);
-  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:cName,student_name:cName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'跟进电话'+cName,due_at:dToday.toISOString()}}});
-  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:tName,student_name:tName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{appointment:{type:'trial',student_name:tName+'学生',due_at:dToday.toISOString(),place:'101教室',course:'体验课',state:'confirmed'}}}});
-  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:oName,student_name:oName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'逾期跟进'+oName,due_at:dOverdue.toISOString()}}});
- },{cName:callName,tName:trialName,oName:overdueName});
+
+ // Explicitly compute reference dates strictly in Asia/Shanghai timezone
+ const shTodayStr=await page.evaluate(()=>{
+  return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ });
+ const [shY,shM,shD]=shTodayStr.split('-').map(Number);
+ const shNoonUtc=Date.UTC(shY,shM-1,shD,4,0,0); // 12:00 in Asia/Shanghai is 04:00 UTC
+ const dTodayIso=new Date(shNoonUtc).toISOString();
+ const dOverdueIso=new Date(shNoonUtc-2*86400000).toISOString();
+ const shTomorrowStr=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(shNoonUtc+86400000));
+
+ await page.evaluate(async({cName,tName,oName,todayIso,overdueIso})=>{
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:cName,student_name:cName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'跟进电话'+cName,due_at:todayIso}}});
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:tName,student_name:tName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{appointment:{type:'trial',student_name:tName+'学生',due_at:todayIso,place:'101教室',course:'体验课',state:'confirmed'}}}});
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:oName,student_name:oName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'逾期跟进'+oName,due_at:overdueIso}}});
+ },{cName:callName,tName:trialName,oName:overdueName,todayIso:dTodayIso,overdueIso:dOverdueIso});
 
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
 
@@ -87,12 +95,10 @@ test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and
  await expect(page.locator('#v35-handover-tasks')).toBeHidden();
 
  // Empty state for appointments on a day without appointments
- const tomorrow=await page.evaluate(()=>{const d=new Date();d.setDate(d.getDate()+1);return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);});
- const todayStr=await page.evaluate(()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()));
- await page.locator('#v34-tasks [name="task_day"]').fill(tomorrow);
+ await page.locator('#v34-tasks [name="task_day"]').fill(shTomorrowStr);
  await page.locator('#v34-tasks [name="task_day"]').dispatchEvent('change');
  await expect(page.locator('#v35-day-tasks')).toContainText('当天没有面谈或试听安排');
- await page.locator('#v34-tasks [name="task_day"]').fill(todayStr);
+ await page.locator('#v34-tasks [name="task_day"]').fill(shTodayStr);
  await page.locator('#v34-tasks [name="task_day"]').dispatchEvent('change');
  await expect(page.locator('#v35-day-tasks')).toContainText(trialName);
 
@@ -127,22 +133,22 @@ test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and
  await expect(page.locator('#v35-day-tasks')).toBeHidden();
  await expect(page.locator('#v35-handover-tasks')).toBeVisible();
 
- // 5. Supervisor privilege separation: supervisor sees approvals in handover filter, sales cannot
- const leadRow=(await pool.query("SELECT id FROM ms.leads WHERE organization_id='20000000-0000-4000-8000-000000000001' AND owner_user_id='20000000-0000-4000-8000-000000000011' LIMIT 1")).rows[0];
- if(leadRow){
-  const corrId='35000000-0000-4000-8000-'+String(Date.now()).slice(-12).padStart(12,'0');
-  await pool.query("INSERT INTO ms_workspace.records(id,organization_id,owner_user_id,lead_id,kind,state,body) VALUES($1,'20000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000011',$2,'corrections','pending',$3)",[corrId,leadRow.id,JSON.stringify({type:'lead_transfer',requested_by:'20000000-0000-4000-8000-000000000011',target_owner:'20000000-0000-4000-8000-000000000012',reason:'主管复核交接'})]);
-  await login(page,'supervisor');
-  await page.locator('#v35-task-filters').getByRole('button',{name:'待审批/待接手'}).click();
-  await expect(page.locator('#v35-approvals')).toBeVisible();
-  await expect(page.locator('#v35-approvals')).toContainText('待主管独立复核');
-  await expect(page.locator('#v35-day-tasks')).toBeHidden();
+ // 5. Supervisor privilege separation: non-skippable assertion ensuring lead exists
+ const leadRes=await pool.query("SELECT id FROM ms.leads WHERE organization_id='20000000-0000-4000-8000-000000000001' AND contact_name=$1",[callName]);
+ expect(leadRes.rows.length).toBe(1);
+ const leadId=leadRes.rows[0].id;
+ const corrId='35000000-0000-4000-8000-'+String(Date.now()).slice(-12).padStart(12,'0');
+ await pool.query("INSERT INTO ms_workspace.records(id,organization_id,owner_user_id,lead_id,kind,state,body) VALUES($1,'20000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000011',$2,'corrections','pending',$3)",[corrId,leadId,JSON.stringify({type:'lead_transfer',requested_by:'20000000-0000-4000-8000-000000000011',target_owner:'20000000-0000-4000-8000-000000000012',reason:'主管复核交接'})]);
+ await login(page,'supervisor');
+ await page.locator('#v35-task-filters').getByRole('button',{name:'待审批/待接手'}).click();
+ await expect(page.locator('#v35-approvals')).toBeVisible();
+ await expect(page.locator('#v35-approvals')).toContainText('待主管独立复核');
+ await expect(page.locator('#v35-day-tasks')).toBeHidden();
 
-  // Switch back to sales-a: approvals section must NOT exist
-  await login(page,'sales-a');
-  await page.locator('#v35-task-filters').getByRole('button',{name:'待审批/待接手'}).click();
-  await expect(page.locator('#v35-approvals')).toHaveCount(0);
- }
+ // Switch back to sales-a: approvals section must NOT exist
+ await login(page,'sales-a');
+ await page.locator('#v35-task-filters').getByRole('button',{name:'待审批/待接手'}).click();
+ await expect(page.locator('#v35-approvals')).toHaveCount(0);
 
  // 6. Return to "全部当日"
  await page.locator('#v35-task-filters').getByRole('button',{name:'全部当日'}).click();
