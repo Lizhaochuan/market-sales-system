@@ -1,5 +1,9 @@
 # 验证与测试台账 | TEST_RESULTS
 
+## 2026-11-19 最终复核勘误
+
+此前一版文档将 `Run 44465869746` 误记为全部通过。ChatGPT 直接核验 GitHub API 后确认其 **conclusion=failure**，并保留两次失败日志；最新可验收的代码提交与三组通过的 CI 证据详见下文。此处 `DONE` 是**受限测试验收完成**，不是正式发布批准。
+
 更新时间：2026-11-19。原则：**历史测试记录、GitHub 远端 CI 记录与本轮亲自执行的检查严格分开；缺失实测一律标“未验证”。**
 
 ---
@@ -13,10 +17,10 @@
 | **PR #129 HEAD 对应 GitHub Actions CI 查询** | `gh pr checks 129` 与 `gh run list --branch chatgpt/v3-2-121-m02-revocation-notices -L 5` | `exit 0` | `fda4ceb8063248caed0a5f55f7c69d17fbaa8e74` 对应 4/4 检查 `pass`（见第二节完整链接）；**绿色 CI 不解除 HOLD** |
 | **最新业务源码与迁移逐文件核读** | 读取 `docs/ROLE_WORKSPACES.md`、`docs/V3.4_SALES_WORKFLOW.md`、`docs/V3.4_DEVELOPMENT_REPORT.md`、`db/workspace-migrations/039`–`040`、`src/sales-workflow.mjs`、`src/role-workspaces.mjs`、`web/sales-workflow.js` 及 V3.4/角色测试清单 | 完成 | 核实防断链 DB 触发器、独立面谈/试听、标准 B 与 Won 分离、角色隔离与待办已落地；确认无 `miniprogram/` 及独立 Boss 驾驶舱文件 |
 | **仓库工作区与隔离检查** | `git status -sb`（`market-sales-system` 与 `edu-management-system`） | `exit 0` | 仅更新 `chatgpt/ms-ai-handoff-20261119` 下 `handoff/*.md`；未触碰业务代码，未触碰 `edu-management-system` |
-| **本地后端 API / 权限 / 安全测试** | `npm test`（本地因新容器无 `node_modules` 报 `ERR_MODULE_NOT_FOUND`；GitHub Actions CI [44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746) 中全绿通过） | `exit 0` (CI) | **全部通过**：CI 独立 PostgreSQL 16 环境完整跑通 |
+| **后端 API / 权限 / 安全测试（本地受阻，CI 验证）** | `npm test` 在新 Antigravity 容器因缺 `pg` 包无法运行；[GitHub Actions Run 44467955779](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955779) 在隔离 PostgreSQL 16/Node 22 Runner 执行完整核心测试 | CI `exit 0`；`722 passed / 0 failed` | **CI 实测通过**，本地未复跑；不能混淆两种环境 |
 | **本地合约语法与设计测试** | 独立运行 `node --check src/sales-workflow.mjs` (exit 0)、`node --check web/sales-workflow.js` (exit 0)、`node --check tests/browser/zz-role-workspaces.spec.mjs` (exit 0) 与 `node --test tests/contracts/contracts.test.mjs` (exit 0, 8 passed) | `exit 0` | **全部通过**：逐文件语法检查与设计不变量无误 |
-| **本地 PostgreSQL 迁移执行** | GitHub Actions CI [44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746) 执行完整迁移与测试数据播种 | `exit 0` | **全部通过** |
-| **Chromium 浏览器 UAT (PC-01)** | GitHub Actions CI [44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746) 官方 Runner 执行 `npx playwright test` | `exit 0` (33 passed, 22.2s) | **实测全绿通过**：涵盖 `tests/browser/zz-role-workspaces.spec.mjs` 全部 8 项用例及全仓 33 项浏览器回归 |
+| **PostgreSQL 迁移执行（GitHub Actions CI）** | [Run 44467955779](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955779) 中创建完整隔离 Schema 和 fixture | CI `exit 0` | **CI 通过**，未执行本地迁移 |
+| **Chromium 浏览器 UAT (PC-01)** | [Run 44467955779](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955779)，提交 `77c532977049311a70e45332c4e4f3a7cdccbd91`，执行 `npx playwright test` | CI `exit 0`，`34 passed / 0 failed`，约 2.4 分钟 | **全部通过**：含 8 项角色工作台浏览器用例及 PC-01；旧 Run 44465869746 实为 33 通过、1 失败，不是全绿 |
 | **微信小程序开发者工具 / 真机测试** | 仓库无小程序工程，本轮**没有运行** | — | **未验证** |
 | **生产环境 / 外部系统集成** | 本轮**没有接触** | — | 不适用；禁止部署 |
 
@@ -59,18 +63,23 @@
 - `node --check tests/browser/zz-role-workspaces.spec.mjs`：退出码 **`0`**
 - `node --test tests/contracts/contracts.test.mjs`：退出码 **`0`**（8 passed，0 failed）
 
-### 3. GitHub Actions CI 真实运行与验证证据
+### 3. GitHub Actions CI 真实运行与验证证据（含失败复盘）
 
-在具备完整依赖环境的 GitHub Actions 官方 Runner 上针对分支 `chatgpt/ms-ui-001-pc-01` 成功触发全流程 CI：
-- **CI 运行链接**：[Run 44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746)（Job ID `135363397698`，耗时 3m11s）
-- **对应 Commit SHA**：`ed2b188c0119e8cf9698d254589d318359b3d2b2`
-- **实际执行结果**：
-  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` 退出码 `0`，**`33 passed (22.2s)`**（包含全部 8 项 `zz-role-workspaces.spec.mjs` 角色工作台测试）
-  - `Restricted actual LOGIN and tenant row-level security E2E`：退出码 `0`，**`12 passed, 0 failed`**
-  - `Core API, authorization, idempotency and Chinese audit E2E`：退出码 `0`，全部通过
-  - `Check frontend JavaScript syntax`：31 个前端/后端关键脚本 `node --check` 退出码 `0`
-  - `Existing design contract regression`：退出码 `0`，**`8 passed, 0 failed`**
-- **当前状态评定**：依据 GitHub Actions 官方独立环境实测全绿证据，正式将 PC-01 标为 **`DONE`**。
+**严格按每次运行的真实状态记录；旧失败不得被后续成功覆盖或冒称已通过。**
+
+- **首次失败**：[Run 44465869746](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44465869746)；对应旧代码 `ed2b1884ab776e51bb1ff8584da5a9ee2e4ddd99`，结论 **failure**。Playwright **33 passed / 1 failed**；PC-01 测试错误假定待审批/待接手容器为空，而既有 fixture 含大量真实待补安排客户。合同回归因该前序失败而跳过。完整原始日志见 GitHub Actions。
+- **第二次失败**：[Run 44467709039](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467709039)；对应 `aafeffd89af60f0142844fe3d390c09d3cce0c26`，结论 **failure**。Playwright **33 passed / 1 failed**；修正空列表假设后，新用例查询不存在的 `ms.leads.contact_name` 数据库列而失败。依照实际 schema 改为通过 `ms.contacts.display_name` 关联查找。失败日志保留。
+- **最终通过**：[Run 44467955779](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955779)（Job ID `135370195511`），**`status=completed`、`conclusion=success`、`head_sha=77c532977049311a70e45332c4e4f3a7cdccbd91`**：
+  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**34 passed / 0 failed**（约 2.4m；含全部 8 项 `zz-role-workspaces.spec.mjs` 用例）。
+  - `Core API, authorization, idempotency and Chinese audit E2E`：**exit 0**，**722 passed / 0 failed**。
+  - `Restricted actual LOGIN and tenant row-level security E2E`：**exit 0**，**12 passed / 0 failed**。
+  - `Check frontend JavaScript syntax`：**exit 0**，覆盖当前脚本语法；测试文件也通过真实 Playwright 加载执行。
+  - `Existing design contract regression`：**exit 0**，**8 passed / 0 failed**。
+  - 同一提交的 [跨阶段隔离审计 Run 44467955638](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955638) 与 [通知契约 Run 44467955661](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44467955661) 均为 **success**。
+
+**代码与日志对应关系**：PC-01 原开发分支 `chatgpt/ms-ui-001-pc-01` 已安全快进到该 CI 验证的代码提交 `77c5329`；此后只有本目录交接记录的文档更新，不修改受测业务/测试文件。所有原始 CI 输出、退出状态和失败证据均保存在上述 GitHub Actions Run 页面。
+
+**最终任务状态**：`PC-01=DONE`（仅开发测试验收），**不改变** `Draft / CI-only / EXT-001=UNVERIFIED / HOLD=true / merge_authorized=false / deploy_authorized=false`。
 
 ---
 
