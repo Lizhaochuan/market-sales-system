@@ -27,8 +27,7 @@
  btn(box,'历史与管理',()=>{legacy=!legacy;layout();if(legacy)setView('overview');else display();},'text-button');
  async function refresh(force=false){if(!enabled||!state.token||state.strict)return;const token=state.token,ticket=++seq,keepForm=!force&&session===state.token&&!!panel.querySelector('form[data-user-dirty="1"]');
   try{const o=await api(root+'/options');const access=o.access;const l=access?.enabled&&!access.sales?{items:[],staff:[],incoming:[]}:await api(root);if(access?.market){const m=await api(root+'/market');if(ticket!==seq||token!==state.token)return;marketRows=m.items;}if(ticket!==seq||token!==state.token)return;options=o;rows=l.items;staff=l.staff;incoming=l.incoming;
-   box.querySelector('[data-workflow-nav="finance"]').hidden=!o.can_verify&&!o.manager;
-   if(session!==token){wipeState();options=o;rows=l.items;staff=l.staff;incoming=l.incoming;if(access?.market)marketRows=m?.items||marketRows;if(access?.enabled){view=access.admin?'metrics':access.sales?'tasks':access.market?'leads':access.finance?'finance':'leads';group=access.sales?'sales':'market';}else if(o.can_verify)view='finance';}layout();
+   if(session!==token){card=null;claim=null;lookupResult=null;lookupPhone='';myLeadSearch='';myLeadState='all';myLeadSort='default';listScrollTop=0;winScrollTop=0;selected=null;detail=null;leadDrafts.clear();if(access?.enabled){view=access.admin?'metrics':access.sales?'tasks':access.market?'leads':access.finance?'finance':'leads';group=access.sales?'sales':'market';}else if(o.can_verify)view='finance';}layout();
    if(selected){const d=await api(root+'/'+selected);if(ticket!==seq||token!==state.token)return;detail=d;}
    if(view==='metrics'||view==='tasks'){const r=await api(root+'/metrics');if(ticket!==seq||token!==state.token)return;report=r;}
    if(view==='finance'){const q=await api(root+'/finance');if(ticket!==seq||token!==state.token)return;queue=q.items;}
