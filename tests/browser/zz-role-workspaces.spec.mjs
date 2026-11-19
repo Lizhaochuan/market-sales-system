@@ -676,13 +676,13 @@ test('PC-04a: read-only stage kanban, saved views, draft preservation, phone mas
  await list.locator('[name="my_lead_search"]').fill('');
  await list.locator('[name="my_lead_state"]').selectOption('all');
  await list.getByRole('button',{name:'列式视图'}).click();
- await page.locator('#v35-saved-views').getByRole('button',{name:'进行中看板'+suffix}).click();
+ await page.locator('#v35-saved-views').getByRole('button',{name:'进行中看板'+suffix,exact:true}).click();
  await expect(list.locator('[name="my_lead_search"]')).toHaveValue(suffix);
  await expect(list.locator('[name="my_lead_state"]')).toHaveValue('open');
  await expect(list.getByRole('button',{name:'阶段看板'})).toHaveAttribute('aria-pressed','true');
  await expect(board.locator(`[data-lead-id="${ids.lostId}"]`)).toHaveCount(0);
 
- await page.locator('#v35-saved-views').getByRole('button',{name:'删除视图 进行中看板'+suffix}).click();
+ await page.locator('#v35-saved-views').getByRole('button',{name:'删除视图 进行中看板'+suffix,exact:true}).click();
  await expect(page.locator('#v35-saved-views')).not.toContainText('进行中看板'+suffix);
 
  // Responsive 1280x720 and 390x844 zero horizontal overflow
