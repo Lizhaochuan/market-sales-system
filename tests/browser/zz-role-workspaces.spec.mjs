@@ -623,7 +623,7 @@ test('PC-04a: read-only stage kanban, saved views, draft preservation, phone mas
   const t=await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'KB试听家长'+suffix,student_name:'KB试听学生'+suffix,contact_info:pTrial,origin_group:'sales',source:'网络咨询',initial_communication:{method:'phone',at:new Date(Date.now()-3600000).toISOString(),stage:'courses_introduced'},next:{appointment:{type:'trial',due_at:tom,place:'101教室',course:'英语'}}}});
   const l=await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'KB流失家长'+suffix,student_name:'KB流失学生'+suffix,contact_info:pLost,origin_group:'sales',source:'转介绍',next:{action:'call',method:'phone',title:'初始跟进'+suffix,due_at:tom}}});
   const det=await api('/api/v1/isolated-workspace/workflow/'+l.lead_id);
-  await api('/api/v1/isolated-workspace/workflow/'+l.lead_id+'/lost',{method:'POST',body:{expected_version:det.workflow.version,reason:'距离太远',feedback:'家长明确不报名'}});
+  await api('/api/v1/isolated-workspace/workflow/'+l.lead_id+'/close-lost',{method:'POST',body:{expected_version:det.workflow.version,reason:'价格原因',feedback:'家长明确不报名',evidence_ref:'沟通记录截图01'}});
   return {discId:d.lead_id,trialId:t.lead_id,lostId:l.lead_id};
  },{pDisc,pTrial,pLost,suffix});
 
