@@ -423,7 +423,7 @@ test('PC-03a: compact columnar view, card toggle, structured facts, phone maskin
   // Add a quote/enrollment intent on trial lead (must NOT mislabel as 已收款/已全款结案)
   const det=await api('/api/v1/isolated-workspace/workflow/'+tr.lead_id);
   const sid=det.students[0].id;
-  await api('/api/v1/isolated-workspace/workflow/'+tr.lead_id+'/quote',{method:'POST',body:{expected_version:det.workflow.version,student_id:sid,items:[{course_label:'数学',unit_cents:10000,quantity:10,discount_cents:0}]}});
+  await api('/api/v1/isolated-workspace/workflow/'+tr.lead_id+'/quote',{method:'POST',body:{expected_version:det.workflow.version,student_id:sid,items:[{course_label:'数学',unit_cents:10000,quantity:10}]}});
  },{pMarket,pOverdue,pTrial,suffix});
 
  // Add a multi-student & no-contact lead via DB to cover edge cases
