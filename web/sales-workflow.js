@@ -5,10 +5,10 @@
  const panel=node('section','view');panel.id='sales-workflow';panel.dataset.panel='sales-workflow';document.querySelector('main.main').append(panel);
  panel.addEventListener('input',e=>{const f=e.target?.closest?.('form');if(f&&f.id!=='v35-lookup'&&!f.closest('#v35-lookup')){f.dataset.userDirty='1';const db=$('v35-discard-draft');if(db&&selected)db.hidden=false;}});
  panel.addEventListener('change',e=>{const f=e.target?.closest?.('form');if(f&&f.id!=='v35-lookup'&&!f.closest('#v35-lookup')){f.dataset.userDirty='1';const db=$('v35-discard-draft');if(db&&selected)db.hidden=false;}});
- let detailHost=panel,enabled=false,view='leads',group='sales',rows=[],staff=[],options=null,selected=null,detail=null,report=null,queue=[],epoch=0,seq=0,busy=false,session=null,incoming=[],legacy=new URLSearchParams(location.search).get('workspace')==='legacy';
- let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine',taskFilter='all',myLeadSearch='',myLeadState='all',myLeadSort='default',myLeadView='table',listScrollTop=0,winScrollTop=0;
+ let detailHost=panel,enabled=false,view='leads',group='sales',rows=[],staff=[],options=null,selected=null,detail=null,report=null,queue=[],epoch=0,seq=0,searchSeq=0,busy=false,session=null,incoming=[],legacy=new URLSearchParams(location.search).get('workspace')==='legacy';
+ let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine',taskFilter='all',myLeadSearch='',myLeadSearchItems=null,myLeadState='all',myLeadSort='default',myLeadView='table',listScrollTop=0,winScrollTop=0;
  const leadDrafts=new Map();
- function wipeState(){epoch++;seq++;busy=false;rows=[];staff=[];incoming=[];marketRows=[];options=null;selected=null;detail=null;card=null;activityTarget=null;editingQuoteId=null;pendingLostFeedback='';claim=null;lookupPhone='';lookupResult=null;queue=[];report=null;myLeadSearch='';myLeadState='all';myLeadSort='default';myLeadView='table';listScrollTop=0;winScrollTop=0;detailHost=panel;leadDrafts.clear();box.hidden=true;}
+ function wipeState(){epoch++;seq++;searchSeq++;busy=false;rows=[];staff=[];incoming=[];marketRows=[];options=null;selected=null;detail=null;card=null;activityTarget=null;editingQuoteId=null;pendingLostFeedback='';claim=null;lookupPhone='';lookupResult=null;queue=[];report=null;myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';listScrollTop=0;winScrollTop=0;detailHost=panel;leadDrafts.clear();box.hidden=true;}
  function handleAuthFailure(e){if([401,403,404].includes(e?.status)){wipeState();panel.replaceChildren(node('p','',e.status===403?'角色已撤销，工作台已关闭':e.status===404?'客户不存在或无权访问':'登录已过期，工作台已关闭'));return true;}return false;}
  const dayKey=d=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d));
  const label=(arr,id)=>arr?.find(x=>x.id===id)?.label||id||'待核实';
@@ -34,7 +34,7 @@
  btn(box,'历史与管理',()=>{saveCurrentLeadDraft();legacy=!legacy;layout();if(legacy)setView('overview');else display();},'text-button');
  async function refresh(force=false){if(!enabled||!state.token||state.strict)return;const token=state.token,ticket=++seq,keepForm=!force&&session===state.token&&!!panel.querySelector('form[data-user-dirty="1"]');
   try{const o=await api(root+'/options');const access=o.access;const l=access?.enabled&&!access.sales?{items:[],staff:[],incoming:[]}:await api(root);if(access?.market){const m=await api(root+'/market');if(ticket!==seq||token!==state.token)return;marketRows=m.items;}if(ticket!==seq||token!==state.token)return;options=o;rows=l.items;staff=l.staff;incoming=l.incoming;
-   if(session!==token){card=null;claim=null;lookupResult=null;lookupPhone='';myLeadSearch='';myLeadState='all';myLeadSort='default';myLeadView='table';listScrollTop=0;winScrollTop=0;selected=null;detail=null;leadDrafts.clear();if(access?.enabled){view=access.admin?'metrics':access.sales?'tasks':access.market?'leads':access.finance?'finance':'leads';group=access.sales?'sales':'market';}else if(o.can_verify)view='finance';}layout();
+   if(session!==token){card=null;claim=null;lookupResult=null;lookupPhone='';myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';listScrollTop=0;winScrollTop=0;selected=null;detail=null;leadDrafts.clear();if(access?.enabled){view=access.admin?'metrics':access.sales?'tasks':access.market?'leads':access.finance?'finance':'leads';group=access.sales?'sales':'market';}else if(o.can_verify)view='finance';}else{myLeadSearchItems=null;}layout();
    if(selected){const d=await api(root+'/'+selected);if(ticket!==seq||token!==state.token)return;detail=d;}
    if(view==='metrics'||view==='tasks'){const r=await api(root+'/metrics');if(ticket!==seq||token!==state.token)return;report=r;}
    if(view==='finance'){const q=await api(root+'/finance');if(ticket!==seq||token!==state.token)return;queue=q.items;}
@@ -76,7 +76,7 @@
   input(c.f,'联系人姓名','contact_name','text','',true);select(c.f,'已有学生（选填）','student_id',[{id:'',label:'新学生 / 暂未识别'},...state.students.map(s=>({id:s.student_id,label:s.display_name}))],'');const newName=input(c.f,'新学生姓名（可稍后补充）','student_name');c.f.elements.student_id.addEventListener('change',()=>{newName.closest('label').hidden=!!c.f.elements.student_id.value;});if(!options?.access?.enabled)input(c.f,'联系方式（选填）','contact_info');else c.f.append(node('p','form-hint','电话号码：'+lookupPhone));select(c.f,'最初获客来源','source',['市场活动','网络咨询','到店','转介绍','主动咨询','其他'],group==='market'?'市场活动':'主动咨询');input(c.f,'沟通内容或备注（选填）','notes');if(staff.length)select(c.f,'销售负责人','owner_user_id',staff,state.user.staff_id);
   const initial=options?.access?.enabled?initialFields(c.f):null,n=nextFields(c.f,{allowExisting:false});initial?.bind(n.allowBooking);c.f.append(c.submit);
   if(intakeOnly){c.d.open=true;return;}const list=node('div','panel');list.id='v34-leads';panel.append(list);const search=input(list,'查找客户','search','search');const filter=select(list,'客户状态','state_filter',[{id:'all',label:'全部'},{id:'open',label:'Open · 跟进中'},{id:'won',label:'Closed Won'},{id:'lost',label:'Closed Lost'},{id:'missing',label:'待补下一步安排'}],'all');const rowsEl=node('div');list.append(rowsEl);
-  function draw(){rowsEl.replaceChildren();for(const l of rows.filter(l=>(group!=='market'||l.origin_group==='market')&&(!search.value||[l.contact_name,l.contact_info,...(l.students||[]).map(s=>s.name)].some(v=>v?.includes(search.value)))&&(filter.value==='all'||filter.value==='missing'?filter.value!=='missing'||l.needs_arrangement:l.terminal_state===filter.value))){const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',stage(l.stage)+' · '+l.terminal_state+' · '+l.owner_name));if(l.needs_assignment)card.append(node('p','form-hint warning','负责人待分配，需主管处理；原待办保留'));if(l.next_action)card.append(node('p',l.overdue?'form-hint warning':'form-hint','下一步：'+l.next_action.title+' · '+dateText(l.next_action.due_at)+(l.overdue?' · 已逾期':'')));else card.append(node('p','form-hint warning','待补安排：旧数据未设置下一步，不会自动编造时间'));btn(card,'打开客户',()=>openLead(l.id));rowsEl.append(card);}if(!rowsEl.childElementCount)rowsEl.append(node('p','','暂无记录'));}search.addEventListener('input',draw);filter.addEventListener('change',draw);draw();
+  function draw(){rowsEl.replaceChildren();for(const l of rows.filter(l=>(group!=='market'||l.origin_group==='market')&&(!search.value||[l.contact_name,l.contact_info_masked,...(l.students||[]).map(s=>s.name)].some(v=>v?.includes(search.value)))&&(filter.value==='all'||filter.value==='missing'?filter.value!=='missing'||l.needs_arrangement:l.terminal_state===filter.value))){const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',stage(l.stage)+' · '+l.terminal_state+' · '+l.owner_name));if(l.needs_assignment)card.append(node('p','form-hint warning','负责人待分配，需主管处理；原待办保留'));if(l.next_action)card.append(node('p',l.overdue?'form-hint warning':'form-hint','下一步：'+l.next_action.title+' · '+dateText(l.next_action.due_at)+(l.overdue?' · 已逾期':'')));else card.append(node('p','form-hint warning','待补安排：旧数据未设置下一步，不会自动编造时间'));btn(card,'打开客户',()=>openLead(l.id));rowsEl.append(card);}if(!rowsEl.childElementCount)rowsEl.append(node('p','','暂无记录'));}search.addEventListener('input',draw);filter.addEventListener('change',draw);draw();
  }
  function renderTasks(){const p=node('div','panel');p.id='v34-tasks';panel.append(p);for(const r of incoming){const card=node('article','lead-row');card.append(node('p','','待接手客户 · '+r.reason));btn(card,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));p.append(card);}for(const a of report?.pending_approvals||[]){const card=node('article','lead-row');card.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));if(a.can_review)btn(card,'前往独立复核',()=>openLead(a.lead_id));else card.append(node('p','fineprint','本人关联事项 · 须另一位主管独立复核'));p.append(card);}for(const r of report?.reminders||[]){const l=rows.find(l=>l.id===r.lead_id);if(!l)continue;const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',r.title+' · '+dateText(r.due_at)+' · '+l.owner_name));if(r.overdue)card.append(node('p','form-hint warning','已逾期，仍须跟进；不会自动关闭'));btn(card,'执行 / 记结果',()=>openLead(l.id));p.append(card);}for(const l of rows.filter(l=>l.needs_arrangement)){const card=node('article','lead-row');card.append(node('p','','待补安排 · '+(l.contact_name||'待识别客户')+' · '+l.owner_name));btn(card,'补充安排',()=>openLead(l.id));p.append(card);}}
  function renderLead(host=panel){const l=rows.find(l=>l.id===selected);const backLabel=options?.access?.enabled?(view==='tasks'?'返回我的待办':view==='metrics'?'返回统计与提醒':'返回客户列表'):'返回客户列表';
@@ -284,11 +284,18 @@
    const filter=select(controls,'客户状态','my_lead_state',[{id:'all',label:'全部'},{id:'open',label:'跟进中'},{id:'won',label:'已全款结案'},{id:'lost',label:'已流失结案'},{id:'missing',label:'待补安排'}],myLeadState);
    const sortSel=select(controls,'排序方式','my_lead_sort',[{id:'default',label:'默认顺序'},{id:'due_asc',label:'下一步最近到期'},{id:'name_asc',label:'客户名称排序'}],myLeadSort);
    const rowsEl=node('div');list.append(rowsEl);
+   const runServerSearch=q=>{
+    const sTicket=++searchSeq,token=state.token,ticket=epoch;
+    api(root+'?q='+encodeURIComponent(q)).then(d=>{if(token!==state.token||ticket!==epoch||sTicket!==searchSeq)return;myLeadSearchItems=d.items;draw();}).catch(e=>{if(token===state.token&&ticket===epoch&&sTicket===searchSeq)handleAuthFailure(e);});
+   };
    const draw=()=>{
     myLeadSearch=search.value;myLeadState=filter.value;myLeadSort=sortSel.value;
+    const qTrim=search.value.trim(),qDigits=qTrim.replace(/[^0-9]/g,''),useServer=qDigits.length>=4;
     rowsEl.className=myLeadView==='table'?'v35-leads-table':'v35-leads-cards';
     rowsEl.replaceChildren();
-    const filtered=rows.filter(l=>(!search.value||[l.contact_name,l.contact_info,...(l.students||[]).map(s=>s.name)].some(v=>v?.includes(search.value)))&&(filter.value==='all'||filter.value==='missing'?filter.value!=='missing'||l.needs_arrangement:l.terminal_state===filter.value));
+    if(useServer&&myLeadSearchItems===null){rowsEl.append(node('p','','搜索中…'));return;}
+    const baseRows=useServer?myLeadSearchItems:rows;
+    const filtered=baseRows.filter(l=>(useServer||!qTrim||[l.contact_name,l.contact_info_masked,...(l.students||[]).map(s=>s.name)].some(v=>v?.includes(qTrim)))&&(filter.value==='all'||filter.value==='missing'?filter.value!=='missing'||l.needs_arrangement:l.terminal_state===filter.value));
     if(sortSel.value==='due_asc')filtered.sort((a,b)=>(a.next_action?Date.parse(a.next_action.due_at):Number.MAX_SAFE_INTEGER)-(b.next_action?Date.parse(b.next_action.due_at):Number.MAX_SAFE_INTEGER));
     else if(sortSel.value==='name_asc')filtered.sort((a,b)=>(a.contact_name||'').localeCompare(b.contact_name||'','zh-CN'));
     if(!filtered.length){rowsEl.append(node('p','','暂无匹配客户'));return;}
@@ -300,7 +307,7 @@
     for(const l of filtered){
      const studentNames=(l.students||[]).map(s=>s.name).join('、');
      const primaryLabel=studentNames||l.contact_name||'待识别客户';
-     const masked=l.contact_info?maskPhone(l.contact_info):'未留电话';
+     const masked=l.contact_info_masked||'未留电话';
      const src=l.current_source||l.original_source||'待确认';
      const stageStr=stage(l.stage)+' · '+terminalText(l.terminal_state);
      const commStr=commText(l.last_communication);
@@ -337,7 +344,10 @@
      }
     }
    };
-   search.addEventListener('input',draw);filter.addEventListener('change',draw);sortSel.addEventListener('change',draw);draw();target.append(list);return;
+   const onSearch=()=>{const qTrim=search.value.trim(),qDigits=qTrim.replace(/[^0-9]/g,'');myLeadSearchItems=null;if(qDigits.length>=4){draw();runServerSearch(qTrim);}else{searchSeq++;draw();}};
+   search.addEventListener('input',onSearch);filter.addEventListener('change',draw);sortSel.addEventListener('change',draw);
+   if(myLeadSearch.trim().replace(/[^0-9]/g,'').length>=4&&myLeadSearchItems===null)runServerSearch(myLeadSearch.trim());
+   draw();target.append(list);return;
   }
   btn(p,'清空号码查询 / 返回客户列表',()=>{saveCurrentLeadDraft();lookupPhone='';lookupResult=null;display();},'text-button');
   if(!lookupResult.length){p.append(node('p','form-hint','没有匹配线索，补充必要资料即可新建。'));renderList(true);return;}

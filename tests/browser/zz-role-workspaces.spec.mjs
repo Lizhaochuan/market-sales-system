@@ -438,9 +438,30 @@ test('PC-03a: compact columnar view, card toggle, structured facts, phone maskin
  await pool.query("INSERT INTO ms.students(id,organization_id,display_name,owner_user_id) VALUES($1,$2,$3,$4),($5,$2,$6,$4)",[s1Id,org,'PC03大宝'+suffix,owner,s2Id,'PC03二宝'+suffix]);
  await pool.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'confirmed'),($1,$3,'confirmed')",[noContactId,s1Id,s2Id]);
 
+ const listRespPromise=page.waitForResponse(r=>r.url().endsWith('/api/v1/isolated-workspace/workflow')&&r.request().method()==='GET');
  await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
+ const listResp=await listRespPromise;
+ const listBody=await listResp.json();
+ const listBodyStr=JSON.stringify(listBody);
+ expect(listBodyStr).not.toContain(pMarket);
+ expect(listBodyStr).not.toContain(pOverdue);
+ expect(listBodyStr).not.toContain(pTrial);
+ expect(listBody.data.items.every(i=>i.contact_info===undefined)).toBe(true);
+ expect(listBody.data.items.some(i=>i.contact_info_masked===pMarketMask)).toBe(true);
+ expect(listBody.data.items.some(i=>i.contact_info_masked===pOverdueMask)).toBe(true);
+ expect(listBody.data.items.some(i=>i.contact_info_masked===pTrialMask)).toBe(true);
  const list=page.locator('#v35-my-leads');
  await expect(list).toBeVisible();
+
+ // Phone search via server-side ?q= works without exposing raw phone in response or DOM
+ const qRespPromise=page.waitForResponse(r=>r.url().includes('/api/v1/isolated-workspace/workflow?q=')&&r.request().method()==='GET');
+ await list.locator('[name="my_lead_search"]').fill(pMarket);
+ const qBody=await (await qRespPromise).json();
+ expect(JSON.stringify(qBody)).not.toContain(pMarket);
+ expect(qBody.data.items.every(i=>i.contact_info===undefined)).toBe(true);
+ await expect(list).toContainText('PC03交接学生'+suffix);
+ await expect(list).not.toContainText('PC03逾期学生'+suffix);
+ expect(await list.innerHTML()).not.toContain(pMarket);
 
  // 3. Default compact columnar view assertions
  await expect(list.getByRole('button',{name:'列式视图'})).toHaveAttribute('aria-pressed','true');
@@ -574,6 +595,10 @@ test('PC-03b: authorized detail shows full phone without market notes, cross-emp
  await expect(page.locator('#v35-my-leads')).not.toContainText(pAuthMask);
  const status=await page.evaluate(async(id)=>{try{await api('/api/v1/isolated-workspace/workflow/'+id);return 200;}catch(e){return e.status;}},leadId);
  expect(status).toBe(403);
+ const bSearch=await page.evaluate(async(q)=>api('/api/v1/isolated-workspace/workflow?q='+encodeURIComponent(q)),pAuth);
+ expect(bSearch.items).toHaveLength(0);
+ expect(JSON.stringify(bSearch)).not.toContain(pAuth);
+ expect(JSON.stringify(bSearch)).not.toContain(pAuthMask);
 
  // 403 fail-closed wipes list and nav
  await page.route('**/api/v1/isolated-workspace/workflow/options',r=>r.fulfill({status:403,contentType:'application/json',body:JSON.stringify({code:'FORBIDDEN',message:'角色已撤销'})}));

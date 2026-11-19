@@ -27,8 +27,10 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
    const ap={type:'trial',due_at:new Date(Date.now()+2*86400000).toISOString(),place:'试听室',course:'数学'};
    assert.equal((await w('',{contact_name:'首呼未接误约',student_name:'误约学生',contact_info:'13900000045',origin_group:'sales',source:'网络咨询',initial_communication:{method:'phone',result:'failed',failure_reason:'无人接听',at:new Date().toISOString()},next:{appointment:ap}})).status,422);
    const f1=good(await w('',{contact_name:'首呼未接家长',student_name:'首呼未接学生',contact_info:'13900000045',origin_group:'sales',source:'网络咨询',initial_communication:{method:'phone',result:'failed',failure_reason:'无人接听',at:new Date().toISOString()},next:next(1)})).lead_id;
-   const d1=good(await w('/'+f1));assert.equal(d1.workflow.stage,'needs_discovery');assert.equal(d1.events.find(e=>e.event_name==='V34_COMMUNICATION').after_business_json.result,'failed');
-   assert.equal(good(await w('')).items.find(i=>i.id===f1).contact_info,'13900000045');
+   const d1=good(await w('/'+f1));assert.equal(d1.workflow.stage,'needs_discovery');assert.equal(d1.workflow.contact_info,'13900000045');assert.equal(d1.events.find(e=>e.event_name==='V34_COMMUNICATION').after_business_json.result,'failed');
+   const listRes=good(await w(''));const listItem=listRes.items.find(i=>i.id===f1);assert.equal(listItem.contact_info,undefined);assert.equal(listItem.contact_info_masked,'139****0045');assert.equal(JSON.stringify(listRes).includes('13900000045'),false);
+   const qRes=good(await w('?q=13900000045'));assert.equal(qRes.items.length,1);assert.equal(qRes.items[0].id,f1);assert.equal(qRes.items[0].contact_info,undefined);assert.equal(qRes.items[0].contact_info_masked,'139****0045');assert.equal(JSON.stringify(qRes).includes('13900000045'),false);
+   assert.equal(good(await w('?q=13900000045',undefined,B)).items.length,0);
    const f2=good(await w('',{contact_name:'无初填学生直接预约',contact_info:'13900000046',origin_group:'sales',source:'到店',initial_communication:{method:'phone',at:new Date().toISOString(),stage:'enrollment_intent'},next:{appointment:{...ap,student_name:'预约创建学生'}}})).lead_id;
    const d2=good(await w('/'+f2));assert.equal(d2.workflow.stage,'enrollment_intent');assert.equal(d2.events.find(e=>e.event_name==='V34_COMMUNICATION').after_business_json.student_ids.length,1);
    const mk=good(await w('/market',{phone:'13900000047',contact_name:'市场首呼未接',student_name:'交接首呼学生',source:'市场活动'},K2)).lead_id;

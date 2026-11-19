@@ -88,8 +88,8 @@ async function normalize(c,ctx,kind,b){
  return {body,...linked};
 }
 const stateFor=kind=>kind==='tasks'?'open':kind==='automation-rules'?'configured':'draft';
-export async function workspaceOperation(c,ctx,{method,parts,body}){
- if(parts[0]==='workflow'){if(!ctx.v34Enabled)fail(404,'NOT_FOUND','V3.4未启用');return salesWorkflow(c,ctx,{method,parts,body});}
+export async function workspaceOperation(c,ctx,{method,parts,body,query}){
+ if(parts[0]==='workflow'){if(!ctx.v34Enabled)fail(404,'NOT_FOUND','V3.4未启用');return salesWorkflow(c,ctx,{method,parts,body,query});}
  if(ctx.v34Enabled&&method==='POST'){
   if(parts[0]==='leads')fail(409,'WORKFLOW_REQUIRED','请在新版工作台保存，确保后续动作完整');
   if(parts[1]&&uuid(parts[1])){const r=await c.query('SELECT lead_id FROM ms_workspace.records WHERE id=$1',[parts[1]]);if(r.rows[0]?.lead_id)fail(409,'WORKFLOW_REQUIRED','该记录须通过新版客户工作台操作');}

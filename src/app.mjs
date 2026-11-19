@@ -167,7 +167,7 @@ const routeDefs=[
 ];
 async function handle(c,ctx,op,p,body,requestUrl) {
   const org=ctx.user.organization_id,actor=ctx.user.id;
-  if(op==='workspace')return workspaceOperation(c,ctx,{method:body===null?'GET':'POST',parts:p[0].split('/'),body});
+  if(op==='workspace')return workspaceOperation(c,ctx,{method:body===null?'GET':'POST',parts:p[0].split('/'),body,query:requestUrl?Object.fromEntries(requestUrl.searchParams):{}});
   if(op.startsWith('identity'))return identityOperation(c,ctx,op,p,body);
   switch(op){
     case 'updateLeadSource': {
