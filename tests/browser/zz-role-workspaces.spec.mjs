@@ -309,6 +309,7 @@ test('PC-02b: 390px narrow layout, 403 role revocation cleanup, and cross-employ
  const follow=page.locator('#v34-followup');
  await follow.locator('[name="result"]').selectOption('communicated');
  await follow.locator('[name="notes"]').fill('未提交跟进记录');
+ await nextTomorrow(page,follow);
 
  // Save POST returns 400: preserves form and uncommitted input
  await page.route('**/api/v1/isolated-workspace/workflow/**',route=>{
