@@ -125,7 +125,18 @@ test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and
  await expect(page.locator('#v35-task-count')).toBeHidden();
  await expect(page.locator('#v35-approvals')).toHaveCount(0);
  await expect(page.locator('#v35-handover-tasks')).toBeVisible();
- await expect(page.locator('#v35-handover-tasks')).toContainText('暂无待审批或待接手事项');
+ const handoverRows=page.locator('#v35-handover-tasks article');
+ const handoverCount=await handoverRows.count();
+ // Existing fixture data can contain genuine outstanding arrangements: this is not an empty list.
+ // Both populated and empty cases must exclude ordinary contact/appointment tasks.
+ if(handoverCount){
+  for(let i=0;i<handoverCount;i++)await expect(handoverRows.nth(i)).toContainText(/待补安排|待确认接手|待主管独立复核/);
+  await expect(page.locator('#v35-handover-tasks')).not.toContainText('暂无待审批或待接手事项');
+ }else{
+  await expect(page.locator('#v35-handover-tasks')).toContainText('暂无待审批或待接手事项');
+ }
+ await expect(page.locator('#v35-handover-tasks')).not.toContainText(callName);
+ await expect(page.locator('#v35-handover-tasks')).not.toContainText(trialName);
 
  // Refresh preserves handover filter
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
