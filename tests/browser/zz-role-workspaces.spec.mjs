@@ -244,6 +244,8 @@ test('PC-02a: wide-screen side-detail preserves list search/filter/sort and unsa
  await expect(page.locator('#v35-side-detail')).toBeVisible();
  await expect(page.locator('#v34-followup')).toHaveCount(0);
  await page.locator('#v35-side-detail').getByRole('button',{name:'返回客户列表',exact:true}).click();
+ await expect(page.locator('#v35-side-detail')).toHaveCount(0);
+ await expect(list).toBeVisible();
 
  // Tasks view side-detail + back to tasks
  await page.getByRole('button',{name:'我的待办',exact:true}).click();
