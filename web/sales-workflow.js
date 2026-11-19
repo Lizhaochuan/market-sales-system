@@ -351,16 +351,12 @@
     let clean=s.trim();
     if(!clean)return false;
     clean=clean.replace(/(?:19|20)\d{2}[-/.\u5e74](?:0?[1-9]|1[0-2])[-/.\u6708](?:0?[1-9]|[12]\d|3[01])\u65e5?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/g,' ');
-    const candRegex=/(?:[+＋]?(?:00)?\d|[\(（\[【]\d)[\d\s\-–—_().（）【】[\]·•/]*\d/g;
-    const matches=clean.match(candRegex);
-    if(!matches)return false;
-    for(const cand of matches){
-     const digits=cand.replace(/\D/g,'');
-     const nationalDigits=digits.replace(/^(?:0086|86)/,'');
-     if(/^1[3-9]\d{9}$/.test(nationalDigits)||/^1[3-9]\d{9}$/.test(digits))return true;
-     if(/^0\d{9,11}$/.test(nationalDigits)||/^0\d{9,11}$/.test(digits))return true;
-     if(nationalDigits.length>=7&&nationalDigits.length<=15)return true;
-     if(digits.length>=7&&digits.length<=15)return true;
+    // Scan phone-shaped spans anywhere in text; do not combine digits across words.
+    // Keep brackets explicit so separators remain inside a single candidate.
+    const candRegex=/[+＋]?\d[\d\s\-–—_().（）【】\[\]·•/]*\d/g;
+    for(const cand of clean.match(candRegex)||[]){
+     // No upper bound: adjacent numbers or a numeric prefix must not hide a phone.
+     if(cand.replace(/\D/g,'').length>=7)return true;
     }
     return false;
    };

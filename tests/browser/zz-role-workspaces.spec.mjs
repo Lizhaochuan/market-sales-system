@@ -612,6 +612,37 @@ test('PC-03b: authorized detail shows full phone without market notes, cross-emp
  await page.unroute('**/api/v1/isolated-workspace/workflow/options');
 });
 
+test('PC-04c: saved views reject embedded separated phones in either field and retain ordinary identifiers',async({page})=>{
+ await login(page,'sales-a');
+ await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
+ const list=page.locator('#v35-my-leads');
+ const search=list.locator('[name="my_lead_search"]');
+ const name=list.locator('[name="saved_view_name"]');
+ const save=list.getByRole('button',{name:'保存当前视图'});
+ const chips=list.locator('.v35-saved-chip');
+ for(const field of ['search','name']){
+  for(const value of ['电话139 1234 5678视图','客户+86-139-1234-5678','家长(139)1234-5678','家长（139）1234—5678','13912345678 13812345678','电话139 1234 5678 138 1234 5678视图']){
+   await search.fill(field==='search'?value:'学生1');
+   await name.fill(field==='name'?value:'04A视图');
+   await save.click();
+   await expect(list.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
+   await expect(chips).toHaveCount(0);
+  }
+ }
+ let count=0;
+ for(const value of ['学生1','04A','2026课程计划','班级04A学生1','计划2026-11-20']){
+  await search.fill(value);await name.fill(value);await save.click();
+  await expect(chips).toHaveCount(++count);
+  await expect(list.locator('#v35-saved-view-hint')).toBeEmpty();
+  await search.fill('其它');
+  await chips.getByRole('button',{name:value,exact:true}).click();
+  await expect(search).toHaveValue(value);
+ }
+ await login(page,'sales-a');
+ await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
+ await expect(chips).toHaveCount(0);
+});
+
 test('PC-04a: read-only stage kanban, saved views, draft preservation, phone masking, and cross-employee isolation',async({page})=>{
  await page.setViewportSize({width:1440,height:900});
  const suffix='04A'+String(Date.now()).slice(-4);
