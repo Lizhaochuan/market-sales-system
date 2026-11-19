@@ -537,6 +537,7 @@ test('PC-03a: compact columnar view, card toggle, structured facts, phone maskin
  page.once('dialog',d=>d.accept());
  await side.getByRole('button',{name:'放弃未保存修改',exact:true}).click();
  await side.getByRole('button',{name:'返回客户列表',exact:true}).click();
+ await expect(side).toBeHidden();
 
  // Empty state check
  await list.locator('[name="my_lead_search"]').fill('绝对不存在的客户关键字XYZ');
