@@ -196,10 +196,12 @@
     btn(q,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));
     handover.append(q);
    }
-   for(const l of rows.filter(l=>l.needs_arrangement&&(taskScope==='team'||l.owner_user_id===state.user.staff_id))){
-    const q=node('article','lead-row');q.append(node('p','','待补安排 · '+l.contact_name));
-    btn(q,'补充安排',()=>openLead(l.id));
-    handover.append(q);
+   if(taskFilter!=='handover'){
+    for(const l of rows.filter(l=>l.needs_arrangement&&(taskScope==='team'||l.owner_user_id===state.user.staff_id))){
+     const q=node('article','lead-row');q.append(node('p','','待补安排 · '+l.contact_name));
+     btn(q,'补充安排',()=>openLead(l.id));
+     handover.append(q);
+    }
    }
    if(!handover.children.length&&taskFilter==='handover'){
     handover.append(node('p','','暂无待审批或待接手事项'));
