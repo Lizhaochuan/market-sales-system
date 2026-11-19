@@ -469,7 +469,7 @@ test('PC-03a: compact columnar view, card toggle, structured facts, phone maskin
  await expect(list.getByRole('button',{name:'列式视图'})).toHaveAttribute('aria-pressed','true');
  await expect(list.locator('.v35-table-head')).toBeVisible();
  await list.locator('[name="my_lead_search"]').fill(suffix);
- await expect(list).toContainText('PC03市场学生'+suffix);
+ await expect(list).toContainText(pMarketMask);
 
  // Verify masked phones and NO raw phones anywhere in #v35-my-leads HTML (text, title, aria-label, data-*)
  const listHtml=await list.innerHTML();
