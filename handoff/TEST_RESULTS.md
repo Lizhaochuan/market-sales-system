@@ -22,7 +22,49 @@
 
 ---
 
-## 二、PC-03 客户列表紧凑列式视图与联系方式脱敏验证记录（chatgpt/ms-ui-003-pc-03）
+## 二、PC-04 只读阶段看板、周日程与 Saved Views 验证记录（chatgpt/ms-ui-004-pc-04）
+
+- **开发分支**：`chatgpt/ms-ui-004-pc-04`（基于 PC-03 已验收文档 HEAD `a3edeb14fa24dff40e66291d602c6ab7f5710a1c` / 代码 `0eb982d7b7981b69a82aa38506bb8289a22adbf0`）
+- **最新受测代码 Commit SHA**：`2bf1a79c196c09b1e2c44fda433a9d4ff73124b5`
+- **当前状态**：`REVIEW_REQUIRED`（最新增量代码已通过 GitHub Actions 全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED` / `merge_authorized=false` / `deploy_authorized=false`，待 ChatGPT 最终审核）
+
+### 1. 本轮增量实现与安全边界
+
+1. **只读阶段看板 Kanban（`web/sales-workflow.js` `renderPhoneIntake()`、`web/styles.css`）**：
+   - 在“我的客户列表”新增 `阶段看板` 视图切换（保留 `列式视图` 默认与 `卡片视图`），切换不丢失搜索、状态筛选、排序、选中客户及内存草稿。
+   - 仅基于已授权 `GET /workflow` 投影：按真实 `stage`（`options.stages`）及终态（`Closed Won` / `Closed Lost` / `旧终态`）分组，每个 Lead 仅出现一次。
+   - **严格只读**：无 `draggable="true"`、无拖拽事件、无阶段下拉框或内联改写；列表卡片仅展示 `contact_info_masked`；点击`打开客户`进入既有授权 `#v35-side-detail` 与单项操作卡片。
+2. **会话内存级 Saved Views（`web/sales-workflow.js` `#v35-saved-views`）**：
+   - 允许当前员工保存当前筛选配置（名称、搜索词、状态筛选、排序、视图模式 `table|cards|kanban`）、一键切换及删除。
+   - 仅存于前端闭包内存（`savedViews`），严禁写入 `localStorage` / `sessionStorage`，不缓存明文电话或客户明细；在 `wipeState()` 及员工切换（`session !== token`）时立即清空。
+   - 未新增数据库迁移或表结构。
+3. **只读周日程 Calendar（`web/sales-workflow.js` `renderRoleTasks()`、`web/styles.css`）**：
+   - 在“我的待办”新增 `日待办视图`（默认，PC-01 行为零改动）与 `周日程视图` 切换。
+   - 基于已授权 `GET /workflow/metrics` `reminders` 与 `rows` 按 `Asia/Shanghai` 自然日展示周一至周日日程，使用纯 UTC 日历运算处理跨月、跨年与上海午夜边界（如 `2026-12-31T16:30:00Z` 归入 `2027-01-01`），支持`上一周`、`回到本周`、`下一周`及主管范围切换（`taskScope`）。
+   - 严格使用结构化字段标注类型（`试听` / `面谈` / `跟进待办`），不从任务标题猜测；展示真实执行时间、负责人、逾期红标，点击`查看进展 / 继续跟进`进入既有侧边详情。
+   - `1440×900`、`1280×720` 及 `390×844`（纵向堆叠）零横向溢出；401/403/404 `wipeState()` 立即清空看板、周日程与 Saved Views。
+4. **Playwright 扩展回归（`tests/browser/zz-role-workspaces.spec.mjs`）**：
+   - `PC-04a`：验证不同阶段/终态 Lead 准确归列且每客户仅出现一次、无拖拽/无内联修改控件、列表脱敏、侧边详情全号展示与切视图草稿保留、Saved Views 保存/恢复/删除与跨员工隔离、1280/390px 零横向溢出。
+   - `PC-04b`：验证周日程跨月/跨年（`2026-12-28 ~ 2027-01-03`）与 `Asia/Shanghai` 午夜归日、防标题误判（`假装试听`仍标`跟进待办`）、周导航、从周日程打开侧边详情、390px 零横向溢出及 403 fail-closed 清理。
+
+### 2. 本地静态检查与合约测试
+- `node --check web/sales-workflow.js tests/browser/zz-role-workspaces.spec.mjs`：退出码 **`0`**
+- `node --test tests/contracts/contracts.test.mjs`：退出码 **`0`**（**8 passed, 0 failed**）
+
+### 3. GitHub Actions 验证记录
+- **最新实测代码 CI（通过）**：[Run 44547031262](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44547031262)
+  - 对应提交：`2bf1a79c196c09b1e2c44fda433a9d4ff73124b5`
+  - 运行结果：`status=completed`, `conclusion=success`, 耗时 10m33s，全部 21/21 步 `success`。
+  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**40 passed / 0 failed**（2.6m，含 PC-01、PC-02a/b、PC-03a/b 与新增 PC-04a/b）。
+  - `Core API, authorization, idempotency and Chinese audit E2E`：**exit 0**（全量通过）。
+  - `Restricted actual LOGIN and tenant row-level security E2E`：**exit 0**（全量通过）。
+  - `Check frontend JavaScript syntax`：**exit 0**。
+  - `Existing design contract regression`：**exit 0**（**8 passed / 0 failed**）。
+- *历史失败尝试（已修复，不得混淆）*：`Run 44544370705`（`0e3d666`，`PC-04a` 误调 `/lost`）、`Run 44545402451`（`e189839`，`PC-04a` Saved View 按钮定位缺 `exact: true`）。
+
+---
+
+## 三、PC-03 客户列表紧凑列式视图与联系方式脱敏验证记录（chatgpt/ms-ui-003-pc-03）
 
 **ChatGPT 复审签收（2026-11-19）**：直接核实 [Run 44534751901](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44534751901) `status=completed/conclusion=success`，实测代码 SHA `0eb982d7b7981b69a82aa38506bb8289a22adbf0`。真实日志：Chromium **38/38**、核心 API/权限/安全 **722/722**、LOGIN/RLS **12/12**、合约 **8/8**。审阅 `src/sales-workflow.mjs` 确认列表查询内临时使用 `w.contact_info` 完成服务端匹配，但返回前通过 `({contact_info,...r})` 删除明文，仅返回 `contact_info_masked`；授权详情接口仍单独校验权限。核实 API 与 Playwright 断言已验证普通列表、`?q=` 搜索列表原始 JSON 不含完整电话，并验证跨员工搜索无结果、市场备注不可见和草稿/视图回归。该 SHA 后仅更新交接 Markdown，未修改受测代码。**PC-03=DONE**。注意：搜索时用户输入的完整电话仍随 `GET ?q=` 请求 URL 发送，未来正式部署前需单独评估 HTTP 访问日志、代理日志与监控中的敏感参数脱敏/改用受控 POST 查询；这一项不是列表 API 响应泄露，亦不构成本轮开发验收的合并/上线授权。
 
