@@ -22,7 +22,49 @@
 
 ---
 
-## 二、PC-02 客户列表与侧边详情优化验证记录（chatgpt/ms-ui-002-pc-02）
+## 二、PC-03 客户列表紧凑列式视图与联系方式脱敏验证记录（chatgpt/ms-ui-003-pc-03）
+
+- **开发分支**：`chatgpt/ms-ui-003-pc-03`（基于 PC-02 已验收文档 HEAD `09af1155092b6e8322359c4f29e5677d4dbc32b2` / 代码 `a36ba3984df6c3ae7962cc30698c2d43fa42fd46`）
+- **最新受测代码 Commit SHA**：`3cfea70d831990bb5e7ba0b5f4d1df17e49e12a8`
+- **当前状态**：`REVIEW_REQUIRED`（最新增量代码已通过 GitHub Actions 全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED` / `merge_authorized=false` / `deploy_authorized=false`，待 ChatGPT 最终审核）
+
+### 1. 本轮增量实现与安全边界
+
+1. **后端最小化只读字段补充（`src/sales-workflow.mjs` `listing()`）**：
+   - 在既有授权与组织隔离查询 `GET /workflow` 中只读补充：`a.kind AS activity_kind`、`last_communication`（取自 `ms.audit_events` 最新 `V34_COMMUNICATION`）、`latest_appointment`（取自 `ms_workspace.records WHERE kind='appointments'`，按活跃状态优先）。
+   - 严格使用结构化业务事实，不从标题猜测面谈/试听/报名/到账；`ms_workspace.lead_directory.marketing_notes` 仍严禁进入销售列表与详情接口。
+2. **紧凑列式视图与卡片视图切换（`web/sales-workflow.js`、`web/styles.css`）**：
+   - 在 `renderPhoneIntake()` 的“我的客户列表”新增 `列式视图`（默认）与 `卡片视图` 切换按钮（`aria-pressed`），切换视图不丢失搜索、状态筛选、排序、选中客户、滚动位置及未保存草稿。
+   - 展示学生（含多学生串联）、销售阶段与终态、获客来源、最近一次实际沟通结果、面谈/试听当前状态、明确下一步及执行时间、真实逾期红标（`.badge.warning`）。
+   - `>=1080px` 非分栏时展示 6 列对齐表头与列表；分栏或 `390px` 窄屏自动折叠为无横向溢出紧凑布局。
+   - 修复编辑中即时显现“放弃未保存修改”按钮（`#v35-discard-draft`）。
+3. **联系方式默认脱敏与详情按需展示**：
+   - 列表与卡片视图统一通过 `maskPhone()` 脱敏展示电话（如 `138****1122`），无电话显示 `未留电话`；不在列表 DOM 文本、`title`、`aria-label`、`data-*` 或隐藏元素输出明文电话。
+   - 完整电话仅在经服务端权限校验的授权客户详情 `renderLead()` 中按需展示。
+4. **Playwright 扩展回归（`tests/browser/zz-role-workspaces.spec.mjs`）**：
+   - `PC-03a`：列式/卡片双视图切换与状态/草稿保持、结构化沟通/面谈试听/报价非误标、列表脱敏与无市场内部备注泄露、多学生/无电话/空状态、1440/1280/390px 零横向溢出。
+   - `PC-03b`：授权详情展示完整电话且不含市场备注、跨员工 `sales-b` 列表及 API 403 隔离、403 fail-closed 清理。
+
+### 2. 本地静态检查与合约测试
+- `node --check src/sales-workflow.mjs`：退出码 **`0`**
+- `node --check web/sales-workflow.js`：退出码 **`0`**
+- `node --check tests/browser/zz-role-workspaces.spec.mjs`：退出码 **`0`**
+- `node --test tests/contracts/contracts.test.mjs`：退出码 **`0`**（**8 passed, 0 failed**）
+
+### 3. GitHub Actions 验证记录
+- **最新实测代码 CI（通过）**：[Run 44525579636](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44525579636)
+  - 对应提交：`3cfea70d831990bb5e7ba0b5f4d1df17e49e12a8`
+  - 运行结果：`status=completed`, `conclusion=success`, 耗时 5m12s，全部步骤 `success`。
+  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**38 passed / 0 failed**（3.5m，含全部 PC-01、PC-02a/b 与新增 PC-03a/b）。
+  - `Core API, authorization, idempotency and Chinese audit E2E`：**exit 0**（全量通过）。
+  - `Restricted actual LOGIN and tenant row-level security E2E`：**exit 0**（全量通过）。
+  - `Check frontend JavaScript syntax`：**exit 0**。
+  - `Existing design contract regression`：**exit 0**（**8 passed / 0 failed**）。
+- *历史失败尝试（已修复，不得混淆）*：`Run 44515061076`（`08bfa80`，测试 quote 传参多字段）、`Run 44516401867`/`44517094967`（`5a998bc`/`0798e5e`，测试 fixture `lead_state` 与 SQL 参数数）、`Run 44517946646`/`44520293271`/`44523324555`（GitHub runner 依赖安装超时/环境故障）、`Run 44521232808`/`44524377333`（`d6faecd` 缺少即时 unhide `#v35-discard-draft`）。
+
+---
+
+## 三、PC-02 客户列表与侧边详情优化验证记录（chatgpt/ms-ui-002-pc-02）
 
 **2026-11-19 ChatGPT 最终复审勘误与验收签收**：交付报告把 CI 对应提交错写为 `a36ba392070e7e1f41b2c45ee2b1462ce4aa4533`（GitHub 不存在该提交）；实查 GitHub Actions [Run 44510026815](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44510026815) 的实际 `head_sha=a36ba3984df6c3ae7962cc30698c2d43fa42fd46`，状态 `completed/success`。该代码通过 Node/PG **722/722**、Chromium **36/36**、LOGIN/RLS **12/12**、合约 **8/8**。静态复审确认跨客户/导航保存当前内存草稿、独立恢复、主动放弃，以及 refresh/openLead/mutate/history 四类异步请求的 401/403/404 fail-closed 清理。新 PC-02b 实测 POST 400/503/403、GET 403/404；401 分支代码逻辑核查通过，但本次新增用例并未单独模拟 401，不得夸大。仅有 handoff 文档提交发生在上述受测代码后，不修改受测业务代码。结论：**PC-02=DONE（开发/测试验收）**，全局仍保持 `HOLD=true`、`EXT-001=UNVERIFIED`、`merge_authorized=false`、`deploy_authorized=false`。
 
