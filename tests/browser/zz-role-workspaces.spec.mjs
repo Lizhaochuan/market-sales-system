@@ -608,5 +608,160 @@ test('PC-03b: authorized detail shows full phone without market notes, cross-emp
  await page.unroute('**/api/v1/isolated-workspace/workflow/options');
 });
 
+test('PC-04a: read-only stage kanban, saved views, draft preservation, phone masking, and cross-employee isolation',async({page})=>{
+ await page.setViewportSize({width:1440,height:900});
+ const suffix='04A'+String(Date.now()).slice(-4);
+ const pDisc='13811'+String(Date.now()).slice(-6);
+ const pTrial='13822'+String(Date.now()).slice(-6);
+ const pLost='13833'+String(Date.now()).slice(-6);
+ const pDiscMask=pDisc.slice(0,3)+'****'+pDisc.slice(-4);
+
+ await login(page,'sales-a');
+ const ids=await page.evaluate(async({pDisc,pTrial,pLost,suffix})=>{
+  const tom=new Date(Date.now()+86400000).toISOString();
+  const d=await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'KB待了解家长'+suffix,student_name:'KB待了解学生'+suffix,contact_info:pDisc,origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'了解需求'+suffix,due_at:tom}}});
+  const t=await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'KB试听家长'+suffix,student_name:'KB试听学生'+suffix,contact_info:pTrial,origin_group:'sales',source:'网络咨询',initial_communication:{method:'phone',at:new Date(Date.now()-3600000).toISOString(),stage:'courses_introduced'},next:{appointment:{type:'trial',due_at:tom,place:'101教室',course:'英语'}}}});
+  const l=await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'KB流失家长'+suffix,student_name:'KB流失学生'+suffix,contact_info:pLost,origin_group:'sales',source:'转介绍',next:{action:'call',method:'phone',title:'初始跟进'+suffix,due_at:tom}}});
+  const det=await api('/api/v1/isolated-workspace/workflow/'+l.lead_id);
+  await api('/api/v1/isolated-workspace/workflow/'+l.lead_id+'/lost',{method:'POST',body:{expected_version:det.workflow.version,reason:'距离太远',feedback:'家长明确不报名'}});
+  return {discId:d.lead_id,trialId:t.lead_id,lostId:l.lead_id};
+ },{pDisc,pTrial,pLost,suffix});
+
+ await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
+ const list=page.locator('#v35-my-leads');
+ await list.locator('[name="my_lead_search"]').fill(suffix);
+ await list.getByRole('button',{name:'阶段看板'}).click();
+ await expect(list.getByRole('button',{name:'阶段看板'})).toHaveAttribute('aria-pressed','true');
+
+ const board=page.locator('#v35-kanban-board');
+ await expect(board).toBeVisible();
+ // Each lead appears exactly once and in its true stage/terminal column
+ await expect(board.locator(`[data-lead-id="${ids.discId}"]`)).toHaveCount(1);
+ await expect(board.locator(`[data-lead-id="${ids.trialId}"]`)).toHaveCount(1);
+ await expect(board.locator(`[data-lead-id="${ids.lostId}"]`)).toHaveCount(1);
+ await expect(board.locator('[data-stage-col="needs_discovery"]')).toContainText('KB待了解学生'+suffix);
+ await expect(board.locator('[data-stage-col="trial_booked"]')).toContainText('KB试听学生'+suffix);
+ await expect(board.locator('[data-stage-col="__lost__"]')).toContainText('KB流失学生'+suffix);
+
+ // Strictly read-only: no draggable cards, no stage selects, no raw phones
+ expect(await board.locator('[draggable="true"]').count()).toBe(0);
+ expect(await board.locator('select,input').count()).toBe(0);
+ const boardHtml=await board.innerHTML();
+ expect(boardHtml).toContain(pDiscMask);
+ expect(boardHtml).not.toContain(pDisc);
+ expect(boardHtml).not.toContain(pTrial);
+ expect(boardHtml).not.toContain(pLost);
+
+ // Open lead from Kanban -> side detail shows full phone, draft preserved across view toggles
+ await board.locator(`[data-lead-id="${ids.discId}"]`).getByRole('button',{name:'打开客户'}).click();
+ const side=page.locator('#v35-side-detail');
+ await expect(side).toBeVisible();
+ await expect(side).toContainText('联系方式：'+pDisc);
+ await side.locator('#v34-primary').getByRole('button',{name:'去跟进 / 记录沟通结果',exact:true}).click();
+ await side.locator('#v34-followup [name="notes"]').fill('PC04看板草稿不丢失');
+ await list.getByRole('button',{name:'列式视图'}).click();
+ await expect(side.locator('#v34-followup [name="notes"]')).toHaveValue('PC04看板草稿不丢失');
+ await list.getByRole('button',{name:'阶段看板'}).click();
+ await expect(side.locator('#v34-followup [name="notes"]')).toHaveValue('PC04看板草稿不丢失');
+ page.once('dialog',d=>d.accept());
+ await side.getByRole('button',{name:'放弃未保存修改',exact:true}).click();
+ await side.getByRole('button',{name:'返回客户列表',exact:true}).click();
+
+ // Saved Views: save, reset, apply, delete, and cross-employee isolation
+ await list.locator('[name="my_lead_state"]').selectOption('open');
+ await list.locator('[name="saved_view_name"]').fill('进行中看板'+suffix);
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-views')).toContainText('进行中看板'+suffix);
+
+ await list.locator('[name="my_lead_search"]').fill('');
+ await list.locator('[name="my_lead_state"]').selectOption('all');
+ await list.getByRole('button',{name:'列式视图'}).click();
+ await page.locator('#v35-saved-views').getByRole('button',{name:'进行中看板'+suffix}).click();
+ await expect(list.locator('[name="my_lead_search"]')).toHaveValue(suffix);
+ await expect(list.locator('[name="my_lead_state"]')).toHaveValue('open');
+ await expect(list.getByRole('button',{name:'阶段看板'})).toHaveAttribute('aria-pressed','true');
+ await expect(board.locator(`[data-lead-id="${ids.lostId}"]`)).toHaveCount(0);
+
+ await page.locator('#v35-saved-views').getByRole('button',{name:'删除视图 进行中看板'+suffix}).click();
+ await expect(page.locator('#v35-saved-views')).not.toContainText('进行中看板'+suffix);
+
+ // Responsive 1280x720 and 390x844 zero horizontal overflow
+ await page.setViewportSize({width:1280,height:720});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+
+ // Save a view on sales-a then login as sales-b -> saved view must NOT leak
+ await list.locator('[name="saved_view_name"]').fill('A专属视图'+suffix);
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await login(page,'sales-b');
+ await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
+ await expect(page.locator('#v35-saved-views')).not.toContainText('A专属视图'+suffix);
+ await expect(page.locator('#v35-my-leads')).not.toContainText('KB待了解学生'+suffix);
+});
+
+test('PC-04b: week calendar navigation, cross-month/year & Asia/Shanghai midnight, structured types, 390px & 403 fail-closed',async({page})=>{
+ await page.setViewportSize({width:1440,height:900});
+ const suffix='04B'+String(Date.now()).slice(-4);
+ const shTodayStr=await page.evaluate(()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()));
+ const [shY,shM,shD]=shTodayStr.split('-').map(Number);
+ const shNoonUtc=Date.UTC(shY,shM-1,shD,4,0,0);
+ const overdueIso=new Date(shNoonUtc-2*86400000).toISOString();
+
+ await login(page,'sales-a');
+ await page.evaluate(async({suffix,overdueIso})=>{
+  const p=()=>String(13700000000+Math.floor(Math.random()*900000000));
+  // Misleading title task (must show 跟进待办, NOT 试听)
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'WC任务家长'+suffix,student_name:'WC任务学生'+suffix,contact_info:p(),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'假装试听沟通'+suffix,due_at:overdueIso}}});
+  // Cross-year Asia/Shanghai midnight boundary: 2026-12-31T16:30:00Z is 2027-01-01 00:30 Asia/Shanghai
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:'WC跨年家长'+suffix,student_name:'WC跨年学生'+suffix,contact_info:p(),origin_group:'sales',source:'网络咨询',initial_communication:{method:'phone',at:new Date(Date.now()-3600000).toISOString(),stage:'courses_introduced'},next:{appointment:{type:'meeting',due_at:'2026-12-31T16:30:00.000Z'}}}});
+ },{suffix,overdueIso});
+
+ await page.getByRole('button',{name:'我的待办',exact:true}).click();
+ // Set task_day to 2026-12-31 so week view opens on 2026-12-28 ~ 2027-01-03
+ await page.locator('#v34-tasks [name="task_day"]').fill('2026-12-31');
+ await page.locator('#v34-tasks [name="task_day"]').dispatchEvent('change');
+ await page.locator('#v35-task-view-toggle').getByRole('button',{name:'周日程视图'}).click();
+ await expect(page.locator('#v35-week-calendar')).toBeVisible();
+ await expect(page.locator('#v35-week-range')).toContainText('2026-12-28 ~ 2027-01-03');
+
+ // 2026-12-31T16:30:00Z MUST appear under 2027-01-01 (Asia/Shanghai), NOT 2026-12-31
+ const jan1Col=page.locator('#v35-week-calendar [data-day="2027-01-01"]');
+ const dec31Col=page.locator('#v35-week-calendar [data-day="2026-12-31"]');
+ await expect(jan1Col).toContainText('WC跨年学生'+suffix);
+ await expect(jan1Col).toContainText('面谈');
+ await expect(dec31Col).not.toContainText('WC跨年学生'+suffix);
+
+ // Navigate next/prev/current week
+ await page.locator('#v35-week-calendar').getByRole('button',{name:'下一周'}).click();
+ await expect(page.locator('#v35-week-range')).toContainText('2027-01-04 ~ 2027-01-10');
+ await page.locator('#v35-week-calendar').getByRole('button',{name:'上一周'}).click();
+ await expect(page.locator('#v35-week-range')).toContainText('2026-12-28 ~ 2027-01-03');
+
+ // Open side detail directly from week calendar item
+ await jan1Col.locator('.v35-week-item').filter({hasText:'WC跨年学生'+suffix}).getByRole('button',{name:'查看进展 / 继续跟进'}).click();
+ await expect(page.locator('#v35-side-detail')).toBeVisible();
+ await page.locator('#v35-side-detail').getByRole('button',{name:'返回我的待办',exact:true}).click();
+
+ // Back to current week -> overdue task shows structured 跟进待办 (not 试听) and 已逾期 badge
+ await page.locator('#v35-week-calendar').getByRole('button',{name:'回到本周'}).click();
+ const overdueItem=page.locator('#v35-week-calendar .v35-week-item').filter({hasText:'WC任务学生'+suffix});
+ await expect(overdueItem).toContainText('跟进待办');
+ await expect(overdueItem).not.toContainText(' · 试听');
+ await expect(overdueItem.locator('.badge.warning')).toContainText('已逾期');
+
+ // 390x844 vertical layout zero horizontal overflow
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+
+ // 403 fail-closed wipes week calendar
+ await page.route('**/api/v1/isolated-workspace/workflow/options',r=>r.fulfill({status:403,contentType:'application/json',body:JSON.stringify({code:'FORBIDDEN',message:'角色已撤销'})}));
+ await page.getByRole('button',{name:'刷新数据',exact:true}).click();
+ await expect(page.locator('#sales-workflow')).toContainText('角色已撤销');
+ await expect(page.locator('#v35-week-calendar')).toHaveCount(0);
+ await page.unroute('**/api/v1/isolated-workspace/workflow/options');
+});
+
+
 
 
