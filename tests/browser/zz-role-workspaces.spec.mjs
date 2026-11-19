@@ -857,3 +857,41 @@ test('PC-04b: week calendar navigation, cross-month/year & Asia/Shanghai midnigh
 
 
 
+
+test('PC-05: a manually chosen follow-up time is saved and appears at that time in the to-do list', async ({page}) => {
+ const student = '手动安排学生' + Date.now();
+ const title = '按约定时间电话回访';
+ const {manualTime, taskDay, displayTime} = await page.evaluate(() => {
+  const due = new Date();
+  due.setDate(due.getDate() + 2);
+  due.setHours(15, 37, 0, 0);
+  return {
+   manualTime: new Date(due.getTime() - due.getTimezoneOffset() * 60000).toISOString().slice(0, 16),
+   taskDay: new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+   }).format(due),
+   displayTime: due.toLocaleString('zh-CN', {hour12: false}),
+  };
+ });
+
+ await login(page);
+ await lookup(page, phone());
+ const form = page.locator('#v34-intake');
+ await form.locator('[name="contact_name"]').fill('手动安排家长');
+ await form.locator('[name="student_name"]').fill(student);
+ await form.locator('[name="next_title"]').fill(title);
+ await nextTomorrow(page, form);
+ const time = form.locator('[name="next_at"]');
+ await time.fill(manualTime);
+ await expect(time).toHaveValue(manualTime);
+ await form.getByRole('button', {name: '保存客户及首次安排'}).click();
+ await expect(page.locator('#v34-message')).toHaveText('已保存，后续安排已保留');
+
+ await login(page);
+ const day = page.locator('#v34-tasks [name="task_day"]');
+ await day.fill(taskDay);
+ await day.dispatchEvent('change');
+ const task = page.locator('#v35-day-tasks article').filter({hasText: student});
+ await expect(task).toContainText(title);
+ await expect(task).toContainText(displayTime);
+});
