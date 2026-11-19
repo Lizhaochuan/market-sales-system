@@ -22,7 +22,45 @@
 
 ---
 
-## 二、PC-01 审查修复与全流程 CI 验证记录（chatgpt/ms-ui-001-pc-01）
+## 二、PC-02 客户列表与侧边详情优化验证记录（chatgpt/ms-ui-002-pc-02）
+
+- **开发分支**：`chatgpt/ms-ui-002-pc-02`（基于 `chatgpt/ms-ui-001-pc-01` @ `06c1a7f7c291490ab6cc68e464da93178914e648`）
+- **实测代码 Commit SHA**：`2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`
+- **当前状态**：`REVIEW_REQUIRED`（已通过全流程 CI，待 ChatGPT 最终审核；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`）
+
+### 1. 本轮改动与协同修复
+1. **`web/sales-workflow.js`**：
+   - 新增分栏与列表状态（`detailHost`、`myLeadSearch`、`myLeadState`、`myLeadSort`、`listScrollTop`、`winScrollTop`），在 `view==='tasks'` 或 `view==='leads' && lookupResult===null` 时渲染 `#v35-split-workspace` 与 `#v35-side-detail`。
+   - 复用 `renderLead(side)`、`renderCardOperations` 及单项操作卡片，提供上下文返回按钮（`返回客户列表` / `返回我的待办`）并保留搜索、筛选、排序与滚动位置。
+   - 维持 `keepForm` 未保存草稿保护；在退出登录（`isolated-session-clear`）、切换员工及 `refresh()` 遇 401/403/404 撤权时彻底清空客户详情、草稿目标与列表筛选状态。
+   - 修复 `renderHandover()`：`待补安排`（`needs_arrangement`）仅在 `全部当日` 视图显示，确保 `待审批/待接手` 筛选在无待审批/待接手时稳定展示空状态。
+2. **`web/styles.css`**：
+   - 新增 `.v35-list-controls`、`.v35-lead-compact` / `.active`、`.v35-side-detail`，`@media(min-width:1280px)` 启用双栏分栏，`@media(max-width:1279px)` 打开详情时隐藏列表，`@media(max-width:600px)` 切换单列筛选控件。
+3. **`tests/browser/zz-role-workspaces.spec.mjs`**：
+   - 新增 `PC-02a`（宽屏 1280px 侧边详情、列表搜索/筛选/排序/返回保持、单项卡片、未保存草稿刷新保护、待办侧边详情往返）与 `PC-02b`（390px 窄屏切换与无横向溢出、403 撤权清理、跨员工隔离）。
+   - 修复 PC-01 用例中 `ms.leads` 缺少 `contact_name` 列的问题（改为 `JOIN ms.contacts c ON c.id=l.contact_id WHERE ... c.display_name=$1`）。
+
+### 2. 本地静态检查与合约测试
+- `node --check src/sales-workflow.mjs`：退出码 **`0`**
+- `node --check web/sales-workflow.js`：退出码 **`0`**
+- `node --check tests/browser/zz-role-workspaces.spec.mjs`：退出码 **`0`**
+- `node --test tests/contracts/contracts.test.mjs`：退出码 **`0`**（**8 passed, 0 failed**）
+
+### 3. GitHub Actions 全流程 CI 实测结果
+- **Workflow**：`V3.2 isolated core business API`（`v3-2-core-api.yml`）
+- **CI 运行链接**：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)（Job ID `135399140279`，耗时 4m44s，退出码 **`0`**）
+- **对应 Commit SHA**：`2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`
+- **关键步骤结论**：
+  - `Restricted runtime role and forbidden finance operations`：pass
+  - `Restricted actual LOGIN and tenant row-level security E2E`：pass
+  - `Check frontend JavaScript syntax`：pass
+  - `Core API, authorization, idempotency and Chinese audit E2E`：pass
+  - `Real headless Chromium workflow and responsive UI` (`npx playwright test`)：pass（含 PC-01 与 PC-02a/PC-02b 全部浏览器回归）
+  - `Existing design contract regression` (`node --test tests/contracts/contracts.test.mjs`)：pass
+
+---
+
+## 三、PC-01 审查修复与全流程 CI 验证记录（chatgpt/ms-ui-001-pc-01）
 
 ### 1. ChatGPT 审查指出的功能缺陷、时区隐患与断言补齐
 
