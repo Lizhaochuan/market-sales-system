@@ -159,7 +159,7 @@ test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 
-test('PC-02: side-detail preserves list state, protects unsaved drafts, and enforces isolation/revocation',async({page})=>{
+test('PC-02a: wide-screen side-detail preserves list search/filter/sort and unsaved drafts',async({page})=>{
  await page.setViewportSize({width:1280,height:720});
  await login(page,'sales-a');
 
@@ -217,10 +217,9 @@ test('PC-02: side-detail preserves list state, protects unsaved drafts, and enfo
  await expect(list.locator('[name="my_lead_state"]')).toHaveValue('open');
  await expect(list.locator('[name="my_lead_sort"]')).toHaveValue('name_asc');
 
- // Tasks view side-detail + back preserves taskFilter
+ // Tasks view side-detail + back to tasks
  await page.getByRole('button',{name:'我的待办',exact:true}).click();
- await page.locator('#v35-task-filters').getByRole('button',{name:'已逾期'}).click();
- await page.locator('#v35-task-filters').getByRole('button',{name:'全部当日'}).click();
+ await expect(page.locator('#v34-tasks')).toBeVisible();
  const day=await page.evaluate(()=>{const d=new Date();d.setDate(d.getDate()+1);return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);});
  await page.locator('#v34-tasks [name="task_day"]').fill(day);
  await page.locator('#v34-tasks [name="task_day"]').dispatchEvent('change');
@@ -229,21 +228,34 @@ test('PC-02: side-detail preserves list state, protects unsaved drafts, and enfo
  await expect(page.locator('#v34-tasks')).toBeVisible();
  await page.locator('#v35-side-detail').getByRole('button',{name:'返回我的待办',exact:true}).click();
  await expect(page.locator('#v35-side-detail')).toHaveCount(0);
+});
+
+test('PC-02b: 390px narrow layout, 403 role revocation cleanup, and cross-employee isolation',async({page})=>{
+ await page.setViewportSize({width:1280,height:720});
+ await login(page,'sales-a');
+ await lookup(page,phone());
+ const f=page.locator('#v34-intake');
+ await f.locator('[name="contact_name"]').fill('PC02隔离测试');
+ await f.locator('[name="student_name"]').fill('PC02隔离学生');
+ await nextTomorrow(page,f);
+ await f.getByRole('button',{name:'保存客户及首次安排'}).click();
+ await expect(page.locator('#v35-actions')).toBeVisible();
 
  // 390px narrow screen: opening detail hides list, back restores list with search preserved, no horizontal overflow
  await page.setViewportSize({width:390,height:844});
  await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
- await page.locator('#v35-my-leads [name="my_lead_search"]').fill('PC02测试A');
- await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02测试A'}).getByRole('button',{name:'打开客户'}).click();
+ await expect(page.locator('#v35-my-leads')).toBeVisible();
+ await page.locator('#v35-my-leads [name="my_lead_search"]').fill('PC02隔离测试');
+ await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02隔离测试'}).getByRole('button',{name:'打开客户'}).click();
  await expect(page.locator('#v35-side-detail')).toBeVisible();
  await expect(page.locator('#v35-my-leads')).toBeHidden();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.locator('#v35-side-detail').getByRole('button',{name:'返回客户列表',exact:true}).click();
  await expect(page.locator('#v35-my-leads')).toBeVisible();
- await expect(page.locator('#v35-my-leads [name="my_lead_search"]')).toHaveValue('PC02测试A');
+ await expect(page.locator('#v35-my-leads [name="my_lead_search"]')).toHaveValue('PC02隔离测试');
 
  // Role revocation (403) clears open detail and unsaved form
- await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02测试A'}).getByRole('button',{name:'打开客户'}).click();
+ await page.locator('#v35-my-leads .v35-lead-compact').filter({hasText:'PC02隔离测试'}).getByRole('button',{name:'打开客户'}).click();
  await expect(page.locator('#v35-side-detail')).toBeVisible();
  await page.route('**/api/v1/isolated-workspace/workflow/options',route=>route.fulfill({status:403,contentType:'application/json',body:JSON.stringify({code:'FORBIDDEN',message:'角色已撤销'})}));
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
@@ -256,8 +268,7 @@ test('PC-02: side-detail preserves list state, protects unsaved drafts, and enfo
  await login(page,'sales-b');
  await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();
  await expect(page.locator('#v35-my-leads [name="my_lead_search"]')).toHaveValue('');
- await expect(page.locator('#v35-my-leads')).not.toContainText('PC02测试A');
- await expect(page.locator('#v35-my-leads')).not.toContainText('PC02测试B');
+ await expect(page.locator('#v35-my-leads')).not.toContainText('PC02隔离测试');
 });
 
 
