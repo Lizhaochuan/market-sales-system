@@ -54,25 +54,101 @@ test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and
  await login(page);
  await expect(page.locator('#v34-tasks')).toBeVisible();
  await expect(page.locator('#v35-task-filters')).toBeVisible();
- await expect(page.locator('#v35-task-filters').getByRole('button',{name:'全部当日'})).toBeVisible();
- await expect(page.locator('#v35-task-filters').getByRole('button',{name:'已逾期'})).toBeVisible();
- await expect(page.locator('#v35-task-filters').getByRole('button',{name:'今日面谈/试听'})).toBeVisible();
- await expect(page.locator('#v35-task-filters').getByRole('button',{name:'待审批/待接手'})).toBeVisible();
- const overdueName='PC01逾期'+Date.now();
- await page.evaluate(async name=>{
-  const d=new Date();d.setDate(d.getDate()-2);d.setHours(12,0,0,0);
-  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:name,student_name:name+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'跟进'+name,due_at:d.toISOString()}}});
- },overdueName);
+ const filters=page.locator('#v35-task-filters');
+ await expect(filters.getByRole('button',{name:'全部当日'})).toBeVisible();
+ await expect(filters.getByRole('button',{name:'已逾期'})).toBeVisible();
+ await expect(filters.getByRole('button',{name:'今日面谈/试听'})).toBeVisible();
+ await expect(filters.getByRole('button',{name:'待审批/待接手'})).toBeVisible();
+
+ const callName='当日电话'+Date.now();
+ const trialName='当日试听'+Date.now();
+ const overdueName='逾期日常'+Date.now();
+ await page.evaluate(async({cName,tName,oName})=>{
+  const now=new Date();
+  const dToday=new Date(now.getFullYear(),now.getMonth(),now.getDate(),12,0,0);
+  const dOverdue=new Date(now.getFullYear(),now.getMonth(),now.getDate()-2,12,0,0);
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:cName,student_name:cName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'跟进电话'+cName,due_at:dToday.toISOString()}}});
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:tName,student_name:tName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{appointment:{type:'trial',student_name:tName+'学生',due_at:dToday.toISOString(),place:'101教室',course:'体验课',state:'confirmed'}}}});
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:oName,student_name:oName+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'逾期跟进'+oName,due_at:dOverdue.toISOString()}}});
+ },{cName:callName,tName:trialName,oName:overdueName});
+
  await page.evaluate(()=>window.__refreshBusinessWorkspace());
- await page.locator('#v35-task-filters').getByRole('button',{name:'已逾期'}).click();
+
+ // 1. "全部当日" default: both call and trial appear
+ await expect(page.locator('#v35-day-tasks')).toBeVisible();
+ await expect(page.locator('#v35-day-tasks')).toContainText(callName);
+ await expect(page.locator('#v35-day-tasks')).toContainText(trialName);
+
+ // 2. "今日面谈/试听" filter: positive and negative assertions
+ await filters.getByRole('button',{name:'今日面谈/试听'}).click();
+ await expect(filters.getByRole('button',{name:'今日面谈/试听'})).toHaveClass(/primary/);
+ await expect(page.locator('#v35-day-tasks')).toContainText(trialName);
+ await expect(page.locator('#v35-day-tasks')).not.toContainText(callName);
+ await expect(page.locator('#v35-handover-tasks')).toBeHidden();
+
+ // Empty state for appointments on a day without appointments
+ const tomorrow=await page.evaluate(()=>{const d=new Date();d.setDate(d.getDate()+1);return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);});
+ const todayStr=await page.evaluate(()=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()));
+ await page.locator('#v34-tasks [name="task_day"]').fill(tomorrow);
+ await page.locator('#v34-tasks [name="task_day"]').dispatchEvent('change');
+ await expect(page.locator('#v35-day-tasks')).toContainText('当天没有面谈或试听安排');
+ await page.locator('#v34-tasks [name="task_day"]').fill(todayStr);
+ await page.locator('#v34-tasks [name="task_day"]').dispatchEvent('change');
+ await expect(page.locator('#v35-day-tasks')).toContainText(trialName);
+
+ // Refresh preserves appointment filter
+ await page.evaluate(()=>window.__refreshBusinessWorkspace());
+ await expect(filters.getByRole('button',{name:'今日面谈/试听'})).toHaveClass(/primary/);
+ await expect(page.locator('#v35-day-tasks')).toContainText(trialName);
+ await expect(page.locator('#v35-day-tasks')).not.toContainText(callName);
+
+ // 3. "已逾期" filter: positive and negative assertions
+ await filters.getByRole('button',{name:'已逾期'}).click();
+ await expect(filters.getByRole('button',{name:'已逾期'})).toHaveClass(/primary/);
  await expect(page.locator('#v35-overdue-tasks')).toBeVisible();
  await expect(page.locator('#v35-overdue-tasks')).toContainText('已逾期');
  await expect(page.locator('#v35-overdue-tasks')).toContainText(overdueName);
+ await expect(page.locator('#v35-day-tasks')).toBeHidden();
+ await expect(page.locator('#v35-handover-tasks')).toBeHidden();
+
+ // 4. "待审批/待接手" filter for sales consultant (sales-a): daily tasks hidden, no supervisor approvals exposed
+ await filters.getByRole('button',{name:'待审批/待接手'}).click();
+ await expect(filters.getByRole('button',{name:'待审批/待接手'})).toHaveClass(/primary/);
+ await expect(page.locator('#v35-day-tasks')).toBeHidden();
+ await expect(page.locator('#v35-overdue-tasks')).toBeHidden();
+ await expect(page.locator('#v35-task-count')).toBeHidden();
+ await expect(page.locator('#v35-approvals')).toHaveCount(0);
+ await expect(page.locator('#v35-handover-tasks')).toBeVisible();
+ await expect(page.locator('#v35-handover-tasks')).toContainText('暂无待审批或待接手事项');
+
+ // Refresh preserves handover filter
+ await page.evaluate(()=>window.__refreshBusinessWorkspace());
+ await expect(filters.getByRole('button',{name:'待审批/待接手'})).toHaveClass(/primary/);
+ await expect(page.locator('#v35-day-tasks')).toBeHidden();
+ await expect(page.locator('#v35-handover-tasks')).toBeVisible();
+
+ // 5. Supervisor privilege separation: supervisor sees approvals in handover filter, sales cannot
+ const leadRow=(await pool.query("SELECT id FROM ms.leads WHERE organization_id='20000000-0000-4000-8000-000000000001' AND owner_user_id='20000000-0000-4000-8000-000000000011' LIMIT 1")).rows[0];
+ if(leadRow){
+  const corrId='35000000-0000-4000-8000-'+String(Date.now()).slice(-12).padStart(12,'0');
+  await pool.query("INSERT INTO ms_workspace.records(id,organization_id,owner_user_id,lead_id,kind,state,body) VALUES($1,'20000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000011',$2,'corrections','pending',$3)",[corrId,leadRow.id,JSON.stringify({type:'lead_transfer',requested_by:'20000000-0000-4000-8000-000000000011',target_owner:'20000000-0000-4000-8000-000000000012',reason:'主管复核交接'})]);
+  await login(page,'supervisor');
+  await page.locator('#v35-task-filters').getByRole('button',{name:'待审批/待接手'}).click();
+  await expect(page.locator('#v35-approvals')).toBeVisible();
+  await expect(page.locator('#v35-approvals')).toContainText('待主管独立复核');
+  await expect(page.locator('#v35-day-tasks')).toBeHidden();
+
+  // Switch back to sales-a: approvals section must NOT exist
+  await login(page,'sales-a');
+  await page.locator('#v35-task-filters').getByRole('button',{name:'待审批/待接手'}).click();
+  await expect(page.locator('#v35-approvals')).toHaveCount(0);
+ }
+
+ // 6. Return to "全部当日"
  await page.locator('#v35-task-filters').getByRole('button',{name:'全部当日'}).click();
  await expect(page.locator('#v35-day-tasks')).toBeVisible();
- await page.evaluate(()=>window.__refreshBusinessWorkspace());
- await expect(page.locator('#v34-tasks')).toBeVisible();
- await expect(page.locator('#v35-task-filters')).toBeVisible();
+
+ // 7. 390px mobile viewport verification
  await page.setViewportSize({width:390,height:844});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });

@@ -178,17 +178,59 @@
   const filters=[{id:'all',label:'全部当日'},{id:'overdue',label:'已逾期'},{id:'appointments',label:'今日面谈/试听'},{id:'handover',label:'待审批/待接手'}];
   for(const f of filters){const b=btn(filterBar,f.label,()=>{taskFilter=f.id;draw();},f.id===taskFilter?'primary':'button');b.dataset.filter=f.id;}
   p.append(filterBar);
-  const summary=node('p','form-hint');summary.id='v35-task-count';const today=node('div'),overdue=node('details');overdue.append(node('summary','','逾期未完成'));const dayHeading=node('h3','','当天待办');p.append(summary,dayHeading,today,overdue);today.id='v35-day-tasks';overdue.id='v35-overdue-tasks';
-  function draw(){taskDay=day.value;dayHeading.textContent=taskDay===dayKey(Date.now())?'当天待办':taskDay+' 待办';taskScope=scope?.value||'mine';today.replaceChildren();overdue.querySelectorAll('article').forEach(x=>x.remove());
+  const summary=node('p','form-hint');summary.id='v35-task-count';const today=node('div'),overdue=node('details');overdue.append(node('summary','','逾期未完成'));const dayHeading=node('h3','','当天待办');const handover=node('div');handover.id='v35-handover-tasks';p.append(summary,dayHeading,today,overdue,handover);today.id='v35-day-tasks';overdue.id='v35-overdue-tasks';
+  function renderHandover(){
+   handover.replaceChildren();
+   if(options.manager&&report?.pending_approvals?.length){
+    const ap=node('section','panel');ap.id='v35-approvals';ap.append(node('h3','','待主管独立复核'));
+    for(const a of report.pending_approvals){
+     const q=node('article','lead-row');q.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));
+     if(a.can_review)btn(q,'前往独立复核',async()=>{await openLead(a.lead_id);if(options?.access?.enabled&&selected===a.lead_id)setCard('records');});
+     else q.append(node('p','fineprint','本人关联事项 · 须由另一位主管独立复核'));
+     ap.append(q);
+    }
+    handover.append(ap);
+   }
+   for(const r of incoming){
+    const q=node('article','lead-row');q.append(node('p','','待确认接手 · '+r.reason));
+    btn(q,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));
+    handover.append(q);
+   }
+   for(const l of rows.filter(l=>l.needs_arrangement&&(taskScope==='team'||l.owner_user_id===state.user.staff_id))){
+    const q=node('article','lead-row');q.append(node('p','','待补安排 · '+l.contact_name));
+    btn(q,'补充安排',()=>openLead(l.id));
+    handover.append(q);
+   }
+   if(!handover.children.length&&taskFilter==='handover'){
+    handover.append(node('p','','暂无待审批或待接手事项'));
+   }
+  }
+  function draw(){taskDay=day.value;taskScope=scope?.value||'mine';today.replaceChildren();overdue.querySelectorAll('article,p.empty-hint').forEach(x=>x.remove());
    filterBar.querySelectorAll('button').forEach(b=>{b.className=b.dataset.filter===taskFilter?'primary':'button';});
    const all=(report?.reminders||[]).filter(r=>taskScope==='team'||r.owner_user_id===state.user.staff_id).sort((a,b)=>Date.parse(a.due_at)-Date.parse(b.due_at));
    const due=all.filter(r=>dayKey(r.due_at)===taskDay);
    const people=new Set(due.flatMap(r=>{const l=rows.find(l=>l.id===r.lead_id);return l?.students?.length?l.students.map(s=>s.id):[r.lead_id];}));
    summary.textContent=taskDay+' · 需要跟进 '+people.size+' 人 · '+due.length+' 项事项';
-   dayHeading.hidden=taskFilter==='overdue';today.hidden=taskFilter==='overdue';if(taskFilter==='overdue')overdue.open=true;
+   if(taskFilter==='handover'){
+    dayHeading.hidden=true;today.hidden=true;overdue.hidden=true;handover.hidden=false;summary.hidden=true;
+    renderHandover();
+    return;
+   }
+   summary.hidden=false;handover.hidden=taskFilter!=='all';
+   if(taskFilter==='overdue'){
+    dayHeading.hidden=true;today.hidden=true;overdue.hidden=false;overdue.open=true;
+   }else if(taskFilter==='appointments'){
+    dayHeading.hidden=false;dayHeading.textContent=taskDay===dayKey(Date.now())?'当天面谈 / 试听':taskDay+' 面谈 / 试听';
+    today.hidden=false;overdue.hidden=false;
+   }else{
+    dayHeading.hidden=false;dayHeading.textContent=taskDay===dayKey(Date.now())?'当天待办':taskDay+' 待办';
+    today.hidden=false;overdue.hidden=false;
+    renderHandover();
+   }
    for(const r of all){
     const l=rows.find(l=>l.id===r.lead_id);if(!l)continue;
-    if(taskFilter==='appointments'&&!(r.kind==='trial'||r.kind==='meeting'||r.title?.includes('面谈')||r.title?.includes('试听')))continue;
+    const isAppointment=r.kind==='appointments'||r.type==='meeting'||r.type==='trial'||r.appointment_type==='meeting'||r.appointment_type==='trial';
+    if(taskFilter==='appointments'&&!isAppointment)continue;
     const d=dayKey(r.due_at),isOverdue=d<dayKey(Date.now()),target=d===taskDay?today:isOverdue?overdue:null;
     if(!target)continue;
     const row=node('article','lead-row');
@@ -201,12 +243,10 @@
     btn(row,'查看进展 / 继续跟进',()=>resumeActivity(l.id,r.id));
     target.append(row);
    }
-   if(!due.length&&!today.hidden)today.append(node('p','','当天没有待办事项'));
+   if(taskFilter==='appointments'&&!today.querySelector('article'))today.append(node('p','','当天没有面谈或试听安排'));
+   else if(!due.length&&!today.hidden)today.append(node('p','','当天没有待办事项'));
   }
   day.addEventListener('change',draw);scope?.addEventListener('change',draw);draw();
-  if(options.manager&&report?.pending_approvals?.length){const ap=node('section','panel');ap.id='v35-approvals';ap.append(node('h3','','待主管独立复核'));for(const a of report.pending_approvals){const q=node('article','lead-row');q.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));if(a.can_review)btn(q,'前往独立复核',async()=>{await openLead(a.lead_id);if(options?.access?.enabled&&selected===a.lead_id)setCard('records');});else q.append(node('p','fineprint','本人关联事项 · 须由另一位主管独立复核'));ap.append(q);}panel.append(ap);}
-  for(const r of incoming){const q=node('article','lead-row');q.append(node('p','','待确认接手 · '+r.reason));btn(q,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));panel.append(q);}
-  for(const l of rows.filter(l=>l.needs_arrangement&&(taskScope==='team'||l.owner_user_id===state.user.staff_id))){const q=node('article','lead-row');q.append(node('p','','待补安排 · '+l.contact_name));btn(q,'补充安排',()=>openLead(l.id));panel.append(q);}
  }
  function renderPhoneIntake(){
   const p=node('section','panel');p.id='v35-lookup';panel.append(p);p.append(node('h2','','新建 / 查询 Leads'));
