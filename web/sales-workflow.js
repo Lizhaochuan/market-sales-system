@@ -4,7 +4,7 @@
  const box=node('div');box.hidden=true;nav.prepend(box);
  const panel=node('section','view');panel.id='sales-workflow';panel.dataset.panel='sales-workflow';document.querySelector('main.main').append(panel);
  let enabled=false,view='leads',group='sales',rows=[],staff=[],options=null,selected=null,detail=null,report=null,queue=[],epoch=0,seq=0,busy=false,session=null,incoming=[],legacy=new URLSearchParams(location.search).get('workspace')==='legacy';
- let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine';
+ let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine',taskFilter='all';
  const dayKey=d=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d));
  const label=(arr,id)=>arr?.find(x=>x.id===id)?.label||id||'待核实';
  const stage=id=>label(options?.stages,id==='unclassified'?'待核实（旧记录）':id);
@@ -174,9 +174,35 @@
  function renderRoleTasks(){
   const p=node('section','panel');p.id='v34-tasks';panel.append(p);p.append(node('h2','','我的待办'));
   const day=input(p,'查看日期','task_day','date',taskDay);const scope=options.access.sales_manager?select(p,'查看范围','task_scope',[{id:'mine',label:'我的待办'},{id:'team',label:'销售团队待办'}],taskScope):null;
+  const filterBar=node('div','filter-group');filterBar.id='v35-task-filters';filterBar.style.display='flex';filterBar.style.flexWrap='wrap';filterBar.style.gap='8px';filterBar.style.margin='10px 0';
+  const filters=[{id:'all',label:'全部当日'},{id:'overdue',label:'已逾期'},{id:'appointments',label:'今日面谈/试听'},{id:'handover',label:'待审批/待接手'}];
+  for(const f of filters){const b=btn(filterBar,f.label,()=>{taskFilter=f.id;draw();},f.id===taskFilter?'primary':'button');b.dataset.filter=f.id;}
+  p.append(filterBar);
   const summary=node('p','form-hint');summary.id='v35-task-count';const today=node('div'),overdue=node('details');overdue.append(node('summary','','逾期未完成'));const dayHeading=node('h3','','当天待办');p.append(summary,dayHeading,today,overdue);today.id='v35-day-tasks';overdue.id='v35-overdue-tasks';
-  function draw(){taskDay=day.value;dayHeading.textContent=taskDay===dayKey(Date.now())?'当天待办':taskDay+' 待办';taskScope=scope?.value||'mine';today.replaceChildren();overdue.querySelectorAll('article').forEach(x=>x.remove());const all=(report?.reminders||[]).filter(r=>taskScope==='team'||r.owner_user_id===state.user.staff_id).sort((a,b)=>Date.parse(a.due_at)-Date.parse(b.due_at));const due=all.filter(r=>dayKey(r.due_at)===taskDay);const people=new Set(due.flatMap(r=>{const l=rows.find(l=>l.id===r.lead_id);return l?.students?.length?l.students.map(s=>s.id):[r.lead_id];}));summary.textContent=taskDay+' · 需要跟进 '+people.size+' 人 · '+due.length+' 项事项';
-   for(const r of all){const l=rows.find(l=>l.id===r.lead_id);if(!l)continue;const d=dayKey(r.due_at),target=d===taskDay?today:d<dayKey(Date.now())?overdue:null;if(!target)continue;const row=node('article','lead-row');row.append(node('strong','',(l.students||[]).map(s=>s.name).join('、')||l.contact_name),node('p','',r.title+' · '+dateText(r.due_at)),node('p','fineprint','当前进展：'+stage(l.stage)+' · '+l.owner_name));btn(row,'查看进展 / 继续跟进',()=>resumeActivity(l.id,r.id));target.append(row);}if(!due.length)today.append(node('p','','当天没有待办事项'));}
+  function draw(){taskDay=day.value;dayHeading.textContent=taskDay===dayKey(Date.now())?'当天待办':taskDay+' 待办';taskScope=scope?.value||'mine';today.replaceChildren();overdue.querySelectorAll('article').forEach(x=>x.remove());
+   filterBar.querySelectorAll('button').forEach(b=>{b.className=b.dataset.filter===taskFilter?'primary':'button';});
+   const all=(report?.reminders||[]).filter(r=>taskScope==='team'||r.owner_user_id===state.user.staff_id).sort((a,b)=>Date.parse(a.due_at)-Date.parse(b.due_at));
+   const due=all.filter(r=>dayKey(r.due_at)===taskDay);
+   const people=new Set(due.flatMap(r=>{const l=rows.find(l=>l.id===r.lead_id);return l?.students?.length?l.students.map(s=>s.id):[r.lead_id];}));
+   summary.textContent=taskDay+' · 需要跟进 '+people.size+' 人 · '+due.length+' 项事项';
+   dayHeading.hidden=taskFilter==='overdue';today.hidden=taskFilter==='overdue';if(taskFilter==='overdue')overdue.open=true;
+   for(const r of all){
+    const l=rows.find(l=>l.id===r.lead_id);if(!l)continue;
+    if(taskFilter==='appointments'&&!(r.kind==='trial'||r.kind==='meeting'||r.title?.includes('面谈')||r.title?.includes('试听')))continue;
+    const d=dayKey(r.due_at),isOverdue=d<dayKey(Date.now()),target=d===taskDay?today:isOverdue?overdue:null;
+    if(!target)continue;
+    const row=node('article','lead-row');
+    row.append(node('strong','',(l.students||[]).map(s=>s.name).join('、')||l.contact_name),node('p','',r.title+' · '+dateText(r.due_at)));
+    if(isOverdue){
+     const days=Math.max(1,Math.round((Date.now()-Date.parse(r.due_at))/86400000));
+     row.append(node('span','badge warning','已逾期 '+days+'天'));
+    }
+    row.append(node('p','fineprint','当前进展：'+stage(l.stage)+' · '+l.owner_name));
+    btn(row,'查看进展 / 继续跟进',()=>resumeActivity(l.id,r.id));
+    target.append(row);
+   }
+   if(!due.length&&!today.hidden)today.append(node('p','','当天没有待办事项'));
+  }
   day.addEventListener('change',draw);scope?.addEventListener('change',draw);draw();
   if(options.manager&&report?.pending_approvals?.length){const ap=node('section','panel');ap.id='v35-approvals';ap.append(node('h3','','待主管独立复核'));for(const a of report.pending_approvals){const q=node('article','lead-row');q.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));if(a.can_review)btn(q,'前往独立复核',async()=>{await openLead(a.lead_id);if(options?.access?.enabled&&selected===a.lead_id)setCard('records');});else q.append(node('p','fineprint','本人关联事项 · 须由另一位主管独立复核'));ap.append(q);}panel.append(ap);}
   for(const r of incoming){const q=node('article','lead-row');q.append(node('p','','待确认接手 · '+r.reason));btn(q,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));panel.append(q);}
@@ -218,7 +244,7 @@
  const snapOld=window.__snapshotLeadDraft,restoreOld=window.__restoreLeadDraft;
  window.__snapshotLeadDraft=()=>{if(!enabled)return snapOld?.();if(state.view!=='sales-workflow')return null;return {v34:true,selected,view,group,card,activityTarget,editingQuoteId,lookupPhone,lookupResult,claim,forms:[...panel.querySelectorAll('form')].map(f=>({id:f.id,open:f.closest('details')?.open,fields:[...f.querySelectorAll('input,select,textarea')].filter(i=>i.type!=='file').map(i=>({name:i.name,value:i.value,checked:i.checked}))}))};};
  window.__restoreLeadDraft=async draft=>{if(!draft?.v34)return restoreOld?.(draft);if(!enabled||state.strict)return false;const token=state.token,ticket=epoch;selected=draft.selected;view=draft.view;group=draft.group;card=draft.card||null;activityTarget=draft.activityTarget||null;editingQuoteId=draft.editingQuoteId||null;lookupPhone=draft.lookupPhone||'';lookupResult=draft.lookupResult??null;claim=draft.claim||null;if(selected){if(!rows.some(l=>l.id===selected))return false;const d=await api(root+'/'+selected);if(ticket!==epoch||token!==state.token)return false;detail=d;}display();for(const saved of draft.forms){const f=$(saved.id);if(!f)continue;if(saved.id==='v34-quote'){const count=saved.fields.filter(v=>v.name==='course').length;while(f.querySelectorAll('.v34-course').length<count)[...f.querySelectorAll('button')].find(b=>b.textContent==='增加课程').click();}const used={};for(const v of saved.fields){const i=f.querySelectorAll('[name="'+v.name+'"]')[used[v.name]||0];used[v.name]=(used[v.name]||0)+1;if(!i)continue;if(i.type==='checkbox')i.checked=v.checked;else i.value=v.value;if(i.tagName==='SELECT')i.dispatchEvent(new Event('change',{bubbles:true}));}if(f.closest('details'))f.closest('details').open=saved.open;f.dispatchEvent(new Event('input',{bubbles:true}));if(saved.id==='v34-quote')f.querySelector('[name="unit"]')?.dispatchEvent(new Event('input',{bubbles:true}));}return true;};
- window.addEventListener('isolated-session-clear',()=>{epoch++;seq++;taskDay=dayKey(Date.now());taskScope='mine';editingQuoteId=null;activityTarget=null;pendingLostFeedback='';card=null;claim=null;lookupPhone='';lookupResult=null;marketRows=[];rows=[];staff=[];options=null;selected=null;detail=null;report=null;queue=[];incoming=[];busy=false;session=null;panel.replaceChildren();box.hidden=true;});
+ window.addEventListener('isolated-session-clear',()=>{epoch++;seq++;taskDay=dayKey(Date.now());taskScope='mine';taskFilter='all';editingQuoteId=null;activityTarget=null;pendingLostFeedback='';card=null;claim=null;lookupPhone='';lookupResult=null;marketRows=[];rows=[];staff=[];options=null;selected=null;detail=null;report=null;queue=[];incoming=[];busy=false;session=null;panel.replaceChildren();box.hidden=true;});
  fetch('/api/v1/health',{cache:'no-store'}).then(r=>r.json()).then(r=>{enabled=r?.data?.sales_workflow_v34===true;if(enabled){document.querySelector('#login-screen .eyebrow').textContent='V3.4 · 隔离演示';document.querySelector('#login-screen .muted').textContent='可测试完整招生流程，请只录入虚构资料。所有收款核实均为本机演示记录。';$('demo-finance-option').hidden=false;if(r.data.role_workspaces)document.querySelectorAll('.role-demo-option').forEach(o=>o.hidden=false);if(state.token)refresh();}}).catch(()=>{});
  setInterval(()=>{if(enabled&&state.token&&state.view==='sales-workflow'&&!selected&&!busy)refresh();},60000);
 })();

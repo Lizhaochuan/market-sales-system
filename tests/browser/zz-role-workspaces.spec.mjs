@@ -50,3 +50,30 @@ test('role UI: my-leads search, single-card draft restore, sibling student, meet
  await page.locator('#v34-primary').getByRole('button',{name:'去跟进 / 记录沟通结果',exact:true}).click();await page.locator('#v34-followup [name="result"]').selectOption('communicated');await page.locator('#v34-followup [name="notes"]').fill('家长明确表示改去住家旁机构');await page.locator('#v34-followup [name="stage"]').selectOption('declined');
  await expect(page.locator('#v34-lost')).toBeVisible();await expect(page.locator('#v34-lost [name="feedback"]')).toHaveValue('家长明确表示改去住家旁机构');
 });
+test('PC-01: daily todo quick filters, overdue badges, refresh preservation, and 390px layout',async({page})=>{
+ await login(page);
+ await expect(page.locator('#v34-tasks')).toBeVisible();
+ await expect(page.locator('#v35-task-filters')).toBeVisible();
+ await expect(page.locator('#v35-task-filters').getByRole('button',{name:'全部当日'})).toBeVisible();
+ await expect(page.locator('#v35-task-filters').getByRole('button',{name:'已逾期'})).toBeVisible();
+ await expect(page.locator('#v35-task-filters').getByRole('button',{name:'今日面谈/试听'})).toBeVisible();
+ await expect(page.locator('#v35-task-filters').getByRole('button',{name:'待审批/待接手'})).toBeVisible();
+ const overdueName='PC01逾期'+Date.now();
+ await page.evaluate(async name=>{
+  const d=new Date();d.setDate(d.getDate()-2);d.setHours(12,0,0,0);
+  await api('/api/v1/isolated-workspace/workflow',{method:'POST',body:{contact_name:name,student_name:name+'学生',contact_info:String(13000000000+Math.floor(Math.random()*900000000)),origin_group:'sales',source:'到店',next:{action:'call',method:'phone',title:'跟进'+name,due_at:d.toISOString()}}});
+ },overdueName);
+ await page.evaluate(()=>window.__refreshBusinessWorkspace());
+ await page.locator('#v35-task-filters').getByRole('button',{name:'已逾期'}).click();
+ await expect(page.locator('#v35-overdue-tasks')).toBeVisible();
+ await expect(page.locator('#v35-overdue-tasks')).toContainText('已逾期');
+ await expect(page.locator('#v35-overdue-tasks')).toContainText(overdueName);
+ await page.locator('#v35-task-filters').getByRole('button',{name:'全部当日'}).click();
+ await expect(page.locator('#v35-day-tasks')).toBeVisible();
+ await page.evaluate(()=>window.__refreshBusinessWorkspace());
+ await expect(page.locator('#v34-tasks')).toBeVisible();
+ await expect(page.locator('#v35-task-filters')).toBeVisible();
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
