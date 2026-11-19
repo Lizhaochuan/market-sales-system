@@ -667,30 +667,62 @@ test('PC-04a: read-only stage kanban, saved views, draft preservation, phone mas
  await side.getByRole('button',{name:'放弃未保存修改',exact:true}).click();
  await side.getByRole('button',{name:'返回客户列表',exact:true}).click();
 
- // 1. Negative checks: reject saving phone numbers (11 digits, formatted, or in name) in Saved Views
- await list.locator('[name="my_lead_search"]').fill('13912345678');
- await list.locator('[name="saved_view_name"]').fill('违规手机视图');
+ // 1. Negative checks: reject saving phone numbers (embedded prefixes/suffixes, separators, spaces, parens, country codes)
+ const initialChipsCount=await page.locator('#v35-saved-views .v35-saved-chip').count();
+
+ // 1a. Embedded in search: 家长139 1234 5678
+ await list.locator('[name="my_lead_search"]').fill('家长139 1234 5678');
+ await list.locator('[name="saved_view_name"]').fill('正常视图名');
  await list.getByRole('button',{name:'保存当前视图'}).click();
  await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
- await expect(page.locator('#v35-saved-views')).not.toContainText('违规手机视图');
+ expect(await page.locator('#v35-saved-views .v35-saved-chip').count()).toBe(initialChipsCount);
 
- await list.locator('[name="my_lead_search"]').fill('139 1234 5678');
- await list.getByRole('button',{name:'保存当前视图'}).click();
- await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
- await expect(page.locator('#v35-saved-views')).not.toContainText('违规手机视图');
-
- await list.locator('[name="my_lead_search"]').fill('+86-139-1234-5678');
- await list.getByRole('button',{name:'保存当前视图'}).click();
- await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
- await expect(page.locator('#v35-saved-views')).not.toContainText('违规手机视图');
-
+ // 1b. Embedded in view name with spaces: 电话139 1234 5678视图
  await list.locator('[name="my_lead_search"]').fill('正常搜索词');
+ await list.locator('[name="saved_view_name"]').fill('电话139 1234 5678视图');
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
+ expect(await page.locator('#v35-saved-views .v35-saved-chip').count()).toBe(initialChipsCount);
+
+ // 1c. Embedded with country code & dashes: 客户+86-139-1234-5678
+ await list.locator('[name="saved_view_name"]').fill('客户+86-139-1234-5678');
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
+ expect(await page.locator('#v35-saved-views .v35-saved-chip').count()).toBe(initialChipsCount);
+
+ // 1d. Embedded with parentheses & dashes: 家长(139)1234-5678
+ await list.locator('[name="saved_view_name"]').fill('家长(139)1234-5678');
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
+ expect(await page.locator('#v35-saved-views .v35-saved-chip').count()).toBe(initialChipsCount);
+
+ // 1e. Continuous 11-digit phone in search & view name
+ await list.locator('[name="my_lead_search"]').fill('13912345678');
  await list.locator('[name="saved_view_name"]').fill('电话13800000000视图');
  await list.getByRole('button',{name:'保存当前视图'}).click();
  await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
- await expect(page.locator('#v35-saved-views')).not.toContainText('电话13800000000视图');
+ expect(await page.locator('#v35-saved-views .v35-saved-chip').count()).toBe(initialChipsCount);
 
- // 2. Positive checks: alphanumeric / non-phone names & normal search terms save and restore cleanly
+ // 2. Positive checks: ordinary business identifiers with digits (学生1, 04A, 2026课程计划, 进行中看板+suffix) save and restore cleanly
+ // 2a. Save "学生1" view with "2026课程计划" search
+ await list.locator('[name="my_lead_search"]').fill('2026课程计划');
+ await list.locator('[name="saved_view_name"]').fill('学生1');
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toHaveText('');
+ await expect(page.locator('#v35-saved-views')).toContainText('学生1');
+ expect(await page.locator('#v35-saved-views .v35-saved-chip').count()).toBe(initialChipsCount+1);
+
+ // 2b. Restore "学生1" view
+ await list.locator('[name="my_lead_search"]').fill('');
+ await page.locator('#v35-saved-views').getByRole('button',{name:'学生1',exact:true}).click();
+ await expect(list.locator('[name="my_lead_search"]')).toHaveValue('2026课程计划');
+
+ // 2c. Delete "学生1" view
+ await page.locator('#v35-saved-views').getByRole('button',{name:'删除视图 学生1',exact:true}).click();
+ await expect(page.locator('#v35-saved-views')).not.toContainText('学生1');
+ expect(await page.locator('#v35-saved-views .v35-saved-chip').count()).toBe(initialChipsCount);
+
+ // 2d. Save and restore "进行中看板"+suffix (includes "04A" alphanumeric token)
  await list.locator('[name="my_lead_search"]').fill(suffix);
  await list.locator('[name="my_lead_state"]').selectOption('open');
  await list.locator('[name="saved_view_name"]').fill('进行中看板'+suffix);

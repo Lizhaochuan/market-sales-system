@@ -348,16 +348,20 @@
    };
    const isSensitivePhonePattern=s=>{
     if(!s||typeof s!=='string')return false;
-    const clean=s.trim();
+    let clean=s.trim();
     if(!clean)return false;
-    // Normalized check: strip spaces, dashes, parentheses
-    const digits=clean.replace(/[\s()（）+-]/g,'');
-    if(/^\d{7,15}$/.test(digits))return true;
-    // Check if clean matches phone number formats (with or without separators, e.g., 138 0000 0000, 138-0000-0000)
-    if(/^1[3-9]\d{9}$/.test(digits))return true;
-    if(/^\+?86\d{7,12}$/.test(digits))return true;
-    // Substring phone match: contains 7 or more consecutive digits
-    if(/\d{7,}/.test(clean))return true;
+    clean=clean.replace(/(?:19|20)\d{2}[-/.\u5e74](?:0?[1-9]|1[0-2])[-/.\u6708](?:0?[1-9]|[12]\d|3[01])\u65e5?(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?/g,' ');
+    const candRegex=/(?:[+＋]?(?:00)?\d|[\(（\[【]\d)[\d\s\-–—_().（）【】[\]·•/]*\d/g;
+    const matches=clean.match(candRegex);
+    if(!matches)return false;
+    for(const cand of matches){
+     const digits=cand.replace(/\D/g,'');
+     const nationalDigits=digits.replace(/^(?:0086|86)/,'');
+     if(/^1[3-9]\d{9}$/.test(nationalDigits)||/^1[3-9]\d{9}$/.test(digits))return true;
+     if(/^0\d{9,11}$/.test(nationalDigits)||/^0\d{9,11}$/.test(digits))return true;
+     if(nationalDigits.length>=7&&nationalDigits.length<=15)return true;
+     if(digits.length>=7&&digits.length<=15)return true;
+    }
     return false;
    };
    savedBar.append(svName);
