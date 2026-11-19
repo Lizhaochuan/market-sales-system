@@ -667,10 +667,35 @@ test('PC-04a: read-only stage kanban, saved views, draft preservation, phone mas
  await side.getByRole('button',{name:'放弃未保存修改',exact:true}).click();
  await side.getByRole('button',{name:'返回客户列表',exact:true}).click();
 
- // Saved Views: save, reset, apply, delete, and cross-employee isolation
+ // 1. Negative checks: reject saving phone numbers (11 digits, formatted, or in name) in Saved Views
+ await list.locator('[name="my_lead_search"]').fill('13912345678');
+ await list.locator('[name="saved_view_name"]').fill('违规手机视图');
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
+ await expect(page.locator('#v35-saved-views')).not.toContainText('违规手机视图');
+
+ await list.locator('[name="my_lead_search"]').fill('139 1234 5678');
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
+ await expect(page.locator('#v35-saved-views')).not.toContainText('违规手机视图');
+
+ await list.locator('[name="my_lead_search"]').fill('+86-139-1234-5678');
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
+ await expect(page.locator('#v35-saved-views')).not.toContainText('违规手机视图');
+
+ await list.locator('[name="my_lead_search"]').fill('正常搜索词');
+ await list.locator('[name="saved_view_name"]').fill('电话13800000000视图');
+ await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toContainText('不能包含电话号码');
+ await expect(page.locator('#v35-saved-views')).not.toContainText('电话13800000000视图');
+
+ // 2. Positive checks: alphanumeric / non-phone names & normal search terms save and restore cleanly
+ await list.locator('[name="my_lead_search"]').fill(suffix);
  await list.locator('[name="my_lead_state"]').selectOption('open');
  await list.locator('[name="saved_view_name"]').fill('进行中看板'+suffix);
  await list.getByRole('button',{name:'保存当前视图'}).click();
+ await expect(page.locator('#v35-saved-view-hint')).toHaveText('');
  await expect(page.locator('#v35-saved-views')).toContainText('进行中看板'+suffix);
 
  await list.locator('[name="my_lead_search"]').fill('');

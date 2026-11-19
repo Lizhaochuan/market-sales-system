@@ -346,8 +346,38 @@
      svChips.append(chip);
     }
    };
+   const isSensitivePhonePattern=s=>{
+    if(!s||typeof s!=='string')return false;
+    const clean=s.trim();
+    if(!clean)return false;
+    // Normalized check: strip spaces, dashes, parentheses
+    const digits=clean.replace(/[\s()（）+-]/g,'');
+    if(/^\d{7,15}$/.test(digits))return true;
+    // Check if clean matches phone number formats (with or without separators, e.g., 138 0000 0000, 138-0000-0000)
+    if(/^1[3-9]\d{9}$/.test(digits))return true;
+    if(/^\+?86\d{7,12}$/.test(digits))return true;
+    // Substring phone match: contains 7 or more consecutive digits
+    if(/\d{7,}/.test(clean))return true;
+    return false;
+   };
    savedBar.append(svName);
-   btn(savedBar,'保存当前视图',()=>{const name=(svName.value||'').trim()||('视图 '+(savedViews.length+1));savedViews.push({id:String(++savedViewSeq),name,search:search.value,state:filter.value,sort:sortSel.value,view:myLeadView});svName.value='';drawSavedViews();},'secondary');
+   const svHint=node('span','form-hint');svHint.id='v35-saved-view-hint';savedBar.append(svHint);
+   btn(savedBar,'保存当前视图',()=>{
+    const rawSearch=(search.value||'').trim(),rawName=(svName.value||'').trim();
+    if(isSensitivePhonePattern(rawSearch)||isSensitivePhonePattern(rawName)){
+     svHint.textContent='安全提示：视图名称和搜索条件不能包含电话号码。请清除号码后保存非敏感筛选条件。';
+     svHint.className='form-hint warning';
+     announce('视图包含电话号码，已拒绝保存');
+     return;
+    }
+    svHint.textContent='';
+    svHint.className='form-hint';
+    const name=rawName||('视图 '+(savedViews.length+1));
+    savedViews.push({id:String(++savedViewSeq),name,search:search.value,state:filter.value,sort:sortSel.value,view:myLeadView});
+    svName.value='';
+    drawSavedViews();
+    announce('视图已保存');
+   },'secondary');
    savedBar.append(svChips);drawSavedViews();
    const rowsEl=node('div');list.append(rowsEl);
    const runServerSearch=q=>{
