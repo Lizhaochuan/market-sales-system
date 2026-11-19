@@ -25,8 +25,10 @@
 ## 二、PC-04 只读阶段看板、周日程与 Saved Views 验证记录（chatgpt/ms-ui-004-pc-04）
 
 - **开发分支**：`chatgpt/ms-ui-004-pc-04`（基于 PC-03 已验收文档 HEAD `a3edeb14fa24dff40e66291d602c6ab7f5710a1c` / 代码 `0eb982d7b7981b69a82aa38506bb8289a22adbf0`）
-- **最新受测代码 Commit SHA**：`80522677aac5947546d8d9af90ee44eaf4e88be2`
-- **当前状态**：`REVIEW_REQUIRED`（最新增量代码已通过 GitHub Actions 全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED` / `merge_authorized=false` / `deploy_authorized=false`，待 ChatGPT 最终审核）
+- **最终验收代码 Commit SHA**：`4d9cdb991510afec3ee2b0a02dc1004107233e7d`
+- **当前状态**：`DONE`（2026-11-20 开发验收通过）。保持 Draft / CI-only、`HOLD=true`、`EXT-001=UNVERIFIED`、`merge_authorized=false`、`deploy_authorized=false`。PC-05 未启动。
+- **最终验收证据**：Mac 使用全新隔离 PostgreSQL 16 测试库执行主工作流完整回归。GitHub Actions [Run 44585452635](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44585452635) 的 HEAD 与受测 SHA 一致，结果为 `completed / success`，21/21 步通过。两处结果均为核心、界面与安全 750/750，Chromium 41/41，LOGIN/RLS 12/12，合约 8/8。
+- **源码复核**：`isSensitivePhonePattern()` 在视图名称与搜索词写入会话前执行，修复相邻号码因数字总位数过长而漏检。PC-04c 验证两处输入拒绝指定号码，普通含数字名称可保存和恢复。
 
 ### 1. 本轮增量实现与安全边界（含 Saved Views 敏感电话号码防护）
 
@@ -52,7 +54,7 @@
 - `node --test tests/contracts/contracts.test.mjs`：退出码 **`0`**（**8 passed, 0 failed**）
 
 ### 3. GitHub Actions 验证记录
-- **最新实测代码 CI（通过）**：[Run 44559047616](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44559047616)
+- **早期实测代码 CI（历史记录）**：[Run 44559047616](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44559047616)
   - 对应提交：`80522677aac5947546d8d9af90ee44eaf4e88be2`
   - 运行结果：`status=completed`, `conclusion=success`, 耗时 4m20s，全部 21/21 步 `success`。
   - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**40 passed / 0 failed**（2.6m，含 PC-01、PC-02a/b、PC-03a/b 与更新后 PC-04a/b）。

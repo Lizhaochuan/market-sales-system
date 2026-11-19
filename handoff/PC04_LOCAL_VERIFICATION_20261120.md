@@ -1,6 +1,6 @@
 # PC-04 Mac 本地 Saved Views 复核（2026-11-20）
 
-状态：**PC-04=REVIEW_REQUIRED**；`HOLD=true`、`EXT-001=UNVERIFIED`、Draft / CI-only。未启动 PC-05；不合并、不部署，不修改 edu-management-system。
+状态：**PC-04=DONE（2026-11-20 最终验收通过）**；`HOLD=true`、`EXT-001=UNVERIFIED`、Draft / CI-only。未启动 PC-05；不合并、不部署，不修改 edu-management-system。
 
 ## 基线与修复
 
@@ -33,4 +33,4 @@
 
 本地完整日志保存在独立克隆的 `.tmp/full-summary.log`、`.tmp/full-6.log` 至 `.tmp/full-11.log`，第一次污染数据运行的日志保存在 `.tmp/first-run/`。本机复跑与数据库启停说明见 `.tmp/LOCAL-PC04.md`。这些临时环境、浏览器缓存、测试数据库与日志均未提交。
 
-最终提交 SHA 与该 SHA 的 GitHub Actions 链接在本次交付回复中报告；CI 成功不代替最终审核或解除 HOLD。
+最终验收代码为 `4d9cdb991510afec3ee2b0a02dc1004107233e7d`。GitHub Actions [Run 44585452635](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44585452635) 在该提交上完成，21/21 步通过。Mac 空库复跑与 CI 结果一致：核心、界面与安全 750/750，Chromium 41/41，LOGIN/RLS 12/12，合约 8/8。验收结论仅覆盖 PC-04 开发与测试，`HOLD=true`。
