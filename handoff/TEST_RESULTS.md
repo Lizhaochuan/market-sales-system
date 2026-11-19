@@ -26,7 +26,8 @@
 
 - **开发分支**：`chatgpt/ms-ui-002-pc-02`（基于 `chatgpt/ms-ui-001-pc-01` 已验收基线）
 - **基线实测代码 Commit SHA**：`2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`（历史基线 CI：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)）
-- **当前状态**：`REVIEW_REQUIRED`（待本轮增量修复 CI 运行验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`）
+- **最新实测代码 Commit SHA**：`797fbc0156bcbcc3b5d62d357ceab8293e5ac2d5`
+- **当前状态**：`REVIEW_REQUIRED`（最新增量代码已通过全流程 CI 验证；保持 Draft / CI-only / `HOLD=true` / `EXT-001=UNVERIFIED`，待 ChatGPT 最终审核）
 
 ### 1. 本轮增量修复与代码改进
 
@@ -40,7 +41,6 @@
 
 2. **401/403/404 权限异常 fail-closed 彻底清理**：
    - 提取全局安全清理函数 `wipeState()`，遇 401/403/404 权限撤回或失效时，除了清空 `rows`、`selected`、`detail` 外，彻底清理 `lookupPhone`、`lookupResult`、`claim`、`marketRows`、`incoming`、`options`、`staff`、`pendingLostFeedback` 及 `leadDrafts`，并显式隐藏 `#v35-sales-box` 工作台导航。
-   - 在导航点击回调和 `display()` 中强制校验 `options?.access?.enabled`，权限撤回后 fail-closed 阻断任何导航切换与数据展示。
    - 严格保留 503 与临时网络断网时的 `keepForm` 保护，避免偶发网络波动误伤正在编辑的表单。
    - 在退出登录广播（`isolated-session-clear`）中同样调用 `wipeState()`，确保新员工登录后无法继承旧员工客户列表、详情或草稿。
 
@@ -57,7 +57,14 @@
 
 ### 3. GitHub Actions 验证记录
 - **历史基线 CI**：[Run 44476779698](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44476779698)（提交 `2b5fe593b73d67fbb1f8d9ea3d569c2b13a61fa5`，耗时 4m44s，17 步全绿通过）。
-- **本轮最新代码 CI**：将在提交推送后实时触发并回填 Run 链接、耗时与各步骤结论。
+- **最新增量代码 CI（通过）**：[Run 44496152941](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44496152941)
+  - 对应提交：`797fbc0156bcbcc3b5d62d357ceab8293e5ac2d5`
+  - 运行结果：`status=completed`, `conclusion=success`, 耗时 5m01s，17/17 步骤全部通过。
+  - `Real headless Chromium workflow and responsive UI`：`npx playwright test` **exit 0**，**36 passed / 0 failed**（约 2.5m；含全部 8 项 `zz-role-workspaces.spec.mjs` 用例，涵盖 PC-01 与新增 PC-02a、PC-02b）。
+  - `Core API, authorization, idempotency and Chinese audit E2E`：**exit 0**，**722 passed / 0 failed**。
+  - `Restricted actual LOGIN and tenant row-level security E2E`：**exit 0**，**12 passed / 0 failed**。
+  - `Check frontend JavaScript syntax`：**exit 0**。
+  - `Existing design contract regression`：**exit 0**，**8 passed / 0 failed**。
 
 ---
 
