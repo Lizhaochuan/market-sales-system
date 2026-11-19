@@ -147,4 +147,15 @@ button.compact-btn{padding:6px 10px;font-size:12px;border-radius:7px}
 .v35-action-card{min-height:88px;text-align:left;padding:20px;border:1px solid #cfdfdf;border-radius:16px;background:#fff;color:#176f67;font:inherit;font-weight:700;cursor:pointer}
 .v35-action-card:hover,.v35-action-card:focus-visible{background:#edf8f5;border-color:#187d73}
 #v34-tasks>.form-hint{font-weight:700}#v35-lookup .panel{margin-top:16px}
-@media(max-width:600px){.v35-action-grid{grid-template-columns:1fr}.v35-action-card{min-height:64px;padding:16px}}
+.v35-list-controls{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr);gap:10px;margin-bottom:10px}
+.v35-lead-compact{padding:12px 10px}
+.v35-lead-compact p{margin:4px 0;line-height:1.45}
+.v35-lead-compact.active{background:#edf8f5;border-left:3px solid var(--teal);padding-left:10px;border-radius:8px}
+.v35-side-detail{min-width:0}
+@media(min-width:1280px){
+ .v35-split.has-detail{display:grid;grid-template-columns:minmax(360px,.92fr) minmax(440px,1.08fr);gap:20px;align-items:start}
+ .v35-split.has-detail .v35-split-list{max-height:calc(100vh - 140px);overflow-y:auto;padding-right:4px}
+ .v35-side-detail{position:sticky;top:24px;max-height:calc(100vh - 48px);overflow-y:auto;margin-top:0}
+}
+@media(max-width:1279px){.v35-split.has-detail .v35-split-list{display:none}}
+@media(max-width:600px){.v35-action-grid{grid-template-columns:1fr}.v35-action-card{min-height:64px;padding:16px}.v35-list-controls{grid-template-columns:1fr}}
