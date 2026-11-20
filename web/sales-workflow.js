@@ -996,11 +996,17 @@
   filters.id='v35-market-metrics-filters';
   const start=input(filters,'市场录入开始日期','start_at','date',scope.start_at?dayKey(new Date(scope.start_at)):'');
   const end=input(filters,'市场录入结束日期','end_at','date',scope.end_at?shDayShift(dayKey(new Date(scope.end_at)),-1):'');
+  const owners=new Map();
+  for(const row of marketRows){
+   if(row.market_owner_id)owners.set(row.market_owner_id,row.market_owner_name||'原市场负责人不可用');
+  }
+  const ownerOptions=[...owners].map(([id,label])=>({id,label})).sort((a,b)=>a.label.localeCompare(b.label,'zh-CN')||a.id.localeCompare(b.id));
+  const owner=select(filters,'原市场负责人','owner_id',[{id:'',label:'全部负责人'},...ownerOptions],scope.owner_id??'');
   const actions=node('div','filter-group');
-  const apply=node('button','primary','应用市场日期');
+  const apply=node('button','primary','应用市场筛选');
   apply.type='submit';
   actions.append(apply);
-  btn(actions,'清除市场日期',()=>{marketMetricsQuery='';refresh(true);});
+  btn(actions,'清除市场日期',()=>applyFilters(new URLSearchParams(scope.owner_id?{owner_id:scope.owner_id}:{})));
   const message=node('p','form-hint');
   message.setAttribute('role','status');
   filters.append(actions,message);
@@ -1013,11 +1019,15 @@
    }
    const query=start.value?new URLSearchParams({
     view_mode:'cohort',start_at:start.value+'T00:00:00+08:00',end_at:shDayShift(end.value,1)+'T00:00:00+08:00',
-   }):null;
-   marketMetricsQuery=query?'?'+query.toString():'';
+   }):new URLSearchParams();
+   if(owner.value)query.set('owner_id',owner.value);
+   applyFilters(query);
+  });
+  function applyFilters(query){
+   marketMetricsQuery=query.size?'?'+query.toString():'';
    apply.disabled=true;
    refresh(true);
-  });
+  }
 
   const details=node('div');
   let ticket=0;

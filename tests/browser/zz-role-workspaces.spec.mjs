@@ -16,7 +16,12 @@ test('role UI: sales lands on dated todo, phone intake opens one customer operat
 });
 test('role UI: market handoff retains one Lead, sales cannot see private notes, roles have different home pages',async({page})=>{
  const number=phone(),name='市场交接'+number;await login(page,'market-a');await expect(page.locator('#v35-market')).toBeVisible();await expect(page.getByRole('button',{name:'我的待办',exact:true})).toBeHidden();const form=page.locator('#v35-market-intake');await form.locator('..').locator('summary').click();await form.locator('[name="phone"]').fill(number);await form.locator('[name="contact_name"]').fill(name);await form.locator('[name="student_name"]').fill('交接验收学生');await form.locator('[name="notes"]').fill('市场私有备注不得向销售展示');await form.getByRole('button',{name:'保存并提交销售交接'}).click();await expect(page.locator('#v35-market')).toContainText(name);
- await login(page,'market-b');await expect(page.locator('#v35-market')).not.toContainText(name);await login(page,'market-manager');await expect(page.locator('#v35-market')).toContainText(name);
+ await login(page,'market-b');await expect(page.locator('#v35-market')).not.toContainText(name);
+ const secondNumber=phone();
+ await page.evaluate(number=>api('/api/v1/isolated-workspace/workflow/market',{
+  method:'POST',body:{phone:number,contact_name:'市场筛选对照客户',source:'市场活动'},
+ }),secondNumber);
+ await login(page,'market-manager');await expect(page.locator('#v35-market')).toContainText(name);
  const marketMetrics=page.locator('#v35-market-metrics');
  await expect(marketMetrics.getByRole('heading',{name:'市场录入与交接'})).toBeVisible();
  await marketMetrics.getByRole('button',{name:/查看市场来源明细/}).first().click();
@@ -24,18 +29,31 @@ test('role UI: market handoff retains one Lead, sales cannot see private notes, 
  await expect(marketMetrics).not.toContainText(number);
  const createdOn='2025-02-13';
  await pool.query("UPDATE ms_workspace.lead_directory SET created_at=$2 WHERE phone=$1 AND department='market'",[number,createdOn+'T23:59:59+08:00']);
+ await pool.query("UPDATE ms_workspace.lead_directory SET created_at=$2 WHERE phone=$1 AND department='market'",[secondNumber,createdOn+'T10:15:00+08:00']);
+ const originalOwner=marketMetrics.getByLabel('原市场负责人');
  const start=marketMetrics.getByLabel('市场录入开始日期');
  const end=marketMetrics.getByLabel('市场录入结束日期');
- const apply=marketMetrics.getByRole('button',{name:'应用市场日期'});
+ const apply=marketMetrics.getByRole('button',{name:'应用市场筛选'});
  await start.fill(createdOn);
  await apply.click();
  await expect(marketMetrics.getByRole('status')).toContainText('同时选择');
  await end.fill(createdOn);
  await apply.click();
+ await expect(marketMetrics).toContainText('市场活动 · 录入 2 条 · 已接收 0 条');
+ await originalOwner.selectOption({label:'模拟市场人员 A'});
+ await apply.click();
  await expect(marketMetrics).toContainText('市场活动 · 录入 1 条 · 已接收 0 条');
  await marketMetrics.getByRole('button',{name:'查看市场来源明细：市场活动'}).click();
  await expect(marketMetrics).toContainText('共 1 条市场线索');
  await expect(marketMetrics).toContainText('2025-02-13 23:59');
+ await expect(marketMetrics).not.toContainText('2025-02-13 10:15');
+ await originalOwner.selectOption({label:'模拟市场人员 B'});
+ await apply.click();
+ await expect(originalOwner).toHaveValue('35000000-0000-4000-8000-000000000012');
+ await marketMetrics.getByRole('button',{name:'查看市场来源明细：市场活动'}).click();
+ await expect(marketMetrics).toContainText('2025-02-13 10:15');
+ await expect(marketMetrics).not.toContainText('2025-02-13 23:59');
+
  await start.fill('2025-02-14');
  await end.fill('2025-02-14');
  await apply.click();
@@ -43,6 +61,7 @@ test('role UI: market handoff retains one Lead, sales cannot see private notes, 
  await expect(marketMetrics).not.toContainText('共 1 条市场线索');
  await marketMetrics.getByRole('button',{name:'清除市场日期'}).click();
  await expect(start).toHaveValue('');
+ await expect(originalOwner).toHaveValue('35000000-0000-4000-8000-000000000012');
  await expect(marketMetrics.getByRole('button',{name:'查看市场来源明细：市场活动'})).toBeVisible();
 
 
