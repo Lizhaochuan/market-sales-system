@@ -923,7 +923,8 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  const panel=page.locator('#v34-metrics');
  const filters=panel.locator('#v34-metrics-filters');
  await expect(filters).toBeVisible();
- await expect(panel).toContainText('首响与 24 小时接通率：待确认统计规则');
+ await expect(panel.getByRole('heading',{name:'首响 SLA · 30 分钟（连续自然时间）'})).toBeVisible();
+ await expect(panel).toContainText('24 小时接通率：待确认有效接通与分母规则');
  const owners=filters.getByRole('combobox',{name:'顾问'});
  const ownerIds=await owners.locator('option').evaluateAll(options=>options.map(option=>option.value).filter(Boolean));
  expect(ownerIds.length).toBeGreaterThanOrEqual(2);

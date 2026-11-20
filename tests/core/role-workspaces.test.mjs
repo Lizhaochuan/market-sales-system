@@ -508,6 +508,34 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal((await w('/metrics',undefined,KM)).status,403);
   assert.equal(good(await w('/market-metrics/drilldown'+query,undefined,G)).total,detail.total);
  });
+ await t.test('first response SLA uses elapsed time, recorded attempts and the scoped sales handoff',async()=>{
+  const start='2024-10-03T22:30:00+08:00',end='2024-10-04T00:00:00+08:00';
+  const event=(id,name,at,body={})=>pool.query(
+   "INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,happened_at,after_business_json) VALUES($1,$2,'lead',$3,$4,$5,$6)",
+   [org,A,id,'V34_'+name,at,body],
+  );
+  const seed=async(startEvent,user=A)=>{
+   const {rows:[r]}=await pool.query("INSERT INTO ms.leads(organization_id,owner_user_id,lead_state,created_at) VALUES($1,$2,'working',$3) RETURNING id",[org,user,start]);
+   if(startEvent)await event(r.id,startEvent,start);
+   return r.id;
+  };
+  const onTime=await seed('INTAKE'), late=await seed('MARKET_HANDOFF_ACCEPTED');
+  const noAttempt=await seed('INTAKE'), pending=await seed(null);
+  await seed(null);
+  await seed('INTAKE',B);
+  const attempt={method:'phone',result:'failed'};
+  await event(onTime,'COMMUNICATION','2024-10-03T23:00:00+08:00',attempt);
+  await event(late,'COMMUNICATION','2024-10-03T22:00:00+08:00',attempt);
+  await event(late,'COMMUNICATION','2024-10-03T23:00:01+08:00',attempt);
+  await event(noAttempt,'DRAFT_SAVED','2024-10-03T22:50:00+08:00',attempt);
+  await event(pending,'INTAKE',new Date(Date.now()-60000).toISOString());
+  const sla=async(user=A,extra={})=>good(await w('/metrics?'+new URLSearchParams({
+   start_at:start,end_at:end,view_mode:'cohort',...extra,
+  }),undefined,user)).first_response_sla;
+  assert.deepEqual(await sla(),{threshold_minutes:30,time_basis:'elapsed',on_time:1,overdue:2,pending:1,missing_start:1});
+  assert.equal((await sla(M,{owner_id:B})).overdue,1);
+  assert.equal((await sla(A,{owner_id:B})).overdue,0);
+ });
  await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
   const drill='/metrics/drilldown?metric=leads';
   const general=good(await w(drill,undefined,G));

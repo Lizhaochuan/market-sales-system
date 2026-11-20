@@ -605,6 +605,42 @@ function salesLeadScope(ctx,scope){
  }
  return {where:conditions.join(' AND '),params};
 }
+async function firstResponseSla(c,ctx,scope){
+ const {where,params}=salesLeadScope(ctx,scope);
+ const {rows:[counts]}=await c.query(`
+  WITH eligible AS (
+   SELECT l.id,l.organization_id,start.happened_at AS started_at
+   FROM ms.leads l
+   LEFT JOIN LATERAL (
+    SELECT a.happened_at FROM ms.audit_events a
+    WHERE a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id
+     AND a.event_name IN ('V34_INTAKE','V34_MARKET_HANDOFF_ACCEPTED')
+    ORDER BY a.happened_at,a.id LIMIT 1
+   ) start ON true
+   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id AND w.organization_id=l.organization_id
+   WHERE ${where} AND w.do_not_contact IS DISTINCT FROM true
+  ), measured AS (
+   SELECT e.started_at,first.happened_at AS responded_at
+   FROM eligible e
+   LEFT JOIN LATERAL (
+    SELECT a.happened_at FROM ms.audit_events a
+    WHERE a.organization_id=e.organization_id AND a.target_type='lead' AND a.target_id=e.id
+     AND a.event_name='V34_COMMUNICATION' AND a.happened_at>=e.started_at
+     AND a.after_business_json->>'result' IN ('communicated','failed','waiting','other')
+     AND NULLIF(a.after_business_json->>'method','') IS NOT NULL
+    ORDER BY a.happened_at,a.id LIMIT 1
+   ) first ON true
+  )
+  SELECT count(*) FILTER (WHERE responded_at<=started_at+interval '30 minutes')::int AS on_time,
+   count(*) FILTER (WHERE started_at IS NOT NULL AND (
+    responded_at>started_at+interval '30 minutes'
+    OR (responded_at IS NULL AND now()>=started_at+interval '30 minutes')
+   ))::int AS overdue,
+   count(*) FILTER (WHERE responded_at IS NULL AND now()<started_at+interval '30 minutes')::int AS pending,
+   count(*) FILTER (WHERE started_at IS NULL)::int AS missing_start
+  FROM measured`,params);
+ return {threshold_minutes:30,time_basis:'elapsed',...counts};
+}
 const activeScopedStudent='s.organization_id=l.organization_id AND s.archived_at IS NULL';
 const salesPathMetricKeys=['direct_to_trial_students','direct_enroll_without_trial_students'];
 function salesPathFacts(ctx,scope){
@@ -1118,6 +1154,7 @@ async function metrics(c,ctx,query){
  ]:[];
  const path_counts=await salesPathCounts(c,ctx,scope);
  const supervision=await supervisionReports(c,ctx,scope);
+ const first_response_sla=await firstResponseSla(c,ctx,scope);
  if(supervision.transfer_supervision){
   const pendingTransfers=new Set(records.filter(r=>r.kind==='corrections'&&r.body.type==='lead_transfer'&&['pending','approved'].includes(r.state)).map(r=>r.lead_id));
   supervision.transfer_supervision.candidates=list.items.filter(l=>l.version&&l.terminal_state==='open'&&!pendingTransfers.has(l.id)).map(l=>({
@@ -1134,5 +1171,5 @@ async function metrics(c,ctx,query){
   const eligibleOwners=new Set(list.staff.map(staff=>staff.id));
   supervision.arrangement_supervision.candidates=list.items.filter(l=>l.needs_arrangement&&eligibleOwners.has(l.owner_user_id)).map(l=>l.id);
  }
- return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,...supervision,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,version:r.version,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,first_response_sla,...supervision,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,version:r.version,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
 }
