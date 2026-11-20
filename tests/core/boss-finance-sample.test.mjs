@@ -95,3 +95,40 @@ test('historical sample replays Shanghai day-end with evidence and reconciles ag
  assert.equal(wrong.status,1);
  assert.match(wrong.stderr,/无法.*对平/);
 });
+
+test('published finance templates reconcile through the sample CLI',()=>{
+ const template=(name,args)=>spawnSync(process.execPath,[script,
+  fileURLToPath(new URL('../../handoff/finance-sample-templates/'+name,import.meta.url)),...args,
+ ],{encoding:'utf8'});
+
+ const costs=template('channel-costs.example.json',['--summary']);
+ assert.equal(costs.status,0,costs.stderr);
+ const costReport=JSON.parse(costs.stdout);
+ assert.equal(costReport.validation_scope,'sample_only');
+ assert.equal(costReport.reconciled_groups,2);
+ assert.deepEqual(costReport.summary.map(row=>[row.channel_id,row.amount_cents]),[
+  ['DEMO-EVENT','75000'],['DEMO-ONLINE','80000'],
+ ]);
+
+ const cases=[
+  ['2026-10-01','300000','100000','200000'],
+  ['2026-10-02','300000','150000','150000'],
+  ['2026-10-03','300000','130000','170000'],
+  ['2026-10-04','270000','130000','140000'],
+ ];
+ for(const [date,receivable,allocated,balance] of cases){
+  const result=template('historical-ledger.example.json',['--date',date]);
+  assert.equal(result.status,0,result.stderr);
+  const report=JSON.parse(result.stdout);
+  assert.equal(report.validation_scope,'sample_only');
+  assert.equal(report.checkpoints,2);
+  assert.deepEqual(report.snapshot,{
+   date,orders:1,receivable_cents:receivable,net_allocated_cents:allocated,balance_cents:balance,
+  });
+ }
+ for(const date of ['2026-09-30','2026-10-05']){
+  const outside=template('historical-ledger.example.json',['--date',date]);
+  assert.equal(outside.status,1);
+  assert.match(outside.stderr,/查询日期超出/);
+ }
+});

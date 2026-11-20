@@ -196,3 +196,5 @@ flowchart TD
 |---|---|---|
 | 渠道费用 | 一个已结账月份，至少一个渠道 | 财务确认状态及凭证号、渠道编号、费用归属月、金额及含税口径。涉及分摊时附渠道分摊额，附同口径账单合计用于核对。 |
 | 历史应收与余额 | 一段连续日期，至少一笔有应收或收退款变动的脱敏订单 | 账本覆盖起止日期、覆盖前一日末的期初、带业务生效及系统记录时间的订单变动和款项分配、可核对的至少一个日末余额。若账本没有可追溯版本，请注明实际能覆盖的最早日期。 |
+
+可复制的虚拟模板位于 [渠道费用](finance-sample-templates/channel-costs.example.json) 和 [历史账本](finance-sample-templates/historical-ledger.example.json)。运行 `node --test tests/core/boss-finance-sample.test.mjs` 会直接用校验入口核对这两份文件。模板仅用于说明字段与验证数据规则。
