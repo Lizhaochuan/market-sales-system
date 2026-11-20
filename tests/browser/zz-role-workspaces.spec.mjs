@@ -965,6 +965,15 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
   "INSERT INTO ms_workspace.history(record_id,version,actor_user_id,state,body,recorded_at) VALUES($1,1,$2,'verified',$3,$4)",
   [payment.id,payment.owner_user_id,{receipt_id:receipt,amount_cents:10000},verifiedAt],
  );
+ const trialAt='2024-04-01T11:00:00+08:00';
+ const trial=(await pool.query(
+  "INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,student_id,kind,state,body,created_at) SELECT l.organization_id,l.owner_user_id,l.id,ls.student_id,'appointments','confirmed',$2,$3 FROM ms.leads l JOIN ms.lead_students ls ON ls.lead_id=l.id WHERE l.id=$1 RETURNING id,owner_user_id",
+  [lostLead.lead_id,{type:'trial',due_at:'2024-04-02T10:00:00+08:00'},trialAt],
+ )).rows[0];
+ await pool.query(
+  "INSERT INTO ms_workspace.history(record_id,version,actor_user_id,state,body,recorded_at) VALUES($1,1,$2,'confirmed',$3,$4)",
+  [trial.id,trial.owner_user_id,{type:'trial'},trialAt],
+ );
  const count=panel.locator('.stat-card').filter({has:page.getByText('Lead 数',{exact:true})}).locator('strong');
 
  const start=filters.getByLabel('开始日期');
@@ -1042,6 +1051,14 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await expect(eventDrilldown).toContainText('窗口第二位顾问测试家长');
  await expect(eventDrilldown).toContainText('2024-04-01 10:00 记录');
  await expect(eventDrilldown).not.toContainText('窗口首位顾问测试家长');
+ const paths=panel.locator('#v34-sales-paths');
+ const directTrial=paths.locator('.stat-card').filter({hasText:'未完成面谈即确认试听'});
+ await expect(directTrial.locator('strong')).toHaveText('1');
+ await directTrial.getByRole('button',{name:'查看未完成面谈即确认试听明细'}).click();
+ const pathDetail=panel.locator('#v34-metrics-direct_to_trial_students');
+ await expect(pathDetail).toContainText('共 1 名学生');
+ await expect(pathDetail).toContainText('窗口第二位顾问测试学生');
+ await expect(pathDetail).toContainText('最早记录 2024-04-01 11:00');
  await mode.selectOption('snapshot');
  const asOf=filters.getByLabel('历史时点（上海时间）');
  await asOf.fill('2024-04-01T09:30');

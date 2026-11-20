@@ -633,6 +633,89 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal(good(await drill('snapshot_verified_receipts',{owner_id:A,source:'主动咨询'},M)).total,1);
    assert.equal(good(await drill('snapshot_verified_receipts',{owner_id:A,source:'到店'},M)).total,0);
   });
+  await t.test('nonlinear path counts and detail share scope and first recorded milestones',async()=>{
+   const source='其他',start='2023-10-02T00:00:00+08:00',end='2023-10-03T00:00:00+08:00';
+   const seed=async(name,createdAt,user=A)=>{
+    const lead=good(await req('',{
+     contact_name:name+'家长',student_name:name,origin_group:'sales',source,next:next(),
+    },user)).lead_id;
+    await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[lead,createdAt]);
+    return {lead,student:(await detail(lead,user)).students[0].id,user};
+   };
+   const direct=await seed('直达路径学生','2023-10-01T08:00:00+08:00');
+   const sameStudent=await create({source,student_name:undefined,student_id:direct.student});
+   await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[sameStudent,start]);
+   const secondLead={...direct,lead:sameStudent};
+   const sequential=await seed('顺序路径学生',start);
+   const boundary=await seed('边界路径学生',start);
+   const other=await seed('另一顾问路径学生',start,B);
+   const placement={
+    before:'2023-10-01T15:00:00+08:00',first:'2023-10-02T08:00:00+08:00',later:'2023-10-02T09:00:00+08:00',
+    last:'2023-10-02T10:00:00+08:00',after:'2023-10-03T11:00:00+08:00',
+   };
+   const appointment=async({lead,student,user},type,versions)=>{
+    const last=versions.at(-1);
+    const {rows:[r]}=await pool.query(
+     "INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,student_id,kind,state,body,created_at,version) VALUES($1,$2,$3,$4,'appointments',$5,$6,$7,$8) RETURNING id",
+     [org,user,lead,student,last[0],{type},versions[0][1],versions.length],
+    );
+    for(const [index,[state,at,body={}]] of versions.entries()){
+     await pool.query(
+      'INSERT INTO ms_workspace.history(record_id,version,actor_user_id,state,body,recorded_at) VALUES($1,$2,$3,$4,$5,$6)',
+      [r.id,index+1,user,state,{type,...body},at],
+     );
+    }
+   };
+   const enroll=({lead,student,user},at)=>pool.query(
+    "INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,happened_at,after_business_json) VALUES($1,$2,'lead',$3,'V34_ENROLLMENT_SUCCESS',$4,$5)",
+    [org,user,lead,at,{student_id:student,order_id:randomUUID(),notes:'不返回的业务备注'}],
+   );
+   await appointment(direct,'trial',[
+    ['pending',placement.before],['confirmed',start],['completed',placement.last],
+   ]);
+   await enroll(direct,placement.first);
+   await enroll(direct,placement.after);
+   await appointment(direct,'meeting',[['completed',placement.later,{student_ids:[direct.student],finished_at:placement.before}]]);
+   await appointment(secondLead,'trial',[['confirmed',placement.later],['cancelled',placement.last]]);
+   await enroll(secondLead,placement.later);
+   await appointment(sequential,'meeting',[['completed',placement.first]]);
+   await appointment(sequential,'trial',[['confirmed',placement.first],['completed',placement.later]]);
+   await enroll(sequential,placement.last);
+   await appointment(boundary,'trial',[['confirmed',end]]);
+   await appointment(other,'trial',[['confirmed',placement.first]]);
+   const read=(mode,filters={},user=A)=>req('/metrics?'+new URLSearchParams({
+    view_mode:mode,start_at:start,end_at:end,source,...filters,
+   }),undefined,user);
+   const drill=(mode,metric,filters={},user=A)=>req('/metrics/drilldown?'+new URLSearchParams({
+    view_mode:mode,start_at:start,end_at:end,source,metric,...filters,
+   }),undefined,user);
+   const trial='direct_to_trial_students',signup='direct_enroll_without_trial_students';
+   const events=good(await read('event'));
+   assert.deepEqual(events.path_counts,{[trial]:1,[signup]:1});
+   const cohort=good(await read('cohort'));
+   assert.deepEqual(cohort.path_counts,{[trial]:2,[signup]:1});
+   for(const [metric,total] of Object.entries(events.path_counts)){
+    const detail=good(await drill('event',metric));
+    assert.equal(detail.total,total);
+    assert.deepEqual(detail.items.map(i=>[i.id,i.display_name,i.lead_count]),[[direct.student,'直达路径学生',2]]);
+    assert.ok(!JSON.stringify(detail).includes('不返回的业务备注'));
+   }
+   const trials=good(await drill('event',trial));
+   assert.equal(new Date(trials.items[0].recorded_at).toISOString(),new Date(start).toISOString());
+   const cohorts=good(await drill('cohort',trial,{page_size:1}));
+   assert.equal(cohorts.total,cohort.path_counts[trial]);
+   const pageTwo=good(await drill('cohort',trial,{page_size:1,page:2}));
+   assert.deepEqual([...cohorts.items,...pageTwo.items].map(item=>item.id).sort(),[direct.student,boundary.student].sort());
+   assert.deepEqual(good(await read('event',{owner_id:B},A)).path_counts,{[trial]:0,[signup]:0});
+   assert.equal(good(await drill('event',trial,{owner_id:B},M)).items[0].id,other.student);
+   assert.equal((await drill('event',trial,{},F)).status,403);
+
+   const afterWindow={start_at:end,end_at:'2023-10-04T00:00:00+08:00'};
+   assert.deepEqual(good(await read('event',afterWindow)).path_counts,{[trial]:1,[signup]:0});
+   await pool.query('UPDATE ms.students SET archived_at=now() WHERE id=$1',[direct.student]);
+   assert.deepEqual(good(await read('event')).path_counts,{[trial]:0,[signup]:0});
+   assert.equal(good(await drill('event',trial)).total,0);
+  });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);
    await assert.rejects(pool.query('UPDATE ms_workspace.history SET state=\'bad\' WHERE record_id=$1',[trial.id]),/append only/);

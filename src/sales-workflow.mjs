@@ -369,12 +369,84 @@ function salesLeadScope(ctx,scope){
  return {where:conditions.join(' AND '),params};
 }
 const activeScopedStudent='s.organization_id=l.organization_id AND s.archived_at IS NULL';
+const salesPathMetricKeys=['direct_to_trial_students','direct_enroll_without_trial_students'];
+function salesPathFacts(ctx,scope){
+ const {where,params}=salesLeadScope(ctx,scope);
+ let period='';
+ if(scope.view_mode==='event'){
+  const start=params.push(scope.start_at),end=params.push(scope.end_at);
+  period=`WHERE recorded_at >= $${start}::timestamptz AND recorded_at < $${end}::timestamptz`;
+ }
+ const sql=`
+  WITH scoped_students AS (
+   SELECT l.id AS lead_id,s.id AS student_id,s.display_name
+   FROM ms.leads l JOIN ms.lead_students ls ON ls.lead_id=l.id AND ls.confirmation_state<>'withdrawn'
+   JOIN ms.students s ON s.id=ls.student_id AND ${activeScopedStudent}
+   WHERE ${where}
+  ), milestones AS (
+   SELECT s.lead_id,s.student_id,s.display_name,h.recorded_at,
+    CASE
+     WHEN h.body->>'type'='meeting' AND h.state='completed' THEN 'meeting_completed'
+     WHEN h.body->>'type'='trial' AND h.state='completed' THEN 'trial_completed'
+     WHEN h.body->>'type'='trial' AND h.state='confirmed' THEN 'trial_confirmed'
+    END AS milestone
+   FROM scoped_students s JOIN ms_workspace.records r
+    ON r.lead_id=s.lead_id AND r.organization_id=$1 AND r.kind='appointments'
+   JOIN ms_workspace.history h ON h.record_id=r.id AND h.state IN ('confirmed','completed')
+   WHERE CASE WHEN jsonb_typeof(h.body->'student_ids')='array'
+     THEN (h.body->'student_ids') ? s.student_id::text ELSE r.student_id=s.student_id END
+   UNION ALL
+   SELECT s.lead_id,s.student_id,s.display_name,a.happened_at,'enrollment_succeeded'
+   FROM scoped_students s JOIN ms.audit_events a
+    ON a.organization_id=$1 AND a.target_type='lead' AND a.target_id=s.lead_id
+    AND a.event_name='V34_ENROLLMENT_SUCCESS' AND a.after_business_json->>'student_id'=s.student_id::text
+  ), first_milestones AS (
+   SELECT lead_id,student_id,display_name,
+    min(recorded_at) FILTER (WHERE milestone='meeting_completed') AS meeting_completed,
+    min(recorded_at) FILTER (WHERE milestone='trial_confirmed') AS trial_confirmed,
+    min(recorded_at) FILTER (WHERE milestone='trial_completed') AS trial_completed,
+    min(recorded_at) FILTER (WHERE milestone='enrollment_succeeded') AS enrollment_succeeded
+   FROM milestones GROUP BY lead_id,student_id,display_name
+  ), paths AS (
+   SELECT lead_id,student_id,display_name,trial_confirmed AS recorded_at,'direct_to_trial_students' AS metric
+   FROM first_milestones
+   WHERE trial_confirmed IS NOT NULL AND (meeting_completed IS NULL OR trial_confirmed<meeting_completed)
+   UNION ALL
+   SELECT lead_id,student_id,display_name,enrollment_succeeded,'direct_enroll_without_trial_students'
+   FROM first_milestones
+   WHERE enrollment_succeeded IS NOT NULL AND (trial_completed IS NULL OR enrollment_succeeded<trial_completed)
+  ), path_students AS (
+   SELECT metric,student_id AS id,display_name,min(recorded_at) AS recorded_at,count(*)::int AS lead_count
+   FROM paths ${period} GROUP BY metric,student_id,display_name
+  )`;
+ return {sql,params};
+}
+async function salesPathCounts(c,ctx,scope){
+ const {sql,params}=salesPathFacts(ctx,scope);
+ const rows=(await c.query(`${sql} SELECT metric,count(*)::int AS total FROM path_students GROUP BY metric`,params)).rows;
+ const counts=new Map(rows.map(row=>[row.metric,row.total]));
+ return Object.fromEntries(salesPathMetricKeys.map(metric=>[metric,counts.get(metric)??0]));
+}
+async function salesPathDrilldown(c,ctx,scope,metric,page,pageSize){
+ const {sql,params}=salesPathFacts(ctx,scope);
+ const key=params.push(metric),limit=params.push(pageSize),offset=params.push((page-1)*pageSize);
+ const result=(await c.query(`${sql}, matching AS (
+   SELECT id,display_name,recorded_at,lead_count FROM path_students WHERE metric=$${key}
+  ), page_rows AS (
+   SELECT * FROM matching ORDER BY display_name,id LIMIT $${limit} OFFSET $${offset}
+  )
+  SELECT (SELECT count(*)::int FROM matching) AS total,
+   COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY display_name,id),'[]'::jsonb) AS items
+  FROM page_rows`,params)).rows[0];
+ return {...flags,metric,filters:scope,page,page_size:pageSize,...result};
+}
 async function metricsDrilldown(c,ctx,query={}){
  const {metric,page='1',page_size='20',...filters}=query;
  if(!/^[1-9]\d{0,5}$/.test(page)||!/^[1-9]\d?$/.test(page_size)||Number(page_size)>50){
   fail(422,'VALIDATION_ERROR','请选择有效页码，每页最多 50 条');
  }
  const scope=metricsScope(filters);
+ if(scope.view_mode!=='snapshot'&&salesPathMetricKeys.includes(metric))return salesPathDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
  if(scope.view_mode==='event')return eventMetricsDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
  if(scope.view_mode==='snapshot')return snapshotDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
  if(!['leads','students','won_leads','lost_leads'].includes(metric))fail(422,'VALIDATION_ERROR','该指标暂不支持查看明细');
@@ -478,7 +550,8 @@ async function eventMetrics(c,ctx,scope){
   SELECT metric,count(*)::int AS total FROM period_facts WHERE metric IS NOT NULL GROUP BY metric`,params)).rows;
  const counts=new Map(rows.map(row=>[row.metric,row.total]));
  const event_counts=Object.fromEntries(eventMetricKeys.map(metric=>[metric,counts.get(metric)??0]));
- return {...flags,timezone:'Asia/Shanghai',filters:scope,event_time_basis:'recorded_at',event_counts};
+ const path_counts=await salesPathCounts(c,ctx,scope);
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,event_time_basis:'recorded_at',event_counts,path_counts};
 }
 async function eventMetricsDrilldown(c,ctx,scope,metric,page,pageSize){
  if(!eventMetricKeys.includes(metric))fail(422,'VALIDATION_ERROR','该当期指标暂不支持查看明细');
@@ -806,5 +879,6 @@ async function metrics(c,ctx,query){
   ...enroll.filter(r=>r.state!=='cancelled'&&!r.body.agreement_confirmed).map(r=>({id:r.id,lead_id:r.lead_id,kind:'agreement',title:'报名协议待独立核实',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.submitted_by!==ctx.user.id})),
   ...records.filter(r=>r.kind==='corrections'&&r.state==='pending').map(r=>({id:r.id,lead_id:r.lead_id,kind:r.body.type,title:r.body.type==='lead_transfer'?'客户转交待独立复核':'报名退款/取消纠正待审批',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.requested_by!==ctx.user.id&&r.body.target_owner!==ctx.user.id}))
  ]:[];
- return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
+ const path_counts=await salesPathCounts(c,ctx,scope);
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
 }
