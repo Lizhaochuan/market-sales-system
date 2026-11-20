@@ -508,7 +508,7 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal((await w('/metrics',undefined,KM)).status,403);
   assert.equal(good(await w('/market-metrics/drilldown'+query,undefined,G)).total,detail.total);
  });
- await t.test('first response SLA uses elapsed time, recorded attempts and the scoped sales handoff',async()=>{
+ await t.test('response SLA and 24-hour connection rate use scoped recorded evidence',async()=>{
   const start='2024-10-03T22:30:00+08:00',end='2024-10-04T00:00:00+08:00';
   const event=(id,name,at,body={})=>pool.query(
    "INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,happened_at,after_business_json) VALUES($1,$2,'lead',$3,$4,$5,$6)",
@@ -529,12 +529,24 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   await event(late,'COMMUNICATION','2024-10-03T23:00:01+08:00',attempt);
   await event(noAttempt,'DRAFT_SAVED','2024-10-03T22:50:00+08:00',attempt);
   await event(pending,'INTAKE',new Date(Date.now()-60000).toISOString());
-  const sla=async(user=A,extra={})=>good(await w('/metrics?'+new URLSearchParams({
+  const report=async(user=A,extra={})=>good(await w('/metrics?'+new URLSearchParams({
    start_at:start,end_at:end,view_mode:'cohort',...extra,
-  }),undefined,user)).first_response_sla;
+  }),undefined,user));
+  const sla=async(...args)=>(await report(...args)).first_response_sla;
   assert.deepEqual(await sla(),{threshold_minutes:30,time_basis:'elapsed',on_time:1,overdue:2,pending:1,missing_start:1});
   assert.equal((await sla(M,{owner_id:B})).overdue,1);
   assert.equal((await sla(A,{owner_id:B})).overdue,0);
+  const connection=async(...args)=>(await report(...args)).connection_24h;
+  await event(onTime,'COMMUNICATION','2024-10-04T22:30:00+08:00',{method:'wechat_text',result:'communicated'});
+  await event(late,'COMMUNICATION','2024-10-03T22:00:01+08:00',{method:'phone',result:'communicated'});
+  await event(late,'COMMUNICATION','2024-10-04T22:30:01+08:00',{method:'phone',result:'communicated'});
+  await event(noAttempt,'COMMUNICATION','2024-10-03T23:00:00+08:00',{method:'wechat_text',result:'waiting'});
+  await event(noAttempt,'COMMUNICATION','2024-10-04T00:00:00+08:00',{method:'campus',result:'communicated'});
+  await event(pending,'COMMUNICATION',new Date().toISOString(),{method:'phone',result:'communicated'});
+  assert.deepEqual(await connection(),{eligible:3,connected:1,observing:1,missing_start:1,rate:1/3});
+  assert.equal((await connection(A,{owner_id:B})).rate,null);
+  assert.equal((await connection(M,{owner_id:B})).rate,0);
+
  });
  await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
   const drill='/metrics/drilldown?metric=leads';
