@@ -177,3 +177,6 @@ flowchart TD
 | `historical_ledger` | `coverage: {from, through}` 为包含首尾的连续上海日期。 `opening` 是 `from` 前一日末的订单级余额组成（`order_id`、`receivable_cents`、`net_allocated_cents`）。 `events` 每条含 `event_id`、`order_id`、`evidence_ref`、带时区的 `effective_at` 与 `recorded_at`、`receivable_delta_cents` 和 `allocation_delta_cents`。 `checkpoints` 使用账单上的订单级核对点，含 `order_id`、`date`、`receivable_cents`、`net_allocated_cents`、`balance_cents` 和 `statement_ref`。 |
 
 历史样本按当日系统可见状态回放，生效与记录均到达所选上海日末才纳入。退款冲减净分配，用负的 `allocation_delta_cents`；订单折扣或冲销用负的 `receivable_delta_cents`。如财务要求报表在补录后重述过去日期，应提供该账本的重述规则和对账样本。目前仅校验样本，Boss 页面仍按现状显示渠道成本和历史余额的数据缺口。
+
+
+渠道费用样本可加 `--summary` 查看各上海月份、脱敏渠道与含税口径的净费用。相同分组内的负数冲销抵减原金额，含税和不含税分别汇总。财务可选提供独立账单的 `control_totals`，每条含 `period`、`channel_id`、`tax_basis`、`amount_cents` 与 `statement_ref`。提供控制数时，所有汇总分组须逐项对平；默认输出仅报告校验结果与核对分组数量，不输出渠道编号或金额。

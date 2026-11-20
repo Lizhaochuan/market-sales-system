@@ -47,6 +47,37 @@ test('channel cost sample requires confirmed and fully allocated costs',async t=
  assert.match(wrong.stderr,/分摊合计与费用金额不一致/);
 });
 
+test('channel costs reconcile credits and keep months and tax bases separate',async t=>{
+ const credit={...cost,expense_id:'credit-fixture',amount_cents:-100,allocations:[{channel_id:'source-a',amount_cents:-100}]};
+ const exclusive={...cost,expense_id:'exclusive-fixture',amount_cents:80,tax_basis:'exclusive',allocations:[{channel_id:'source-a',amount_cents:80}]};
+ const nextMonth={...exclusive,expense_id:'next-fixture',period:'2024-08'};
+ const controls=[
+  {channel_id:'source-a',amount_cents:500,tax_basis:'inclusive',period:'2024-07'},
+  {channel_id:'source-a',amount_cents:80,tax_basis:'exclusive',period:'2024-07'},
+  {channel_id:'source-b',amount_cents:300,tax_basis:'inclusive',period:'2024-07'},
+  {channel_id:'source-a',amount_cents:80,tax_basis:'exclusive',period:'2024-08'},
+ ].map(row=>({...row,statement_ref:'statement-fixture'}));
+ const sample={...source,kind:'channel_costs',costs:[cost,credit,exclusive,nextMonth],control_totals:controls};
+ const good=await run(t,sample,['--summary']);
+ assert.equal(good.status,0,good.stderr);
+ const report=JSON.parse(good.stdout);
+ assert.equal(report.reconciled_groups,4);
+ assert.deepEqual(report.summary.map(({period,channel_id,tax_basis,amount_cents})=>[period,channel_id,tax_basis,amount_cents]),[
+  ['2024-07','source-a','exclusive','80'],['2024-07','source-a','inclusive','500'],
+  ['2024-07','source-b','inclusive','300'],['2024-08','source-a','exclusive','80'],
+ ]);
+ const partial=await run(t,{...sample,control_totals:controls.slice(0,3)});
+ assert.equal(partial.status,1);
+ assert.match(partial.stderr,/缺少控制数/);
+ const wrong=await run(t,{...sample,control_totals:[...controls.slice(0,3),{...controls[3],amount_cents:81}]});
+ assert.equal(wrong.status,1);
+ assert.match(wrong.stderr,/与渠道费用汇总不一致/);
+ const check=await run(t,sample);
+ assert.equal(check.status,0,check.stderr);
+ assert.equal(JSON.parse(check.stdout).summary,undefined);
+ assert.ok(!check.stdout.includes('source-a'));
+});
+
 test('historical sample replays Shanghai day-end with evidence and reconciles against a statement',async t=>{
  const before=await run(t,ledger,['--date','2024-07-01']);
  assert.equal(before.status,0,before.stderr);

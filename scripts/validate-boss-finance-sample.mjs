@@ -25,15 +25,18 @@ function unique(set,key,label){
  set.add(key);
 }
 
-function validateChannelCosts(sample){
- const ids=new Set();
+const costPeriod=value=>typeof value==='string'&&/^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+const taxBasis=value=>['inclusive','exclusive'].includes(value);
+const costKey=(period,channel,tax)=>JSON.stringify([period,channel,tax]);
+function validateChannelCosts(sample,includeSummary){
+ const ids=new Set(),grouped=new Map();
  for(const [index,raw] of entries(sample.costs,'costs')){
   const row=raw??{},label='费用第 '+(index+1)+' 条';
   unique(ids,row.expense_id,label);
   requireCondition(row.status==='finance_confirmed'&&hasText(row.confirmation_ref),label+' 缺少财务确认凭证');
   requireCondition(row.currency==='CNY'&&cents(row.amount_cents)&&row.amount_cents!==0,label+' 须提供非零人民币分金额');
-  requireCondition(/^\d{4}-(0[1-9]|1[0-2])$/.test(row.period),label+' 归属月须为 YYYY-MM');
-  requireCondition(['inclusive','exclusive'].includes(row.tax_basis),label+' 缺少含税口径');
+  requireCondition(costPeriod(row.period),label+' 归属月须为 YYYY-MM');
+  requireCondition(taxBasis(row.tax_basis),label+' 缺少含税口径');
   const channels=new Set();
   let total=0n;
   for(const [i,rawPart] of entries(row.allocations,label+'分摊')){
@@ -41,10 +44,33 @@ function validateChannelCosts(sample){
    unique(channels,part.channel_id,partLabel);
    requireCondition(cents(part.amount_cents)&&Math.sign(part.amount_cents)===Math.sign(row.amount_cents),partLabel+' 金额方向与原记录不一致');
    total+=BigInt(part.amount_cents);
+   const key=costKey(row.period,part.channel_id,row.tax_basis);
+   grouped.set(key,(grouped.get(key)??0n)+BigInt(part.amount_cents));
   }
   requireCondition(total===BigInt(row.amount_cents),label+' 分摊合计与费用金额不一致');
  }
- return {kind:'channel_costs',records:ids.size};
+ const report={kind:'channel_costs',records:ids.size};
+ if(sample.control_totals!==undefined){
+  const seen=new Set();
+  for(const [index,raw] of entries(sample.control_totals,'control_totals')){
+   const control=raw??{},label='控制数第 '+(index+1)+' 条';
+   requireCondition(costPeriod(control.period)&&hasText(control.channel_id)&&taxBasis(control.tax_basis)
+    &&cents(control.amount_cents)&&hasText(control.statement_ref),label+' 缺少渠道、归属月、含税口径、金额或对账凭证');
+   const key=costKey(control.period,control.channel_id,control.tax_basis);
+   unique(seen,key,label);
+   requireCondition(grouped.has(key),label+' 未找到对应分摊记录');
+   requireCondition(grouped.get(key)===BigInt(control.amount_cents),label+' 与渠道费用汇总不一致');
+  }
+  requireCondition(seen.size===grouped.size,'渠道费用汇总存在缺少控制数的分组');
+  report.reconciled_groups=seen.size;
+ }
+ if(includeSummary){
+  report.summary=[...grouped.keys()].sort().map(key=>{
+   const [period,channel_id,tax_basis]=JSON.parse(key);
+   return {period,channel_id,tax_basis,amount_cents:String(grouped.get(key))};
+  });
+ }
+ return report;
 }
 function validateLedger(sample,requestedDate){
  const {from,through}=sample.coverage??{};
@@ -114,13 +140,16 @@ function validateLedger(sample,requestedDate){
 
 try{
  const [file,option,date,...extra]=process.argv.slice(2);
- requireCondition(file&&!extra.length&&(!option||option==='--date'&&date),'用法：node scripts/validate-boss-finance-sample.mjs <脱敏样本.json> [--date YYYY-MM-DD]');
+ const summary=option==='--summary';
+ requireCondition(file&&!extra.length&&(!option||(summary&&!date)||(option==='--date'&&date)),
+  '用法：node scripts/validate-boss-finance-sample.mjs <脱敏样本.json> [--summary | --date YYYY-MM-DD]');
  let sample;
  try{sample=JSON.parse(await readFile(file,'utf8'));}catch{throw new Error('无法读取有效的 JSON 样本');}
  requireCondition(sample&&hasText(sample.organization_ref)&&hasText(sample.source_ref),'须提供脱敏机构编号和账表或接口标识');
  requireCondition(['channel_costs','historical_ledger'].includes(sample.kind),'kind 须为 channel_costs 或 historical_ledger');
- requireCondition(!option||sample.kind==='historical_ledger','仅历史账本接受查询日期');
- const report=sample.kind==='channel_costs'?validateChannelCosts(sample):validateLedger(sample,date);
+ if(summary)requireCondition(sample.kind==='channel_costs','仅渠道费用接受 --summary');
+ if(option==='--date')requireCondition(sample.kind==='historical_ledger','仅历史账本接受查询日期');
+ const report=sample.kind==='channel_costs'?validateChannelCosts(sample,summary):validateLedger(sample,date);
  process.stdout.write(JSON.stringify({valid:true,validation_scope:'sample_only',...report})+'\n');
 }catch(error){
  process.stderr.write('样本校验失败：'+error.message+'\n');
