@@ -195,5 +195,18 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal(result.code,'STUDENT_REVIEW_REQUIRED');
   assert.equal(good(await w('/market',undefined,K2)).items.find(item=>item.id===id).handoff_state,'market');
  });
+ await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
+  const drill='/metrics/drilldown?metric=leads';
+  const general=good(await w(drill,undefined,G));
+  assert.equal(general.total,good(await w('/metrics',undefined,G)).counts.leads);
+  const pendingMarket=good(await w('/market',undefined,K2)).items.filter(item=>item.handoff_state==='market');
+  assert.ok(pendingMarket.length>0);
+  assert.ok(general.items.every(item=>!pendingMarket.some(market=>market.id===item.id)));
+  assert.equal((await w(drill,undefined,KM)).status,403);
+  assert.equal((await w(drill,undefined,F)).status,403);
+
+  await pool.query('UPDATE ms.user_role_grants SET revoked_at=now() WHERE user_id=$1',[G]);
+  assert.equal((await w(drill,undefined,G)).status,403);
+ });
  }finally{if(app)await new Promise(r=>app.close(r));await pool.end();}
 });

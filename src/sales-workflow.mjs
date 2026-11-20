@@ -78,7 +78,9 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  if(method==='GET'&&id==='finance')return financialQueue(c,ctx);
  if(method==='GET'&&id==='metrics'){
   if(isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','收款核实员不可访问销售统计');
-  return metrics(c,ctx,query);
+  if(action==='drilldown')return leadMetricsDrilldown(c,ctx,query);
+  if(!action)return metrics(c,ctx,query);
+  fail(404,'NOT_FOUND','没有找到统计入口');
  }
  if(method==='GET'&&!id)return listing(c,ctx,query);
  if(method==='POST'&&!id){
@@ -337,10 +339,48 @@ function metricsScope(query={}){
  if(Date.parse(start)>=Date.parse(end))fail(422,'VALIDATION_ERROR','结束时间须晚于开始时间');
  return {view_mode:'cohort',start_at:start,end_at:end,owner_id:owner_id??null};
 }
+function salesLeadScope(ctx,scope){
+ const params=[ctx.user.organization_id,ctx.user.id,ctx.manager];
+ const conditions=['l.organization_id=$1','(l.owner_user_id=$2 OR $3::boolean)'];
+ if(ctx.roleWorkspaces)conditions.push("NOT EXISTS(SELECT 1 FROM ms_workspace.lead_directory d WHERE d.lead_id=l.id AND d.department='market')");
+ if(scope?.owner_id)conditions.push(`l.owner_user_id=$${params.push(scope.owner_id)}::uuid`);
+ if(scope?.start_at){
+  conditions.push(`l.created_at>=$${params.push(scope.start_at)}::timestamptz`);
+  conditions.push(`l.created_at<$${params.push(scope.end_at)}::timestamptz`);
+ }
+ return {where:conditions.join(' AND '),params};
+}
+async function leadMetricsDrilldown(c,ctx,query={}){
+ const {metric,page='1',page_size='20',...filters}=query;
+ if(metric!=='leads')fail(422,'VALIDATION_ERROR','当前仅支持线索数明细');
+ if(!/^[1-9]\d{0,5}$/.test(page)||!/^[1-9]\d?$/.test(page_size)||Number(page_size)>50){
+  fail(422,'VALIDATION_ERROR','请选择有效页码，每页最多 50 条');
+ }
+ const scope=metricsScope(filters);
+ const {where,params}=salesLeadScope(ctx,scope);
+ const limit=params.push(Number(page_size)),offset=params.push((Number(page)-1)*Number(page_size));
+ const result=(await c.query(`
+  WITH matching AS (
+   SELECT l.id,l.created_at,l.owner_user_id,l.contact_id,l.lead_state
+   FROM ms.leads l WHERE ${where}
+  ), page_rows AS (
+   SELECT m.id,m.created_at,
+     co.display_name AS contact_name,u.display_name AS owner_name,
+     COALESCE(w.terminal_state,CASE WHEN m.lead_state IN ('closed','invalid') THEN 'legacy_closed' ELSE 'open' END) AS terminal_state
+   FROM (SELECT * FROM matching ORDER BY created_at DESC,id LIMIT $${limit} OFFSET $${offset}) m
+   LEFT JOIN ms.contacts co ON co.id=m.contact_id AND co.organization_id=$1
+   LEFT JOIN ms.staff_users u ON u.id=m.owner_user_id AND u.organization_id=$1
+   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=m.id AND w.organization_id=$1
+  )
+  SELECT (SELECT count(*)::int FROM matching) AS total,
+         COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY created_at DESC,id),'[]'::jsonb) AS items
+  FROM page_rows`,params)).rows[0];
+ return {...flags,metric,filters:scope,page:Number(page),page_size:Number(page_size),...result};
+}
 async function listing(c,ctx,query={},scope=null){
  const q=typeof query?.q==='string'?query.q.trim().slice(0,100):'';
  const digits=q.replace(/[^0-9]/g,'');
- const params=[ctx.user.organization_id,ctx.user.id,ctx.manager];
+ const {where,params}=salesLeadScope(ctx,scope);
  let qWhere='';
  if(q){
   params.push('%'+q+'%');
@@ -352,13 +392,6 @@ async function listing(c,ctx,query={},scope=null){
   }
   qWhere=` AND (c.display_name ILIKE ${qIdx} OR w.contact_info ILIKE ${qIdx} OR EXISTS(SELECT 1 FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.archived_at IS NULL AND s.display_name ILIKE ${qIdx})${dClause})`;
  }
- const scopeWhere=[];
- if(scope?.owner_id)scopeWhere.push(`l.owner_user_id=$${params.push(scope.owner_id)}::uuid`);
- if(scope?.start_at){
-  scopeWhere.push(`l.created_at>=$${params.push(scope.start_at)}::timestamptz`);
-  scopeWhere.push(`l.created_at<$${params.push(scope.end_at)}::timestamptz`);
- }
- const extraWhere=scopeWhere.map(condition=>' AND '+condition).join('');
  const rows=(await c.query(`SELECT l.id,l.lead_state,l.owner_user_id,l.created_at,c.display_name AS contact_name,u.display_name AS owner_name,u.status AS owner_status,e.event_type AS original_source,(SELECT a.after_business_json->>'source' FROM ms.audit_events a WHERE a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='LEAD_SOURCE_UPDATED' ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS current_source,
   w.stage,w.version,w.updated_at,w.terminal_state,w.primary_activity_id,w.do_not_contact,w.contact_info,
   a.body AS next_action,a.state AS activity_state,a.kind AS activity_kind,
@@ -368,7 +401,7 @@ async function listing(c,ctx,query={},scope=null){
   (SELECT x.after_business_json->>'origin_group' FROM ms.audit_events x WHERE x.organization_id=l.organization_id AND x.target_type='lead' AND x.target_id=l.id AND x.event_name='LEAD_DESK_CREATED' ORDER BY x.happened_at LIMIT 1) AS origin_group
   FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id LEFT JOIN ms.contact_events e ON e.id=l.source_event_id
   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms_workspace.records a ON a.id=w.primary_activity_id
-  WHERE l.organization_id=$1 ${ctx.roleWorkspaces?"AND NOT EXISTS(SELECT 1 FROM ms_workspace.lead_directory d WHERE d.lead_id=l.id AND d.department='market')":''} AND(l.owner_user_id=$2 OR $3::boolean)${qWhere}${extraWhere} ORDER BY l.created_at DESC,l.id`,params)).rows;
+  WHERE ${where}${qWhere} ORDER BY l.created_at DESC,l.id`,params)).rows;
  const incoming=(await c.query("SELECT r.id,r.lead_id,r.body->>'reason' AS reason,w.version FROM ms_workspace.records r JOIN ms_workspace.lead_workflow w ON w.lead_id=r.lead_id WHERE r.organization_id=$1 AND r.kind='corrections' AND r.state='approved' AND r.body->>'type'='lead_transfer' AND r.body->>'target_owner'=$2",[ctx.user.organization_id,ctx.user.id])).rows;
  return {...flags,incoming,items:rows.map(({contact_info,...r})=>({...r,contact_info_masked:maskPhone(contact_info),terminal_state:r.terminal_state??(['closed','invalid'].includes(r.lead_state)?'legacy_closed':'open'),needs_arrangement:!r.version&&!['closed','invalid'].includes(r.lead_state),needs_assignment:!r.owner_user_id||r.owner_status!=='active',overdue:r.next_action?.due_at?Date.parse(r.next_action.due_at)<Date.now()&&r.terminal_state==='open':false})),staff:ctx.manager?(await c.query(`SELECT u.id,u.display_name FROM ms.staff_users u WHERE u.organization_id=$1 AND u.status='active' ${ctx.roleWorkspaces?"AND EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('sales_staff','sales_consultant','sales_manager','super_admin')) AND NOT EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('marketing','marketing_staff','marketing_manager','finance_verifier'))":''} ORDER BY u.display_name`,[ctx.user.organization_id])).rows:[]};
 }

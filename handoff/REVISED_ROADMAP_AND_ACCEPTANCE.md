@@ -77,8 +77,10 @@ flowchart TD
    - **证据化销项**：每类督办绑定对应完成条件（例如：“催办预约结果核销”须有该预约的 `completed/no_show/cancelled/rescheduled` 记录；“催办待补安排”须修复 `primary_activity_id`；“催办超期跟进”须有督办下发时间之后的真实沟通/活动处理记录），**不允许任意一条无关跟进自动消除全部督办**。
 
 #### 2.2 Phase 2 增量交付清单
-- **后端**：扩展 `GET /workflow/metrics`（支持 `start_at / end_at`、`Asia/Shanghai` 窗口、`view_mode=cohort|event`、`owner_id`、`source`、`as_of_at`）；新增 `POST /workflow/metrics/drilldown`（与汇总同源口径）；新增独立隔离迁移（如 `041_boss_supervision_and_views.sql`）承载 `ms_workspace.management_actions`（督办单）与可选 `saved_views`。
+- **后端**：扩展 `GET /workflow/metrics`（支持 `start_at / end_at`、`Asia/Shanghai` 窗口、`view_mode=cohort|event`、`owner_id`、`source`、`as_of_at`）；新增只读 `GET /workflow/metrics/drilldown`（与汇总共用权限及筛选，逐次鉴权，不走写入请求回执）；新增独立隔离迁移（如 `041_boss_supervision_and_views.sql`）承载 `ms_workspace.management_actions`（督办单）与可选 `saved_views`。
 - **前端**：升级 `renderMetrics` 为结构化 Boss 驾驶舱视图（顶部筛选栏 + 异常优先置顶卡 + 核心转化/资金双口径卡 + Cohort/Event 切换 + 顾问过程榜 + 渠道质量榜 + 战败归因图 + 点击数字证据化下钻抽屉 + 合规督办派发与追踪）。
+
+**当前增量范围**：线索数明细接受 `metric=leads`，沿用建档时间和当前顾问筛选，通过 `page`、`page_size` 分页。汇总和明细分别读取当前状态，历史时点快照及其他指标的明细仍待接入。
 
 **Phase 2 验收标准**：
 - 角色与机构隔离测试：销售顾问无法访问他人/团队汇总与下钻；市场主管仅见市场维度；财务核实员无法经下钻读取销售沟通详情；撤权后进行中的下钻请求 fail-closed 返回 `403`。

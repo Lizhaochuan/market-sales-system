@@ -289,7 +289,11 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    const first=await seed(A,start);
    const other=await seed(B,'2024-04-01T12:00:00+08:00');
    const after=await seed(A,end);
+   const foreignOrg=randomUUID();
+   await pool.query("INSERT INTO ms.organizations(id,name) VALUES($1,'统计窗口其他机构')",[foreignOrg]);
+   await pool.query("INSERT INTO ms.leads(organization_id,lead_state,created_at) VALUES($1,'working',$2)",[foreignOrg,start]);
    const scoped=(query,user)=>req('/metrics?'+new URLSearchParams(query),undefined,user);
+   const drill=(query,user)=>req('/metrics/drilldown?'+new URLSearchParams({metric:'leads',...query}),undefined,user);
    const window={view_mode:'cohort',start_at:start,end_at:end};
    const team=good(await scoped(window,M));
    assert.equal(team.counts.leads,2);
@@ -300,6 +304,24 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.deepEqual(good(await scoped(window,A)).reminders.map(row=>row.lead_id),[first]);
    assert.equal(good(await scoped({...window,owner_id:B},A)).counts.leads,0);
    assert.equal((await scoped(window,F)).status,403);
+   const firstPage=good(await drill({...window,page_size:1},M));
+   const secondPage=good(await drill({...window,page:2,page_size:1},M));
+   const beyond=good(await drill({...window,page:3,page_size:1},M));
+   assert.equal(firstPage.total,team.counts.leads);
+   assert.equal(secondPage.total,team.counts.leads);
+   assert.equal(beyond.total,team.counts.leads);
+   assert.deepEqual(beyond.items,[]);
+   assert.deepEqual(firstPage.filters,team.filters);
+   assert.deepEqual(firstPage.items.map(item=>item.id),[other]);
+   assert.deepEqual(secondPage.items.map(item=>item.id),[first]);
+   assert.deepEqual(Object.keys(firstPage.items[0]).sort(),['contact_name','created_at','id','owner_name','terminal_state']);
+   assert.deepEqual(good(await drill(window,A)).items.map(item=>item.id),[first]);
+   assert.deepEqual(good(await drill({...window,owner_id:B},M)).items.map(item=>item.id),[other]);
+   assert.deepEqual(good(await drill({...window,owner_id:B},A)).items,[]);
+   assert.equal((await drill(window,F)).status,403);
+   for(const invalid of [{metric:'students'},{page:'0'},{page_size:'51'},{...window,view_mode:'event'}]){
+    assert.equal((await drill(invalid,M)).status,422,JSON.stringify(invalid));
+   }
    for(const invalid of [
     {start_at:start},
     {...window,end_at:start},

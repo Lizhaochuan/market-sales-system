@@ -911,7 +911,7 @@ test('PC-05: manually scheduled late follow-up keeps its exact time after sign-i
 });
 
 
-test('Boss filters by Shanghai lead creation date and advisor and can clear the scope', async ({page}) => {
+test('Boss lead drilldown follows Shanghai creation date and advisor filters', async ({page}) => {
  await login(page,'supervisor');
  await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
  const panel=page.locator('#v34-metrics');
@@ -943,12 +943,26 @@ test('Boss filters by Shanghai lead creation date and advisor and can clear the 
  await end.fill('2024-04-01');
  await apply.click();
  await expect(count).toHaveText('2');
+ const openDrilldown=panel.getByRole('button',{name:'查看线索明细'});
+ const drilldown=panel.locator('#v34-metrics-leads');
+ await openDrilldown.click();
+ await expect(drilldown).toContainText('共 2 条线索');
+ await expect(drilldown).toContainText('窗口首位顾问测试家长');
+ await expect(drilldown).toContainText('窗口第二位顾问测试家长');
+ await expect(drilldown).not.toContainText('窗口之外测试家长');
  await owners.selectOption(ownerIds[1]);
  await apply.click();
  await expect(count).toHaveText('1');
  await expect(owners).toHaveValue(ownerIds[1]);
  await expect(start).toHaveValue('2024-04-01');
  await expect(end).toHaveValue('2024-04-01');
+ await expect(drilldown).toHaveCount(0);
+ await openDrilldown.click();
+ await expect(drilldown).toContainText('共 1 条线索');
+ await expect(drilldown).toContainText('窗口第二位顾问测试家长');
+ await expect(drilldown).not.toContainText('窗口首位顾问测试家长');
+ await drilldown.getByRole('button',{name:'关闭线索明细'}).click();
+ await expect(drilldown).toHaveCount(0);
 
  await page.getByRole('button',{name:'我的待办',exact:true}).click();
  await expect(page.locator('#v34-tasks')).toBeVisible();
