@@ -4,11 +4,17 @@
 
 ---
 
-## PC-05 手动跟进时间复验准备（2026-11-20）
+## PC-05 手动跟进时间独立验收（2026-11-20）
 
 Antigravity 对原提交 `aa7e8d6` 的独立验收指出，测试可能把电话查询留下的提示误认为新建保存成功。修订后的 PC-05 用例等待实际新建请求成功，并在客户详情和重新登录后的待办中核对同一时间。用例验证原有三个日期预设、手动覆盖已生效的预设，以及上海时间 22:37 原样保存。
 
-Mac 使用 `bash .tmp/pc05-full.sh` 在空的隔离库完整复跑，核心、界面与安全 750/750、Chromium 42/42、LOGIN/RLS 12/12、合约 8/8。使用 UTC 浏览器单独复跑 PC-05 为 1/1。本轮证据仅来自本地，业务代码未修改，PC-05 仍为 `REVIEW_REQUIRED`，等待独立复验。
+**PC-05=DONE。** Antigravity 独立复验确认受测提交为 `52edab5b1a919c9a9c32e06e6f0bb98e715b9a1e`，保存同步、预设覆盖和上海时间 22:37 原样保存三项通过。
+
+- 首轮 PC-05 通过，既有 `isolated-workspace.spec.mjs:182` 等待 `#toast` 超时。Chromium 41/42，合约步骤未运行。日志 `.tmp/pc05.vgb7MY/full-10.log`。
+- 第二轮从空的隔离库完整复跑。核心、界面与安全 750/750、Chromium 42/42、LOGIN/RLS 12/12、合约 8/8。日志 `.tmp/pc05.drVgWs/full-6.log` 至 `full-11.log`。
+- UTC 浏览器定向复跑 1/1。日志 `.tmp/pc05.drVgWs/pc05-utc.log`。
+
+证据为本地独立复验，未运行本分支的 GitHub Actions。保留 `HOLD=true`、`EXT-001=UNVERIFIED`、Draft / CI-only。
 
 ---
 
