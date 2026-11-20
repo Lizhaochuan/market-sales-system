@@ -11,5 +11,6 @@ try{
  if(!(await c.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=36')).rowCount)await c.query(await readFile(new URL('../db/workspace-migrations/041_historical_student_links.sql',import.meta.url),'utf8'));
  if(!(await c.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=37')).rowCount)await c.query(await readFile(new URL('../db/workspace-migrations/042_appointment_supervision.sql',import.meta.url),'utf8'));
  if(!(await c.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=38')).rowCount)await c.query(await readFile(new URL('../db/workspace-migrations/043_followup_supervision.sql',import.meta.url),'utf8'));
+ if(!(await c.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=39')).rowCount)await c.query(await readFile(new URL('../db/workspace-migrations/044_arrangement_supervision.sql',import.meta.url),'utf8'));
  console.log('V3.4 additive workspace migration ready; old records unchanged; HOLD remains.');
 }finally{await c.end();}

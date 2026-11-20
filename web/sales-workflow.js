@@ -455,6 +455,7 @@
   target.append(section);
  }
  const supervisionKinds=[
+  {key:'arrangement',heading:'待补安排督办',action:'supervise-arrangement',label:'待补安排'},
   {key:'appointment',target:'appointment',kind:'appointments',heading:'预约结果督办',action:'supervise-appointment',label:'预约',
    outcome:{completed:'已完成',no_show:'未到场',cancelled:'已取消',rescheduled:'已改期'}},
   {key:'followup',target:'task',kind:'tasks',heading:'逾期跟进督办',action:'supervise-followup',label:'跟进待办',
@@ -466,14 +467,19 @@
  function renderSupervisionKind(target,type,{offer=false,onlyMine=false}={}){
   const supervision=report?.[type.key+'_supervision'];
   if(!supervision)return;
-  const targetId=type.target+'_id';
-  const openTargets=new Set(supervision.items.filter(item=>!item.resolved_version).map(item=>item[targetId]));
-  const items=supervision.items.filter(item=>(offer||!item.resolved_version)&&(!onlyMine||item.owner_user_id===state.user.staff_id));
-  const candidates=offer&&supervision.can_issue?(report.reminders||[]).filter(r=>{
-   if(r.kind!==type.kind||!r.overdue||openTargets.has(r.id))return false;
-   const lead=rows.find(item=>item.id===r.lead_id);
-   return lead?.terminal_state==='open'&&lead.owner_user_id===r.owner_user_id;
-  }):[];
+  const arrangement=!type.target;
+  const targetId=arrangement?'lead_id':type.target+'_id';
+  const openTargets=new Set(supervision.items.filter(item=>!item.resolved_at).map(item=>item[targetId]));
+  const items=supervision.items.filter(item=>(offer||!item.resolved_at)&&(!onlyMine||item.owner_user_id===state.user.staff_id));
+  let candidates=[];
+  if(offer&&supervision.can_issue){
+   if(arrangement)candidates=(supervision.candidates||[]).filter(id=>!openTargets.has(id)).map(id=>({id,lead_id:id}));
+   else candidates=(report.reminders||[]).filter(r=>{
+    if(r.kind!==type.kind||!r.overdue||openTargets.has(r.id))return false;
+    const lead=rows.find(item=>item.id===r.lead_id);
+    return lead?.terminal_state==='open'&&lead.owner_user_id===r.owner_user_id;
+   });
+  }
   if(!items.length&&!candidates.length)return;
   const section=node('section','panel');
   section.id='v34-'+type.key+'-supervision';
@@ -481,13 +487,17 @@
   for(const item of items){
    const row=node('article','lead-row');
    row.dataset.supervisionId=item.id;
-   const title=(item.contact_name||'待识别客户')+' · '+item[type.target+'_title'];
+   const title=(item.contact_name||'待识别客户')+(arrangement?'':' · '+item[type.target+'_title']);
    row.append(node('strong','',title),node('p','',item.reason));
-   if(item.resolved_version){
-    row.append(node('p','fineprint','已销项 · '+type.outcome[item.resolution_state]+' · '+type.label+'版本 '+item.resolved_version+' · '+shSupervisionTime(item.resolved_at)));
+   if(item.resolved_at){
+    const proof=arrangement?'已补齐首要安排':type.outcome[item.resolution_state]+' · '+type.label+'版本 '+item.resolved_version;
+    row.append(node('p','fineprint','已销项 · '+proof+' · '+shSupervisionTime(item.resolved_at)));
    }else{
     row.append(node('p','fineprint',(item.owner_name||'待分配')+' · '+(Date.parse(item.due_at)<Date.now()?'督办已逾期 · ':'待处理 · ')+shSupervisionTime(item.due_at)));
-    if(isActive({state:item.activity_state})){
+    if(arrangement){
+     if(item.can_repair)btn(row,'补齐指定客户安排',()=>openLead(item.lead_id));
+     else row.append(node('p','warning','当前无法补安排 · 缺少符合条件的处理记录'));
+    }else if(isActive({state:item.activity_state})){
      btn(row,'处理指定'+type.label,()=>openLead(item.lead_id,item[targetId],{preferTarget:true}));
     }else row.append(node('p','warning','原'+type.label+'已结束 · 缺少符合条件的处理记录'));
    }
@@ -495,11 +505,12 @@
   }
   for(const r of candidates){
    const lead=rows.find(item=>item.id===r.lead_id);
-   const title=(lead.contact_name||'待识别客户')+' · '+r.title;
-   const actions=form(section,'v34-'+type.key+'-supervise-'+r.id,'催办 '+title,'下发'+(type.key==='followup'?'跟进':'预约')+'督办',f=>{
+   const title=(lead?.contact_name||'待识别客户')+(arrangement?'':' · '+r.title);
+   const actionLabel=type.key==='followup'?'跟进':type.label;
+   const actions=form(section,'v34-'+type.key+'-supervise-'+r.id,'催办 '+title,'下发'+actionLabel+'督办',f=>{
     const values=data(f);
     return api(root+'/'+r.lead_id+'/'+type.action,{method:'POST',body:{
-     [targetId]:r.id,[type.target+'_version']:r.version,reason:values.reason,due_at:values.due_at+':00+08:00',
+     ...(arrangement?{}:{[targetId]:r.id,[type.target+'_version']:r.version}),reason:values.reason,due_at:values.due_at+':00+08:00',
     }});
    },{version:null});
    const reason=input(actions.f,'督办说明','reason','text','',true);

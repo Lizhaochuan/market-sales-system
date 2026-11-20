@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import pg f
 test('Role workspaces: phone handoff, department privacy and persistent dated tasks',async t=>{
  process.env.MS_STAGE='isolated-test';const pool=new pg.Pool({connectionString:process.env.DATABASE_URL}),org=randomUUID(),A=randomUUID(),B=randomUUID(),M=randomUUID(),K=randomUUID(),K2=randomUUID(),KM=randomUUID(),G=randomUUID(),F=randomUUID();const secret='fictional-role-workspaces-test-key-2026';let app;
  try{
- for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
+ for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
  await pool.query("INSERT INTO ms.organizations(id,name) VALUES($1,'虚构部门验收机构')",[org]);
  for(const [id,name]of[[A,'销售A'],[B,'销售B'],[M,'销售主管'],[K,'市场A'],[K2,'市场B'],[KM,'市场主管'],[G,'总管理者'],[F,'收款核实员']])await pool.query('INSERT INTO ms.staff_users(id,organization_id,display_name) VALUES($1,$2,$3)',[id,org,name]);
  for(const [role,users]of[['sales_staff',[A,B]],['sales_manager',[M]],['marketing_staff',[K,K2]],['marketing_manager',[KM]],['super_admin',[G]],['finance_verifier',[F]]]){const r=(await pool.query('INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,$2,$2) RETURNING id',[org,role])).rows[0];for(const u of users)await pool.query('INSERT INTO ms.user_role_grants(user_id,role_id,granted_by) VALUES($1,$2,$3)',[u,r.id,G]);}
@@ -372,6 +372,53 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   const recorded=detail.events.find(e=>e.after_business_json.completed_task_id===taskId);
   assert.equal(recorded.after_business_json.completed_task_version,resolved.resolved_version);
   assert.equal((await status(replacedTask)).resolved_version,null);
+ });
+ await t.test('arrangement supervision resolves only with an audited repair for the same lead',async()=>{
+  const seed=async(owner=A,leadState='working')=>(await pool.query(
+   'INSERT INTO ms.leads(organization_id,owner_user_id,lead_state) VALUES($1,$2,$3) RETURNING id',
+   [org,owner,leadState],
+  )).rows[0].id;
+  const leadId=await seed(),otherId=await seed(),closedId=await seed(A,'closed'),unassigned=await seed(null);
+  const financeAssigned=await seed(F);
+  const deadline=next(2).due_at;
+  const issue=(id,user=M,key=randomUUID())=>w('/'+id+'/supervise-arrangement',{due_at:deadline,reason:'补齐首要跟进'},user,key);
+  const status=async(user=A,filters={})=>good(await w(
+   '/metrics?'+new URLSearchParams(filters),undefined,user,
+  )).arrangement_supervision;
+  const find=async(id,user=A)=>(await status(user)).items.find(item=>item.lead_id===id);
+  assert.equal((await issue(leadId,A)).status,403);
+  assert.equal((await issue(leadId,KM)).status,403);
+  assert.equal((await issue(leadId,F)).status,403);
+  assert.equal((await issue(closedId)).code,'ARRANGEMENT_SUPERVISION_INELIGIBLE');
+  assert.equal((await issue(unassigned)).code,'ARRANGEMENT_SUPERVISION_INELIGIBLE');
+  assert.equal((await issue(financeAssigned)).code,'SALES_OWNER_REQUIRED');
+  assert.ok(!(await status(M)).candidates.includes(financeAssigned));
+  assert.ok((await status(M,{owner_id:A})).candidates.includes(leadId));
+  assert.ok(!(await status(M,{owner_id:B})).candidates.includes(leadId));
+  const keys=[randomUUID(),randomUUID()];
+  const responses=await Promise.all(keys.map(key=>issue(leadId,M,key)));
+  assert.deepEqual(responses.map(r=>r.status).sort(),[200,409]);
+  const winner=responses.findIndex(r=>r.status===200);
+  const issued=good(responses[winner]).item;
+  assert.equal(good(await issue(leadId,M,keys[winner])).item.id,issued.id);
+  assert.equal((await find(leadId)).can_repair,true);
+  assert.equal(await find(leadId,B),undefined);
+  assert.equal((await w('/'+leadId+'/arrange',{next:{...next(1),title:''}})).status,422);
+  assert.equal(good(await w('/'+leadId)).workflow,null);
+  const repair=(id)=>w('/'+id+'/arrange',{next:next(1)});
+  good(await repair(otherId));
+  assert.equal((await find(leadId)).evidence_event_id,null);
+  const repaired=good(await repair(leadId));
+  const closed=await find(leadId,M);
+  assert.equal(closed.activity_id,repaired.workflow.primary_activity_id);
+  assert.ok(closed.resolved_at);
+  assert.ok(closed.evidence_event_id);
+  assert.equal(closed.can_repair,false);
+  const evidence=(await pool.query('SELECT after_business_json FROM ms.audit_events WHERE id=$1',[closed.evidence_event_id])).rows[0].after_business_json;
+  assert.equal(evidence.arrangement_supervision_id,issued.id);
+  assert.equal(evidence.primary_activity_id,closed.activity_id);
+  assert.ok(!(await status(M)).candidates.includes(leadId));
+  assert.equal((await issue(leadId)).code,'ARRANGEMENT_SUPERVISION_INELIGIBLE');
  });
  await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
   const drill='/metrics/drilldown?metric=leads';

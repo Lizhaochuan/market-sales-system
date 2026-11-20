@@ -114,11 +114,13 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
   const events=(await c.query("SELECT a.event_name,a.after_business_json,a.happened_at,a.actor_user_id,u.display_name AS actor_name FROM ms.audit_events a LEFT JOIN ms.staff_users u ON u.id=a.actor_user_id WHERE a.organization_id=$1 AND a.target_type='lead' AND a.target_id=$2 ORDER BY a.happened_at DESC,a.id DESC",[org,id])).rows;
   return {...flags,lead:l,workflow:w??null,students,records,events:ctx.roleWorkspaces?events.filter(e=>!e.event_name.startsWith('V34_MARKET_CAPTURED')):events,needs_arrangement:!w||w.terminal_state==='open'&&!records.some(r=>r.id===w.primary_activity_id&&active(r))};
  }
+ if(action==='supervise-arrangement')return issueArrangementSupervision(c,ctx,l,w,body);
  const supervision=supervisionTypes.get(action);
  if(supervision)return issueSupervision(c,ctx,l,w,body,supervision);
  if(!w){if(['closed','invalid'].includes(l.lead_state))fail(409,'LEGACY_TERMINAL_REVIEW','旧终态须由主管先核实，不自动重新开启');if(action!=='arrange')fail(409,'ARRANGEMENT_REQUIRED','旧客户缺少后续安排，请先补充下一步');
   if(!l.owner_user_id||!(await c.query("SELECT 1 FROM ms.staff_users WHERE id=$1 AND status='active'",[l.owner_user_id])).rowCount){if(!ctx.manager||!body.owner_user_id)fail(422,'ASSIGNEE_REQUIRED','待分配客户需要主管指定有效负责人');await sameOrgStaff(c,ctx,body.owner_user_id);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,body.owner_user_id);const previous=l.owner_user_id;l.owner_user_id=body.owner_user_id;await c.query('UPDATE ms.leads SET owner_user_id=$2 WHERE id=$1',[id,l.owner_user_id]);await audit(c,ctx,l,'LEGACY_ASSIGNMENT_REPAIRED',{previous_owner:previous,new_owner:l.owner_user_id});}
-  const r=await activity(c,ctx,l,body.next);w=(await c.query("INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,stage,terminal_state) VALUES($1,$2,$3,'unclassified','open') RETURNING *",[id,org,r.id])).rows[0];await auditWorkflow(c,ctx,l,'ARRANGEMENT_REPAIRED',w,{activity_id:r.id});return {...flags,workflow:w};}
+  const supervisionId=await findArrangementSupervision(c,l);
+  const r=await activity(c,ctx,l,body.next);w=(await c.query("INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,stage,terminal_state) VALUES($1,$2,$3,'unclassified','open') RETURNING *",[id,org,r.id])).rows[0];await auditWorkflow(c,ctx,l,'ARRANGEMENT_REPAIRED',w,{activity_id:r.id,...(supervisionId?{arrangement_supervision_id:supervisionId}:{})});return {...flags,workflow:w};}
  if(body?.expected_version!==w.version)fail(409,'VERSION_CONFLICT','客户或任务已更新，请刷新后再保存');
  if(w.terminal_state!=='open'&&!['reopen','request-correction','approve-correction','reject-correction','submit-refund','verify-refund'].includes(action))fail(409,'LEAD_CLOSED','已结案记录只能走有审计的纠正或重新开启流程');
  if(action==='contact'){fields(body,['expected_version','contact_info']);const value=ctx.roleWorkspaces?phoneNumber(body.contact_info):text(body.contact_info,200);if(ctx.roleWorkspaces){await lockPhone(c,org,value);if((await c.query('SELECT 1 FROM ms_workspace.lead_directory WHERE organization_id=$1 AND phone=$2 AND lead_id<>$3',[org,value,id])).rowCount)fail(409,'PHONE_MATCH_FOUND','该电话已有其他线索，请主管核实');await c.query("INSERT INTO ms_workspace.lead_directory(lead_id,organization_id,phone,department) VALUES($1,$2,$3,'sales') ON CONFLICT(lead_id) DO UPDATE SET phone=EXCLUDED.phone",[id,org,value]);}await c.query('UPDATE ms_workspace.lead_workflow SET contact_info=$2 WHERE lead_id=$1',[id,value]);await audit(c,ctx,l,'CONTACT_UPDATED',{previous:w.contact_info,current:value});return bump(c,ctx,l,w,'CONTACT_SAVED');}
@@ -324,15 +326,51 @@ const supervisionTypes=new Map([
  ['supervise-followup',{table:'followup_supervision',schemaVersion:38,target:'task',kind:'tasks',label:'跟进待办',notOverdue:'FOLLOWUP_NOT_OVERDUE'}],
 ]);
 const canSupervise=ctx=>ctx.manager&&(!ctx.roleWorkspaces||workspaceAccess(ctx).sales_manager);
-async function issueSupervision(c,ctx,lead,workflow,body,{table,schemaVersion,target,kind,label,notOverdue}){
+const arrangementSupervisionVersion=39;
+async function supervisionInstalled(c,version){
+ return (await c.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[version])).rowCount>0;
+}
+async function requireSupervision(c,ctx,version,label){
  if(!canSupervise(ctx))fail(403,'FORBIDDEN','仅销售主管可发起'+label+'督办');
- if(!(await c.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[schemaVersion])).rowCount){
-  fail(409,'SUPERVISION_UNAVAILABLE','当前工作台尚未启用'+label+'督办');
- }
- const targetId=target+'_id',targetVersion=target+'_version';
- fields(body,[targetId,targetVersion,'due_at','reason']);
+ if(!await supervisionInstalled(c,version))fail(409,'SUPERVISION_UNAVAILABLE','当前工作台尚未启用'+label+'督办');
+}
+function supervisionDetails(body,extraFields=[]){
+ fields(body,[...extraFields,'due_at','reason']);
  const deadline=date(body.due_at),reason=text(body.reason);
  if(Date.parse(deadline)<=Date.now())fail(422,'VALIDATION_ERROR','督办截止时间须晚于当前时间');
+ return {deadline,reason};
+}
+async function pendingArrangementSupervision(c,lead){
+ const {rows:[item]}=await c.query(`
+  SELECT id FROM ms_workspace.arrangement_supervision_status
+  WHERE organization_id=$1 AND lead_id=$2 AND evidence_event_id IS NULL
+  ORDER BY created_at,id LIMIT 1`,[lead.organization_id,lead.id]);
+ return item?.id??null;
+}
+async function findArrangementSupervision(c,lead){
+ if(!await supervisionInstalled(c,arrangementSupervisionVersion))return null;
+ return pendingArrangementSupervision(c,lead);
+}
+async function issueArrangementSupervision(c,ctx,lead,workflow,body){
+ await requireSupervision(c,ctx,arrangementSupervisionVersion,'待补安排');
+ const {deadline,reason}=supervisionDetails(body);
+ const assigned=await c.query("SELECT 1 FROM ms.staff_users WHERE id=$1 AND organization_id=$2 AND status='active'",
+  [lead.owner_user_id,lead.organization_id]);
+ if(workflow||['closed','invalid'].includes(lead.lead_state)||!assigned.rowCount){
+  fail(409,'ARRANGEMENT_SUPERVISION_INELIGIBLE','仅可督办已有有效负责人且缺少首要安排的旧线索');
+ }
+ if(ctx.roleWorkspaces)await salesAssignee(c,ctx,lead.owner_user_id);
+ if(await pendingArrangementSupervision(c,lead))fail(409,'SUPERVISION_ALREADY_OPEN','该客户已有待补安排督办');
+ const {rows:[item]}=await c.query(`
+  INSERT INTO ms_workspace.arrangement_supervision(organization_id,lead_id,issued_by,reason,due_at)
+  VALUES($1,$2,$3,$4,$5) RETURNING id,lead_id,due_at,created_at`,
+  [lead.organization_id,lead.id,ctx.user.id,reason,deadline]);
+ return {...flags,item};
+}
+async function issueSupervision(c,ctx,lead,workflow,body,{table,schemaVersion,target,kind,label,notOverdue}){
+ await requireSupervision(c,ctx,schemaVersion,label);
+ const targetId=target+'_id',targetVersion=target+'_version';
+ const {deadline,reason}=supervisionDetails(body,[targetId,targetVersion]);
  const activity=await record(c,lead,body[targetId],kind);
  if(activity.version!==body[targetVersion])fail(409,'VERSION_CONFLICT',label+'已更新，请刷新后再发起督办');
  if(workflow?.terminal_state!=='open'||!lead.owner_user_id||lead.owner_user_id!==activity.owner_user_id||
@@ -355,7 +393,7 @@ async function issueSupervision(c,ctx,lead,workflow,body,{table,schemaVersion,ta
 async function supervisionReports(c,ctx,scope){
  const types=[...supervisionTypes.values()];
  const installed=await c.query('SELECT version FROM ms_workspace.schema_versions WHERE version=ANY($1::int[])',
-  [types.map(type=>type.schemaVersion)]);
+  [[...types.map(type=>type.schemaVersion),arrangementSupervisionVersion]]);
  const versions=new Set(installed.rows.map(row=>row.version));
  const {where,params}=salesLeadScope(ctx,scope);
  const reports={};
@@ -372,6 +410,19 @@ async function supervisionReports(c,ctx,scope){
    LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id AND u.organization_id=l.organization_id
    WHERE ${where} ORDER BY (a.resolved_version IS NULL) DESC,a.created_at DESC,a.id`,params);
   reports[table]={can_issue:canSupervise(ctx),items};
+ }
+ reports.arrangement_supervision=null;
+ if(versions.has(arrangementSupervisionVersion)){
+  const {rows:items}=await c.query(`
+   SELECT a.id,a.lead_id,a.reason,a.due_at,a.created_at,a.resolved_at,a.activity_id,a.evidence_event_id,
+    l.owner_user_id,co.display_name AS contact_name,u.display_name AS owner_name,
+    (w.lead_id IS NULL AND l.lead_state NOT IN ('closed','invalid') AND u.status='active') IS TRUE AS can_repair
+   FROM ms.leads l JOIN ms_workspace.arrangement_supervision_status a ON a.lead_id=l.id AND a.organization_id=l.organization_id
+   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id
+   LEFT JOIN ms.contacts co ON co.id=l.contact_id AND co.organization_id=l.organization_id
+   LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id AND u.organization_id=l.organization_id
+   WHERE ${where} ORDER BY (a.evidence_event_id IS NULL) DESC,a.created_at DESC,a.id`,params);
+  reports.arrangement_supervision={can_issue:canSupervise(ctx),items};
  }
  return reports;
 }
@@ -941,5 +992,9 @@ async function metrics(c,ctx,query){
  ]:[];
  const path_counts=await salesPathCounts(c,ctx,scope);
  const supervision=await supervisionReports(c,ctx,scope);
+ if(supervision.arrangement_supervision?.can_issue){
+  const eligibleOwners=new Set(list.staff.map(staff=>staff.id));
+  supervision.arrangement_supervision.candidates=list.items.filter(l=>l.needs_arrangement&&eligibleOwners.has(l.owner_user_id)).map(l=>l.id);
+ }
  return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,...supervision,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,version:r.version,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
 }
