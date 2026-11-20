@@ -533,7 +533,10 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
    start_at:start,end_at:end,view_mode:'cohort',...extra,
   }),undefined,user));
   const sla=async(...args)=>(await report(...args)).first_response_sla;
-  assert.deepEqual(await sla(),{threshold_minutes:30,time_basis:'elapsed',on_time:1,overdue:2,pending:1,missing_start:1});
+  const {p50_minutes,p90_minutes,...timeliness}=await sla();
+  assert.deepEqual(timeliness,{threshold_minutes:30,time_basis:'elapsed',measured:2,on_time:1,overdue:2,pending:1,missing_start:1});
+  assert.ok(Math.abs(p50_minutes-(30+0.5/60))<1e-9);
+  assert.ok(Math.abs(p90_minutes-(30+0.9/60))<1e-9);
   assert.equal((await sla(M,{owner_id:B})).overdue,1);
   assert.equal((await sla(A,{owner_id:B})).overdue,0);
   const connection=async(...args)=>(await report(...args)).connection_24h;
@@ -546,7 +549,45 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.deepEqual(await connection(),{eligible:3,connected:1,observing:1,missing_start:1,rate:1/3});
   assert.equal((await connection(A,{owner_id:B})).rate,null);
   assert.equal((await connection(M,{owner_id:B})).rate,0);
+  await event(onTime,'ENROLLMENT_SUCCESS','2024-10-04T00:30:00+08:00');
+  await event(onTime,'ENROLLMENT_SUCCESS','2024-10-05T00:30:00+08:00');
+  await event(onTime,'CLOSED_WON','2024-10-04T03:30:00+08:00');
+  assert.deepEqual((await report()).conversion_cycle,{
+   enrollment:{samples:1,p50_hours:2},won:{samples:1,p50_hours:5},
+  });
+  const review=good(await w('/metrics/drilldown?'+new URLSearchParams({
+   metric:'missing_next',view_mode:'cohort',start_at:start,end_at:end,page_size:2,
+  })));
+  assert.equal(review.total,(await report()).counts.missing_next);
+  assert.equal(review.items.length,2);
+  const privateReview=good(await w('/metrics/drilldown?metric=missing_next&owner_id='+B));
+  assert.equal(privateReview.total,0);
 
+
+ });
+ await t.test('appointment recovery uses same-record history or a linked replacement after no-show',async()=>{
+  const lead=good(await w('',{contact_name:'预约恢复验收',contact_info:'13900000060',student_name:'恢复验收学生',
+   origin_group:'sales',source:'到店',next:next(1),
+  })).lead_id;
+  const metrics=async()=>good(await w('/metrics',undefined,A)).appointment_recovery;
+  const before=await metrics();
+  const act=async(action,body)=>{
+   const detail=good(await w('/'+lead));
+   return good(await w('/'+lead+'/'+action,{expected_version:detail.workflow.version,...body}));
+  };
+  const ap=days=>({type:'meeting',due_at:next(days).due_at});
+  const original=(await act('appointment',{appointment:ap(-1)})).workflow.primary_activity_id;
+  const replacement=(await act('activity',{record_id:original,transition:'no_show',feedback:'未到场后明确另约',
+   next:{appointment:ap(3)},
+  })).workflow.primary_activity_id;
+  await act('activity',{record_id:replacement,transition:'reschedule',due_at:next(4).due_at,reason:'家长确认改期'});
+  await act('activity',{record_id:replacement,transition:'completed',feedback:'已实际面谈',next:next(5)});
+  const unlinked=(await act('appointment',{appointment:ap(-2)})).workflow.primary_activity_id;
+  await act('activity',{record_id:unlinked,transition:'no_show',feedback:'未到场尚未重新预约',next:next(6)});
+  const after=await metrics();
+  for(const key of ['rescheduled','completed','no_show_linked','no_show_missing_link','no_show_recovered']){
+   assert.equal(after[key],before[key]+1,key);
+  }
  });
  await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
   const drill='/metrics/drilldown?metric=leads';
@@ -561,7 +602,35 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   const students='/metrics/drilldown?metric=students';
   assert.equal(good(await w(students,undefined,G)).total,good(await w('/metrics',undefined,G)).counts.students);
   assert.equal((await w(students,undefined,F)).status,403);
-  await pool.query('UPDATE ms.user_role_grants SET revoked_at=now() WHERE user_id=$1',[G]);
+  let revoked=false;
+  const gatedPool={
+   async connect(){
+    const client=await pool.connect();
+    return {
+     async query(sql,params){
+      const result=await client.query(sql,params);
+      if(!revoked&&sql.includes('WITH matching AS')&&sql.includes('page_rows')){
+       await pool.query('UPDATE ms.user_role_grants SET revoked_at=now() WHERE user_id=$1',[G]);
+       revoked=true;
+      }
+      return result;
+     },
+     release:()=>client.release(),
+    };
+   },
+  };
+  const revocationApp=createApp(gatedPool,{secret,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});
+  await new Promise(resolve=>revocationApp.listen(0,'127.0.0.1',resolve));
+  try{
+   const response=await fetch('http://127.0.0.1:'+revocationApp.address().port+root+drill,{
+    headers:{authorization:'Bearer '+demoToken({id:G,organization_id:org},secret,'market-sales-test-issuer')},
+   });
+   assert.equal(revoked,true);
+   assert.equal(response.status,403);
+   assert.equal((await response.json()).data,undefined);
+  }finally{
+   await new Promise(resolve=>revocationApp.close(resolve));
+  }
   assert.equal((await w(drill,undefined,G)).status,403);
   assert.equal((await w(students,undefined,G)).status,403);
  });

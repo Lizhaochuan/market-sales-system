@@ -1,7 +1,7 @@
 import {workspaceAccess,departmentRoute,prepareSalesIntake,phoneNumber,lockPhone,salesAssignee} from './role-workspaces.mjs';
 // V3.4 standalone sales workflow. Reuses Lead, workspace records/history and the
 // existing financial ledger. No CRM client, external sync or messaging exists here.
-import {fail,sameOrgStaff,ownsStudent} from './auth.mjs';
+import {fail,sameOrgStaff,ownsStudent,staffContext} from './auth.mjs';
 import {leadDesk} from './lead-desk.mjs';
 const flags={hold_active:true,release_eligible:false,external_authority_verified:false,scope:'ISOLATED_STANDALONE_SALES'};
 const pairs=a=>a.map(([id,label])=>({id,label}));
@@ -71,12 +71,20 @@ async function validateStage(c,l,stage){
 function evidence(b){const ref=text(b.evidence_ref,500);if(!b.attachment)return {evidence_ref:ref};const a=b.attachment;fields(a,['name','mime','base64']);const name=text(a.name,120),mime=a.mime;if(!['image/png','image/jpeg','application/pdf'].includes(mime)||typeof a.base64!=='string'||!/^[A-Za-z0-9+/]+={0,2}$/.test(a.base64))fail(422,'VALIDATION_ERROR','仅支持 PNG、JPEG、PDF 凭证');const bytes=Buffer.from(a.base64,'base64');if(bytes.length>1_048_576||bytes.length<4)fail(422,'VALIDATION_ERROR','凭证须小于1MB');const valid=mime==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):mime==='image/jpeg'?bytes[0]===255&&bytes[1]===216:bytes.subarray(0,5).toString()==='%PDF-';if(!valid)fail(422,'VALIDATION_ERROR','凭证格式与文件内容不符');return {evidence_ref:ref,attachment:{name,mime,base64:a.base64}};}
 async function enrollmentState(c,ctx,l,r){const o=(await c.query('SELECT * FROM ms.sales_orders WHERE id=$1 FOR UPDATE',[r.body.order_id])).rows[0];const pending=(await c.query("SELECT COALESCE(sum((p.body->>'amount_cents')::bigint-COALESCE((SELECT sum((r.body->>'amount_cents')::bigint) FROM ms_workspace.records r WHERE r.kind='refunds' AND r.state='verified' AND r.body->>'payment_id'=p.id::text),0)),0)::text AS n FROM ms_workspace.records p WHERE p.kind='payments' AND p.state='verified' AND p.body->>'enrollment_id'=$1 AND COALESCE(p.body->>'allocated','false')='false'",[r.id])).rows[0];const net=Number(o.net_allocated_cents)+Number(pending.n),due=Number(o.amount_due_cents);const state=r.state==='cancelled'?'cancelled':r.body.agreement_confirmed&&net>0?'successful':r.body.agreement_confirmed?'awaiting_payment':'awaiting_agreement';const first=state==='successful'&&!r.body.first_success_at;await c.query('UPDATE ms.sales_orders SET payment_state=$2,version=version+1,updated_at=now() WHERE id=$1',[o.id,Number(o.net_allocated_cents)===0?'unpaid':Number(o.net_allocated_cents)===due?'fully_paid':'partially_paid']);const body={...r.body,unallocated_verified_cents:Number(pending.n),net_cents:net,balance_cents:due-net,payment_state:net===0?'unpaid':net===due?'settled':'partially_paid',...(first?{first_success_at:new Date().toISOString()}:{} )};const n=await update(c,ctx,r,state,body);if(first)await audit(c,ctx,l,'ENROLLMENT_SUCCESS',{enrollment_id:r.id,student_id:r.student_id,order_id:o.id,amount_cents:net});return n;}
 async function financialQueue(c,ctx){if(!isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','仅授权核实员或主管可查看核实队列');const r=await c.query(`SELECT r.*,w.version AS workflow_version,s.display_name AS student_name FROM ms_workspace.records r JOIN ms.leads l ON l.id=r.lead_id JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms.students s ON s.id=r.student_id WHERE l.organization_id=$1 AND r.kind IN('payments','refunds') AND r.state IN('pending','approved') ORDER BY r.created_at`,[ctx.user.organization_id]);return {...flags,items:r.rows,can_verify:isFinance(ctx)};}
+async function recheckMetricsAccess(c,ctx,result){
+ const latest=await staffContext(c,{staffId:ctx.user.id,orgId:ctx.user.organization_id});
+ const before=new Set(ctx.roles),after=new Set(latest.roles);
+ if(before.size!==after.size||[...before].some(role=>!after.has(role))){
+  fail(403,'FORBIDDEN','统计权限已变化，请重新打开驾驶舱');
+ }
+ return result;
+}
 export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  const [,id,action]=parts,org=ctx.user.organization_id,actor=ctx.user.id;
  if(id==='market-metrics'){
   if(!ctx.roleWorkspaces||!workspaceAccess(ctx).market_manager)fail(403,'DEPARTMENT_FORBIDDEN','仅市场主管或总管理者可查看市场统计');
   if(method!=='GET'||(action&&action!=='drilldown'))fail(404,'NOT_FOUND','未找到市场统计入口');
-  return marketMetrics(c,ctx,query,action==='drilldown');
+  return recheckMetricsAccess(c,ctx,await marketMetrics(c,ctx,query,action==='drilldown'));
  }
  if(ctx.roleWorkspaces&&id!=='options'){const r=await departmentRoute(c,ctx,{method,parts,body},{activity,audit,auditWorkflow,initialCommunication});if(r.handled)return {...flags,...r.value};}
  if(method==='GET'&&id==='options')return {...flags,...(ctx.roleWorkspaces?{access:workspaceAccess(ctx)}:{}),methods,stages,actions,classrooms:[],failure_reasons:reasons,can_verify:isFinance(ctx),manager:ctx.manager,catalog:ctx.roleWorkspaces&&!workspaceAccess(ctx).sales?[]:(await c.query("SELECT id,version,body FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND state='active' ORDER BY body->>'course_label'",[org])).rows};
@@ -84,8 +92,8 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  if(method==='GET'&&id==='finance')return financialQueue(c,ctx);
  if(method==='GET'&&id==='metrics'){
   if(isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','收款核实员不可访问销售统计');
-  if(action==='drilldown')return metricsDrilldown(c,ctx,query);
-  if(!action)return metrics(c,ctx,query);
+  if(action==='drilldown')return recheckMetricsAccess(c,ctx,await metricsDrilldown(c,ctx,query));
+  if(!action)return recheckMetricsAccess(c,ctx,await metrics(c,ctx,query));
   fail(404,'NOT_FOUND','没有找到统计入口');
  }
  if(method==='GET'&&!id)return listing(c,ctx,query);
@@ -635,7 +643,10 @@ async function communicationMetrics(c,ctx,scope){
      AND NULLIF(a.after_business_json->>'method','') IS NOT NULL
    ) first ON true
   )
-  SELECT count(*) FILTER (WHERE responded_at<=started_at+interval '30 minutes')::int AS on_time,
+  SELECT count(responded_at)::int AS measured,
+   percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM responded_at-started_at)/60) AS p50_minutes,
+   percentile_cont(0.9) WITHIN GROUP (ORDER BY extract(epoch FROM responded_at-started_at)/60) AS p90_minutes,
+   count(*) FILTER (WHERE responded_at<=started_at+interval '30 minutes')::int AS on_time,
    count(*) FILTER (WHERE started_at IS NOT NULL AND (
     responded_at>started_at+interval '30 minutes'
     OR (responded_at IS NULL AND now()>=started_at+interval '30 minutes')
@@ -728,12 +739,134 @@ async function salesPathDrilldown(c,ctx,scope,metric,page,pageSize){
   FROM page_rows`,params)).rows[0];
  return {...flags,metric,filters:scope,page,page_size:pageSize,...result};
 }
+const reviewPredicates={
+ missing_next:"w.lead_id IS NULL AND l.lead_state NOT IN ('closed','invalid')",
+ unassigned_leads:"COALESCE(w.terminal_state,CASE WHEN l.lead_state IN ('closed','invalid') THEN 'legacy_closed' ELSE 'open' END)='open' AND (l.owner_user_id IS NULL OR owner.status IS DISTINCT FROM 'active')",
+ stale_open_leads:"COALESCE(w.terminal_state,CASE WHEN l.lead_state IN ('closed','invalid') THEN 'legacy_closed' ELSE 'open' END)='open' AND COALESCE(w.updated_at,l.created_at)<now()-interval '336 hours'",
+ overdue_primary_leads:`w.terminal_state='open' AND CASE
+  WHEN pg_input_is_valid(primary_task.body->>'due_at','timestamptz') THEN (primary_task.body->>'due_at')::timestamptz<now()
+  ELSE false END`,
+ continuous_failed_leads:`w.terminal_state='open' AND (
+  SELECT count(*)=2 AND bool_and(result='failed')
+  FROM (
+   SELECT a.after_business_json->>'result' AS result FROM ms.audit_events a
+   WHERE a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='V34_COMMUNICATION'
+   ORDER BY a.happened_at DESC,a.id DESC LIMIT 2
+  ) recent
+ )`,
+};
+function reviewFacts(ctx,scope){
+ const {where,params}=salesLeadScope(ctx,scope);
+ return {params,sql:`
+  WITH review_facts AS (
+   SELECT l.id,l.contact_id,l.owner_user_id,l.created_at,
+    ${Object.entries(reviewPredicates).map(([name,where])=>`(${where}) AS ${name}`).join(',')},
+    (w.terminal_state='lost') AS currently_lost,loss.reason,loss.recorded_at
+   FROM ms.leads l
+   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id AND w.organization_id=l.organization_id
+   LEFT JOIN ms_workspace.records primary_task ON primary_task.id=w.primary_activity_id AND primary_task.organization_id=l.organization_id
+   LEFT JOIN ms.staff_users owner ON owner.id=l.owner_user_id AND owner.organization_id=l.organization_id
+   LEFT JOIN LATERAL (
+    SELECT btrim(a.after_business_json->>'reason') AS reason,a.happened_at AS recorded_at
+    FROM ms.audit_events a
+    WHERE w.terminal_state='lost' AND a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id
+     AND a.event_name='V34_CLOSED_LOST' AND NULLIF(btrim(a.after_business_json->>'reason'),'') IS NOT NULL
+    ORDER BY CASE WHEN jsonb_typeof(a.after_business_json->'workflow_version')='number'
+      THEN (a.after_business_json->>'workflow_version')::numeric ELSE 0 END DESC,a.happened_at DESC,a.id DESC LIMIT 1
+   ) loss ON true
+   WHERE ${where}
+  )`};
+}
+async function appointmentRecovery(c,ctx,scope){
+ const {where,params}=salesLeadScope(ctx,scope);
+ const {rows:[result]}=await c.query(`
+  WITH appointments AS (
+   SELECT r.id,r.lead_id,r.organization_id,r.student_id,r.body->>'type' AS type
+   FROM ms.leads l JOIN ms_workspace.records r ON r.lead_id=l.id AND r.organization_id=l.organization_id
+   WHERE ${where} AND r.kind='appointments'
+  ), rescheduled AS (
+   SELECT r.id,min(h.version) AS version
+   FROM appointments r JOIN ms_workspace.history h ON h.record_id=r.id AND h.state='rescheduled'
+   GROUP BY r.id
+  ), missed AS (
+   SELECT r.id,replacement.id AS replacement_id,replacement.recorded_at
+   FROM appointments r
+   LEFT JOIN LATERAL (
+    SELECT n.id,a.happened_at AS recorded_at FROM ms.audit_events a
+    JOIN appointments n ON n.id::text=a.after_business_json->>'primary_activity_id'
+     AND n.lead_id=r.lead_id AND n.id<>r.id AND n.type=r.type AND n.student_id=r.student_id
+    WHERE a.organization_id=r.organization_id AND a.target_id=r.lead_id AND a.target_type='lead'
+     AND a.event_name='V34_ACTIVITY_NO_SHOW' AND a.after_business_json->>'record_id'=r.id::text
+    ORDER BY a.happened_at,a.id LIMIT 1
+   ) replacement ON true
+   WHERE EXISTS(SELECT 1 FROM ms_workspace.history h WHERE h.record_id=r.id AND h.state='no_show')
+  )
+  SELECT count(*)::int AS rescheduled,count(*) FILTER (WHERE EXISTS (
+   SELECT 1 FROM ms_workspace.history h WHERE h.record_id=r.id AND h.version>r.version AND h.state='completed'
+  ))::int AS completed,
+  (SELECT count(*)::int FROM missed WHERE replacement_id IS NOT NULL) AS no_show_linked,
+  (SELECT count(*)::int FROM missed WHERE replacement_id IS NULL) AS no_show_missing_link,
+  (SELECT count(*)::int FROM missed m WHERE EXISTS (
+   SELECT 1 FROM ms_workspace.history h WHERE h.record_id=m.replacement_id AND h.state='completed' AND h.recorded_at>=m.recorded_at
+  )) AS no_show_recovered
+  FROM rescheduled r`,params);
+ return result;
+}
+function conversionCycle(events){
+ const starts=new Map(),enrolled=new Map(),won=new Map();
+ for(const event of events){
+  const timestamp=Date.parse(event.happened_at);
+  if(!Number.isFinite(timestamp))continue;
+  const id=event.target_id;
+  if(['V34_INTAKE','V34_MARKET_HANDOFF_ACCEPTED'].includes(event.event_name)&&!starts.has(id))starts.set(id,timestamp);
+  const target=event.event_name==='V34_ENROLLMENT_SUCCESS'?enrolled:event.event_name==='V34_CLOSED_WON'?won:null;
+  if(target&&!target.has(id)&&timestamp>=starts.get(id))target.set(id,timestamp);
+ }
+ function median(values){
+  const hours=[...values].map(([id,at])=>(at-starts.get(id))/3600000).sort((a,b)=>a-b);
+  const middle=(hours.length-1)/2;
+  return {samples:hours.length,p50_hours:hours.length?(hours[Math.floor(middle)]+hours[Math.ceil(middle)])/2:null};
+ }
+ return {enrollment:median(enrolled),won:median(won)};
+}
+async function reviewCounts(c,ctx,scope){
+ const {sql,params}=reviewFacts(ctx,scope);
+ const {rows:[counts]}=await c.query(`${sql}
+  SELECT ${Object.keys(reviewPredicates).map(name=>`count(*) FILTER (WHERE ${name})::int AS ${name}`).join(',')},
+   COALESCE((SELECT jsonb_object_agg(reason,total) FROM (
+    SELECT reason,count(*)::int AS total FROM review_facts WHERE currently_lost AND reason IS NOT NULL GROUP BY reason
+   ) reasons),'{}'::jsonb) AS current_lost_reasons FROM review_facts`,params);
+ return counts;
+}
+async function reviewDrilldown(c,ctx,scope,metric,page,pageSize,reason){
+ const {sql,params}=reviewFacts(ctx,scope);
+ const loss=metric==='current_lost_reason';
+ const criterion=loss?`currently_lost AND reason=$${params.push(reason)}`:metric;
+ const limit=params.push(pageSize),offset=params.push((page-1)*pageSize);
+ const {rows:[result]}=await c.query(`${sql}, matching AS (
+   SELECT * FROM review_facts WHERE ${criterion}
+  ), page_rows AS (
+   SELECT m.id,m.created_at,m.recorded_at,c.display_name AS contact_name,u.display_name AS owner_name
+   FROM (SELECT * FROM matching ORDER BY created_at DESC,id LIMIT $${limit} OFFSET $${offset}) m
+   LEFT JOIN ms.contacts c ON c.id=m.contact_id AND c.organization_id=$1
+   LEFT JOIN ms.staff_users u ON u.id=m.owner_user_id AND u.organization_id=$1
+  )
+  SELECT (SELECT count(*)::int FROM matching) AS total,
+    COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY created_at DESC,id),'[]'::jsonb) AS items FROM page_rows`,params);
+ return {...flags,metric,filters:scope,page,page_size:pageSize,...result};
+}
 async function metricsDrilldown(c,ctx,query={}){
- const {metric,page='1',page_size='20',...filters}=query;
+ const {metric,page='1',page_size='20',reason,...filters}=query;
  if(!/^[1-9]\d{0,5}$/.test(page)||!/^[1-9]\d?$/.test(page_size)||Number(page_size)>50){
   fail(422,'VALIDATION_ERROR','请选择有效页码，每页最多 50 条');
  }
  const scope=metricsScope(filters);
+ const reviewMetric=metric==='current_lost_reason'||Object.hasOwn(reviewPredicates,metric);
+ if(reason!==undefined&&metric!=='current_lost_reason')fail(422,'VALIDATION_ERROR','该明细不支持失单原因筛选');
+ if(reviewMetric){
+  if(!['current','cohort'].includes(scope.view_mode))fail(422,'VALIDATION_ERROR','该明细仅支持当前或建档口径');
+  return reviewDrilldown(c,ctx,scope,metric,Number(page),Number(page_size),metric==='current_lost_reason'?text(reason,1000):null);
+ }
  if(scope.view_mode!=='snapshot'&&salesPathMetricKeys.includes(metric))return salesPathDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
  if(scope.view_mode==='event')return eventMetricsDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
  if(scope.view_mode==='snapshot')return snapshotDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
@@ -1134,18 +1267,16 @@ async function metrics(c,ctx,query){
   trial_booked_students:apStudents(appointments.filter(r=>r.body.type==='trial'&&!['pending','cancelled'].includes(r.state))),trial_completed_students:apStudents(appointments.filter(r=>r.body.type==='trial'&&r.state==='completed')),
   enrollment_intent_students:unique(list.items.filter(l=>l.stage==='enrollment_intent')),enrollment_success_orders:successful.length,enrollment_success_students:apStudents(successful),historical_enrollment_success_orders:new Set(everSuccessful.map(r=>r.body.order_id??r.id)).size,historical_enrollment_success_students:apStudents(everSuccessful),settled_orders:enroll.filter(r=>r.state==='successful'&&r.body.balance_cents===0).length,
   received_cents:enroll.reduce((n,r)=>n+(r.body.net_cents||0),0),unsettled_cents:enroll.filter(r=>r.state!=='cancelled').reduce((n,r)=>n+(r.body.balance_cents??r.body.amount_cents??0),0),won_leads:list.items.filter(l=>l.terminal_state==='won').length,lost_leads:list.items.filter(l=>l.terminal_state==='lost').length,
-  due_today:pending.filter(r=>r.body.due_at&&day(r.body.due_at)===today).length,completed_today:completed.filter(r=>(r.body.completed_at||r.body.finished_at)&&day(r.body.completed_at||r.body.finished_at)===today).length,overdue:overdueActivities.length,overdue_activities:overdueActivities.length,overdue_primary_leads:list.items.filter(hasOverduePrimary).length,missing_next:list.items.filter(l=>l.needs_arrangement).length,continuous_failed_leads:list.items.filter(l=>l.terminal_state==='open'&&failureStreak(l)>=2).length,stale_open_leads:list.items.filter(l=>l.terminal_state==='open'&&Date.parse(l.updated_at||l.created_at)<now-14*86400000).length,paused_leads:list.items.filter(l=>l.stage==='paused'&&l.terminal_state==='open').length,
-  appointment_result_due:appointments.filter(r=>active(r)&&Date.parse(r.body.due_at)<now).length,unassigned_leads:list.items.filter(l=>l.needs_assignment&&l.terminal_state==='open').length,pending_transfer:records.filter(r=>r.kind==='corrections'&&r.body.type==='lead_transfer'&&['pending','approved'].includes(r.state)).length};
+  due_today:pending.filter(r=>r.body.due_at&&day(r.body.due_at)===today).length,completed_today:completed.filter(r=>(r.body.completed_at||r.body.finished_at)&&day(r.body.completed_at||r.body.finished_at)===today).length,overdue:overdueActivities.length,overdue_activities:overdueActivities.length,paused_leads:list.items.filter(l=>l.stage==='paused'&&l.terminal_state==='open').length,
+  appointment_result_due:appointments.filter(r=>active(r)&&Date.parse(r.body.due_at)<now).length,pending_transfer:records.filter(r=>r.kind==='corrections'&&r.body.type==='lead_transfer'&&['pending','approved'].includes(r.state)).length};
  const meetingSet=new Set(appointments.filter(r=>r.body.type==='meeting'&&r.body.actual_attendance==='attended').flatMap(r=>r.body.student_ids??(r.student_id?[r.student_id]:[]))),trialSet=new Set(appointments.filter(r=>r.body.type==='trial'&&r.state==='completed').map(r=>r.student_id));count.meeting_to_enrollment_students=apStudents(successful.filter(r=>meetingSet.has(r.student_id)&&appointments.some(a=>(a.student_id===r.student_id||a.body.student_ids?.includes(r.student_id))&&a.body.type==='meeting'&&a.state==='completed'&&Date.parse(a.body.finished_at)<=Date.parse(r.body.first_success_at))));count.trial_to_enrollment_students=apStudents(successful.filter(r=>trialSet.has(r.student_id)&&appointments.some(a=>(a.student_id===r.student_id||a.body.student_ids?.includes(r.student_id))&&a.body.type==='trial'&&a.state==='completed'&&Date.parse(a.body.finished_at)<=Date.parse(r.body.first_success_at))));
- const lostReasonHistory=new Map(),latestLossByLead=new Map();
+ const lostReasonHistory=new Map();
  for(const event of events){
   if(event.event_name!=='V34_CLOSED_LOST')continue;
-  const {reason,workflow_version:version}=event.after_business_json;
+  const {reason}=event.after_business_json??{};
   if(typeof reason!=='string'||!reason.trim())continue;
   lostReasonHistory.set(reason,(lostReasonHistory.get(reason)??0)+1);
-  const previous=latestLossByLead.get(event.target_id);
-  // Workflow versions break timestamp ties and follow the lead's transition order.
-  if(!previous||(version??0)>=previous.version)latestLossByLead.set(event.target_id,{reason,version:version??0});
+
  }
  const sources=new Map();
  for(const lead of list.items){
@@ -1156,12 +1287,10 @@ async function metrics(c,ctx,query){
   row[lead.terminal_state]++;
  }
  const bySource=[...sources.values()].sort((a,b)=>b.leads-a.leads||a.source.localeCompare(b.source,'zh-CN'));
- const currentLostReasons=new Map();
- for(const lead of list.items){
-  if(lead.terminal_state!=='lost')continue;
-  const loss=latestLossByLead.get(lead.id);
-  if(loss)currentLostReasons.set(loss.reason,(currentLostReasons.get(loss.reason)??0)+1);
- }
+ const {current_lost_reasons,...review}=await reviewCounts(c,ctx,scope);
+ const appointment_recovery=await appointmentRecovery(c,ctx,scope);
+ const conversion_cycle=conversionCycle(events);
+ Object.assign(count,review);
  const pending_approvals=ctx.manager?[
   ...records.filter(r=>r.kind==='quotes'&&r.state==='draft'&&r.body.discount_state==='pending'&&leadBy(r.lead_id)?.terminal_state==='open').map(r=>({id:r.id,lead_id:r.lead_id,kind:'discount',title:'优惠/非标课程方案待审批',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.quoted_by!==ctx.user.id})),
   ...enroll.filter(r=>r.state!=='cancelled'&&!r.body.agreement_confirmed).map(r=>({id:r.id,lead_id:r.lead_id,kind:'agreement',title:'报名协议待独立核实',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.submitted_by!==ctx.user.id})),
@@ -1186,5 +1315,5 @@ async function metrics(c,ctx,query){
   const eligibleOwners=new Set(list.staff.map(staff=>staff.id));
   supervision.arrangement_supervision.candidates=list.items.filter(l=>l.needs_arrangement&&eligibleOwners.has(l.owner_user_id)).map(l=>l.id);
  }
- return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,...communication,...supervision,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,version:r.version,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,appointment_recovery,conversion_cycle,...communication,...supervision,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons,pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,version:r.version,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
 }

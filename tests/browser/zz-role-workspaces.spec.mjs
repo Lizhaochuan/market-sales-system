@@ -1041,6 +1041,15 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await expect(count).toHaveText('2');
  const activityCounts=panel.locator('#v34-activity-counts');
  await expect(activityCounts).toContainText('沟通记录 1 次 · 预约记录 2 项 · 已完成活动 1 项');
+ const exceptions=panel.locator('#v34-exception-review');
+ await expect(exceptions.getByRole('heading',{name:'销售异常'})).toBeVisible();
+ await exceptions.getByRole('button',{name:'查看待补安排明细'}).click();
+ await expect(panel.locator('#v34-metrics-missing_next')).toContainText('共 0 条线索');
+ await panel.getByRole('button',{name:'查看价格原因失单明细'}).click();
+ const lossEvidence=panel.locator('#v34-metrics-current_lost_reason');
+ await expect(lossEvidence).toContainText('窗口第二位顾问测试家长');
+ await expect(lossEvidence).not.toContainText('窗口首位顾问测试家长');
+ await expect(panel.locator('#v34-advisor-comparison').getByRole('table')).toBeVisible();
  const channels=panel.locator('#v34-metrics-sources');
  await expect(channels).toContainText('待配置成本源');
  await expect(channels.locator('article').filter({hasText:'网络咨询'})).toContainText('当前失单 1 条');

@@ -190,6 +190,12 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    for(const reason of [firstReason,latestReason]){
     assert.equal(count(lostAgain,'lost_reasons',reason),count(before,'lost_reasons',reason)+1);
    }
+   const byReason=async(reason,user=A)=>good(await req('/metrics/drilldown?'+new URLSearchParams({metric:'current_lost_reason',reason}),undefined,user));
+   const recent=await byReason(latestReason);
+   assert.equal(recent.total,lostAgain.current_lost_reasons[latestReason]);
+   assert.ok(recent.items.some(item=>item.id===lead&&item.recorded_at));
+   assert.ok(!(await byReason(firstReason)).items.some(item=>item.id===lead));
+   assert.ok(!(await byReason(latestReason,B)).items.some(item=>item.id===lead));
    const closedAgainDrill=await drill();
    assert.equal(closedAgainDrill.total,lostAgain.counts.lost_leads);
    assert.equal(closedAgainDrill.items.filter(item=>item.id===lead).length,1);
