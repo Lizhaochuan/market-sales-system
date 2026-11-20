@@ -33,6 +33,38 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal((await detail(id)).workflow.terminal_state,'open');const m=good(await req('/metrics'));assert.ok(m.counts.overdue>=1);assert.equal(m.counts.waiting_leads,1);
    assert.equal((await act(id,'followup',{method:'wechat_text',result:'failed',failure_reason:'无人接听',next:next()})).status,422);
   });
+  await t.test('metrics separates overdue activities from leads with an overdue primary activity',async()=>{
+   const metrics=async(user)=>good(await req('/metrics',undefined,user));
+   const before=await metrics(A);
+   const otherBefore=await metrics(B);
+   const lead=await create();
+   for(const days of [-2,-1]){
+    good(await act(lead,'appointment',{appointment:{type:'meeting',due_at:when(days)}}));
+   }
+   const overdue=await metrics(A);
+   assert.equal(overdue.counts.overdue_activities,before.counts.overdue_activities+2);
+   assert.equal(overdue.counts.overdue_primary_leads,before.counts.overdue_primary_leads+1);
+   assert.equal(overdue.counts.overdue,overdue.counts.overdue_activities);
+
+   good(await req('',{contact_name:'另一顾问逾期回归',student_name:'另一顾问学生',origin_group:'sales',source:'主动咨询',next:next({due_at:when(-1)})},B));
+   const other=await metrics(B);
+   assert.equal(other.counts.overdue_activities,otherBefore.counts.overdue_activities+1);
+   assert.equal(other.counts.overdue_primary_leads,otherBefore.counts.overdue_primary_leads+1);
+   const team=await metrics(M);
+   for(const key of ['overdue_activities','overdue_primary_leads']){
+    assert.equal(team.counts[key],team.by_owner.reduce((sum,owner)=>sum+owner[key],0),key);
+    assert.equal(team.by_owner.find(owner=>owner.owner_id===A)[key],overdue.counts[key],key);
+    assert.equal(team.by_owner.find(owner=>owner.owner_id===B)[key],other.counts[key],key);
+   }
+   assert.equal(team.by_owner.find(owner=>owner.owner_id===A).overdue,overdue.counts.overdue_primary_leads);
+
+   const {workflow}=await detail(lead);
+   good(await act(lead,'activity',{record_id:workflow.primary_activity_id,transition:'reschedule',due_at:when(1),reason:'家长改约'}));
+   const rescheduled=await metrics(A);
+   assert.equal(rescheduled.counts.overdue_activities,before.counts.overdue_activities+1);
+   assert.equal(rescheduled.counts.overdue_primary_leads,before.counts.overdue_primary_leads);
+   assert.equal(rescheduled.reminders.filter(r=>r.lead_id===lead&&r.overdue).length,1);
+  });
   await t.test('TC06/08: unscheduled/rejected invitation requires another real action and never auto loses',async()=>{
    for(const result of ['agreed_unscheduled','declined'])good(await act(id,'followup',{method:'phone',result:'communicated',purpose:'invite',invite_result:result,stage:'needs_confirmed',next:next({action:'confirm_visit'})}));
    assert.equal((await detail(id)).workflow.terminal_state,'open');assert.equal((await detail(id)).records.filter(r=>r.kind==='appointments').length,0);
