@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import pg f
 test('Role workspaces: phone handoff, department privacy and persistent dated tasks',async t=>{
  process.env.MS_STAGE='isolated-test';const pool=new pg.Pool({connectionString:process.env.DATABASE_URL}),org=randomUUID(),A=randomUUID(),B=randomUUID(),M=randomUUID(),K=randomUUID(),K2=randomUUID(),KM=randomUUID(),G=randomUUID(),F=randomUUID();const secret='fictional-role-workspaces-test-key-2026';let app;
  try{
- for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
+ for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql'],[40,'045_appointment_supervision_evidence.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
  await pool.query("INSERT INTO ms.organizations(id,name) VALUES($1,'虚构部门验收机构')",[org]);
  for(const [id,name]of[[A,'销售A'],[B,'销售B'],[M,'销售主管'],[K,'市场A'],[K2,'市场B'],[KM,'市场主管'],[G,'总管理者'],[F,'收款核实员']])await pool.query('INSERT INTO ms.staff_users(id,organization_id,display_name) VALUES($1,$2,$3)',[id,org,name]);
  for(const [role,users]of[['sales_staff',[A,B]],['sales_manager',[M]],['marketing_staff',[K,K2]],['marketing_manager',[KM]],['super_admin',[G]],['finance_verifier',[F]]]){const r=(await pool.query('INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,$2,$2) RETURNING id',[org,role])).rows[0];for(const u of users)await pool.query('INSERT INTO ms.user_role_grants(user_id,role_id,granted_by) VALUES($1,$2,$3)',[u,r.id,G]);}
@@ -419,6 +419,54 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal(evidence.primary_activity_id,closed.activity_id);
   assert.ok(!(await status(M)).candidates.includes(leadId));
   assert.equal((await issue(leadId)).code,'ARRANGEMENT_SUPERVISION_INELIGIBLE');
+ });
+ await t.test('transfer supervision respects independent approval and does not resolve an unchanged appointment',async()=>{
+  const intake=good(await w('',{contact_name:'转交督办家长',student_name:'转交督办学生',
+   contact_info:'13900000057',origin_group:'sales',source:'到店',next:next(1),
+  }));
+  const id=intake.lead_id;
+  const detail=async(user=M)=>good(await w('/'+id,undefined,user));
+  const act=async(action,body,user)=>w('/'+id+'/'+action,{expected_version:(await detail()).workflow.version,...body},user);
+  const start=good(await act('appointment',{appointment:{type:'meeting',due_at:next(-2).due_at}},A));
+  const appointment=start.workflow.primary_activity_id;
+  good(await act('activity',{record_id:appointment,transition:'reschedule',due_at:next(-1).due_at,reason:'原预约已改期'},A));
+  const before=(await detail()).records.find(r=>r.id===appointment);
+  const deadline=next(2).due_at;
+  const reminder=good(await w('/'+id+'/supervise-appointment',{appointment_id:appointment,appointment_version:before.version,due_at:deadline,reason:'核实过期预约'},M)).item;
+  const payload={owner_user_id:B,due_at:deadline,reason:'主管转交督办'};
+  const metrics=async(user=M)=>good(await w('/metrics',undefined,user));
+  const tracked=async(request)=>(await metrics()).transfer_supervision.items.find(item=>item.id===request);
+  assert.equal((await act('supervise-transfer',payload,A)).status,403);
+  assert.equal((await act('supervise-transfer',payload,KM)).status,403);
+  assert.equal((await act('supervise-transfer',{...payload,owner_user_id:A},M)).code,'TRANSFER_SAME_OWNER');
+  assert.equal((await act('supervise-transfer',{...payload,owner_user_id:F},M)).code,'SALES_OWNER_REQUIRED');
+  assert.ok((await metrics()).transfer_supervision.candidates.some(l=>l.id===id));
+  good(await act('supervise-transfer',payload,M));
+  const request=(await detail()).records.find(r=>r.body.supervision_due_at===deadline);
+  assert.equal(request.body.target_owner_name,'销售B');
+  assert.equal((await tracked(request.id)).state,'pending');
+  assert.equal((await metrics(A)).transfer_supervision,null);
+  assert.equal((await act('request-transfer',{owner_user_id:B,reason:'重复提交'},M)).code,'TRANSFER_PENDING');
+  assert.equal((await act('approve-transfer',{record_id:request.id,reason:'申请人自审'},M)).status,403);
+  assert.equal((await act('accept-transfer',{record_id:request.id},B)).status,403);
+  good(await act('approve-transfer',{record_id:request.id,reason:'独立主管核对通过'},G));
+  assert.equal((await tracked(request.id)).state,'approved');
+  assert.equal((await detail()).lead.owner_user_id,A);
+  good(await act('accept-transfer',{record_id:request.id},B));
+  const accepted=await tracked(request.id);
+  assert.equal(accepted.state,'completed');
+  assert.ok(accepted.evidence_event_id);
+  assert.ok(accepted.accepted_at);
+  assert.equal((await detail(B)).lead.owner_user_id,B);
+  const copied=(await detail(B)).records.find(r=>r.id===appointment);
+  assert.equal(copied.version,before.version+1);
+  assert.equal(copied.body.due_at,before.body.due_at);
+  const evidence=async()=>((await metrics(B)).appointment_supervision.items.find(item=>item.id===reminder.id));
+  assert.equal((await evidence()).resolved_version,null);
+  assert.equal((await evidence()).owner_user_id,B);
+  good(await act('activity',{record_id:appointment,transition:'reschedule',due_at:next(4).due_at,reason:'接收人确认新日期'},B));
+  assert.equal((await evidence()).resolution_state,'rescheduled');
+  assert.equal((await evidence()).resolved_version,copied.version+1);
  });
  await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
   const drill='/metrics/drilldown?metric=leads';

@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';import pg from 'pg';import {readFile} from 'node:fs/promises';import {createApp} from '../../src/app.mjs';
 let pool,app,url;const pass='0';
-test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
+test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql'],[40,'045_appointment_supervision_evidence.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
 test.afterAll(async()=>{if(app)await new Promise(r=>app.close(r));await pool?.end();});
 async function login(page,who='sales-a'){await page.goto(url);await page.locator('#login-form [name="account_code"]').selectOption(who);await page.locator('#login-form [name="passphrase"]').fill(pass);await page.locator('#login-form').getByRole('button',{name:'进入工作台'}).click();await expect(page.locator('#sales-workflow')).toBeVisible();}
 async function lookup(page,phone){await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();await page.locator('#v35-lookup [name="phone"]').fill(phone);await page.locator('#v35-lookup [name="phone"]').press('Enter');}
@@ -1219,4 +1219,44 @@ test('Boss arrangement supervision resolves when the assigned advisor repairs th
  await login(page,'supervisor');
  await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
  await expect(row).toContainText('已销项 · 已补齐首要安排');
+});
+
+
+test('Boss transfer supervision tracks independent approval and the recipient acceptance',async({page})=>{
+ const root='/api/v1/isolated-workspace/workflow';
+ await login(page,'sales-a');
+ const result=await page.evaluate(({root,number})=>api(root,{
+  method:'POST',body:{
+   contact_name:'转交督办回归家长',student_name:'转交督办回归学生',contact_info:number,origin_group:'sales',source:'到店',
+   next:{action:'call',method:'phone',title:'转交后的跟进',due_at:new Date(Date.now()+86400000).toISOString()},
+  },
+ }),{root,number:phone()});
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ const section=page.locator('#v34-transfer-supervision');
+ const issue=section.locator('#v34-transfer-supervise');
+ await issue.locator('..').getByText('发起转交申请',{exact:true}).click();
+ await issue.getByLabel('客户',{exact:true}).selectOption(result.lead_id);
+ await issue.getByLabel('接收人').selectOption('20000000-0000-4000-8000-000000000012');
+ const reason='独立转交督办流程回归';
+ await issue.getByLabel('转交说明').fill(reason);
+ const deadline=new Date(Date.now()+86400000+8*3600000).toISOString().slice(0,16);
+ await issue.getByLabel('督办截止（上海时间）').fill(deadline);
+ await issue.getByRole('button',{name:'提交转交督办'}).click();
+ const row=section.locator('article').filter({hasText:reason});
+ await expect(row).toContainText('待独立复核');
+ await login(page,'general-admin');
+ await row.getByRole('button',{name:'打开转交申请'}).click();
+ const approval=page.locator('form[id^="approve-transfer-"]');
+ await approval.locator('..').getByText('独立复核 Lead 转交',{exact:true}).click();
+ await approval.getByLabel('复核原因').fill('独立主管核对通过');
+ await approval.getByRole('button',{name:'提交独立复核'}).click();
+ await expect(approval).toHaveCount(0);
+ await login(page,'sales-b');
+ const incoming=page.locator('#v35-handover-tasks article').filter({hasText:reason});
+ await incoming.getByRole('button',{name:'确认接手并继承全部待办'}).click();
+ await expect(incoming).toHaveCount(0);
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ await expect(row).toContainText('已销项 · 接收人已确认');
 });

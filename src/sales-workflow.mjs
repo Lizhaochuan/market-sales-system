@@ -250,8 +250,30 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  if(action==='reopen'){
   fields(body,['expected_version','evidence_ref','customer_initiated','next']);if(!ctx.manager||w.terminal_state!=='lost')fail(403,'FORBIDDEN','仅主管可重新开启已流失客户');if(w.do_not_contact&&body.customer_initiated!==true)fail(422,'NO_CONTACT','需客户主动重新咨询的依据');const ev=text(body.evidence_ref,500);w.terminal_state='open';w.stage='needs_discovery';w.do_not_contact=false;await next(c,ctx,l,w,body.next,{required:true});return bump(c,ctx,l,w,'REOPENED',{evidence_ref:ev});
  }
- if(action==='request-transfer'){
-  fields(body,['expected_version','owner_user_id','reason']);if((await c.query("SELECT 1 FROM ms_workspace.records WHERE lead_id=$1 AND kind='corrections' AND state IN('pending','approved') AND body->>'type'='lead_transfer'",[id])).rowCount)fail(409,'TRANSFER_PENDING','已有待处理转交申请');if(!ctx.manager)fail(403,'FORBIDDEN','负责人转交需要主管申请和另一主管复核');await sameOrgStaff(c,ctx,body.owner_user_id);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,body.owner_user_id);const r=await save(c,ctx,l,'corrections','pending',{type:'lead_transfer',target_owner:body.owner_user_id,target_owner_name:(await c.query('SELECT display_name FROM ms.staff_users WHERE id=$1',[body.owner_user_id])).rows[0].display_name,reason:text(body.reason),requested_by:actor,requested_by_name:ctx.user.display_name});return bump(c,ctx,l,w,'TRANSFER_REQUESTED',{request_id:r.id});
+ if(['request-transfer','supervise-transfer'].includes(action)){
+  const supervised=action==='supervise-transfer';
+  let details;
+  if(supervised){
+   await requireSupervision(c,ctx,transferSupervisionVersion,'转交申请');
+   details=supervisionDetails(body,['expected_version','owner_user_id']);
+   if(l.owner_user_id===body.owner_user_id)fail(422,'TRANSFER_SAME_OWNER','请指定不同于当前负责人的接收人');
+  }else{
+   fields(body,['expected_version','owner_user_id','reason']);
+   if(!ctx.manager)fail(403,'FORBIDDEN','负责人转交需要主管申请和另一主管复核');
+   details={reason:text(body.reason)};
+  }
+  if((await c.query("SELECT 1 FROM ms_workspace.records WHERE lead_id=$1 AND kind='corrections' AND state IN('pending','approved') AND body->>'type'='lead_transfer'",[id])).rowCount){
+   fail(409,'TRANSFER_PENDING','已有待处理转交申请');
+  }
+  await sameOrgStaff(c,ctx,body.owner_user_id);
+  if(ctx.roleWorkspaces)await salesAssignee(c,ctx,body.owner_user_id);
+  const {rows:[recipient]}=await c.query('SELECT display_name FROM ms.staff_users WHERE id=$1',[body.owner_user_id]);
+  const r=await save(c,ctx,l,'corrections','pending',{
+   type:'lead_transfer',target_owner:body.owner_user_id,target_owner_name:recipient.display_name,
+   reason:details.reason,requested_by:actor,requested_by_name:ctx.user.display_name,
+   ...(supervised?{supervision_due_at:details.deadline}:{}),
+  });
+  return bump(c,ctx,l,w,'TRANSFER_REQUESTED',{request_id:r.id,...(supervised?{supervision_due_at:details.deadline}:{})});
  }
  if(action==='approve-transfer'){
   fields(body,['expected_version','record_id','reason']);if(!ctx.manager)fail(403,'FORBIDDEN','需要独立主管复核');const r=await record(c,l,body.record_id,'corrections');if(r.body.type!=='lead_transfer'||r.state!=='pending'||[r.body.requested_by,r.body.target_owner].includes(actor))fail(403,'FORBIDDEN','复核人必须独立于申请和接收人');await sameOrgStaff(c,ctx,r.body.target_owner);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,r.body.target_owner);
@@ -265,7 +287,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
   fields(body,['expected_version','record_id']);const r=await record(c,l,body.record_id,'corrections');if(r.body.type!=='lead_transfer'||r.state!=='approved'||r.body.target_owner!==actor)fail(403,'FORBIDDEN','仅已批准的接收人可确认接手');await sameOrgStaff(c,ctx,actor);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,actor);
   await c.query('UPDATE ms.leads SET owner_user_id=$2 WHERE id=$1',[id,actor]);await c.query('UPDATE ms.opportunities SET owner_user_id=$2,version=version+1 WHERE originating_lead_id=$1',[id,actor]);
   for(const a of (await c.query('SELECT * FROM ms_workspace.records WHERE lead_id=$1 ORDER BY id FOR UPDATE',[id])).rows){if(['tasks','appointments'].includes(a.kind)){await c.query('UPDATE ms_workspace.records SET owner_user_id=$2 WHERE id=$1',[a.id,actor]);await update(c,ctx,a,a.state,{...a.body,previous_owner:l.owner_user_id,assignee_user_id:actor});}else if(a.id===r.id)await update(c,ctx,a,'completed',{...a.body,accepted_by:actor});}
-  return bump(c,ctx,l,w,'TRANSFER_ACCEPTED',{old_owner:l.owner_user_id,old_owner_name:(await c.query('SELECT display_name FROM ms.staff_users WHERE id=$1',[l.owner_user_id])).rows[0]?.display_name,new_owner:actor,new_owner_name:ctx.user.display_name});
+  return bump(c,ctx,l,w,'TRANSFER_ACCEPTED',{request_id:r.id,old_owner:l.owner_user_id,old_owner_name:(await c.query('SELECT display_name FROM ms.staff_users WHERE id=$1',[l.owner_user_id])).rows[0]?.display_name,new_owner:actor,new_owner_name:ctx.user.display_name});
  }
  if(['request-correction','approve-correction','reject-correction','submit-refund','verify-refund'].includes(action))return corrections(c,ctx,l,w,action,body);
  fail(404,'NOT_FOUND','未找到业务操作');
@@ -327,6 +349,7 @@ const supervisionTypes=new Map([
 ]);
 const canSupervise=ctx=>ctx.manager&&(!ctx.roleWorkspaces||workspaceAccess(ctx).sales_manager);
 const arrangementSupervisionVersion=39;
+const transferSupervisionVersion=40;
 async function supervisionInstalled(c,version){
  return (await c.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[version])).rowCount>0;
 }
@@ -393,7 +416,7 @@ async function issueSupervision(c,ctx,lead,workflow,body,{table,schemaVersion,ta
 async function supervisionReports(c,ctx,scope){
  const types=[...supervisionTypes.values()];
  const installed=await c.query('SELECT version FROM ms_workspace.schema_versions WHERE version=ANY($1::int[])',
-  [[...types.map(type=>type.schemaVersion),arrangementSupervisionVersion]]);
+  [[...types.map(type=>type.schemaVersion),arrangementSupervisionVersion,transferSupervisionVersion]]);
  const versions=new Set(installed.rows.map(row=>row.version));
  const {where,params}=salesLeadScope(ctx,scope);
  const reports={};
@@ -423,6 +446,24 @@ async function supervisionReports(c,ctx,scope){
    LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id AND u.organization_id=l.organization_id
    WHERE ${where} ORDER BY (a.evidence_event_id IS NULL) DESC,a.created_at DESC,a.id`,params);
   reports.arrangement_supervision={can_issue:canSupervise(ctx),items};
+ }
+ reports.transfer_supervision=null;
+ if(versions.has(transferSupervisionVersion)&&canSupervise(ctx)){
+  const {rows:items}=await c.query(`
+   SELECT r.id,r.lead_id,r.state,r.body->>'supervision_due_at' AS due_at,r.body->>'reason' AS reason,
+    r.body->>'target_owner_name' AS target_owner_name,co.display_name AS contact_name,
+    evidence.id AS evidence_event_id,evidence.happened_at AS accepted_at
+   FROM ms.leads l JOIN ms_workspace.records r ON r.lead_id=l.id AND r.organization_id=l.organization_id
+   LEFT JOIN ms.contacts co ON co.id=l.contact_id AND co.organization_id=l.organization_id
+   LEFT JOIN LATERAL (
+    SELECT e.id,e.happened_at FROM ms.audit_events e
+    WHERE e.organization_id=l.organization_id AND e.target_type='lead' AND e.target_id=l.id
+     AND e.event_name='V34_TRANSFER_ACCEPTED' AND e.after_business_json->>'request_id'=r.id::text
+    ORDER BY e.happened_at,e.id LIMIT 1
+   ) evidence ON r.state='completed'
+   WHERE ${where} AND r.kind='corrections' AND r.body->>'type'='lead_transfer' AND r.body ? 'supervision_due_at'
+   ORDER BY r.created_at DESC,r.id`,params);
+  reports.transfer_supervision={items};
  }
  return reports;
 }
@@ -992,6 +1033,12 @@ async function metrics(c,ctx,query){
  ]:[];
  const path_counts=await salesPathCounts(c,ctx,scope);
  const supervision=await supervisionReports(c,ctx,scope);
+ if(supervision.transfer_supervision){
+  const pendingTransfers=new Set(records.filter(r=>r.kind==='corrections'&&r.body.type==='lead_transfer'&&['pending','approved'].includes(r.state)).map(r=>r.lead_id));
+  supervision.transfer_supervision.candidates=list.items.filter(l=>l.version&&l.terminal_state==='open'&&!pendingTransfers.has(l.id)).map(l=>({
+   id:l.id,name:l.contact_name||'待识别客户',owner_id:l.owner_user_id,version:l.version,
+  }));
+ }
  if(supervision.arrangement_supervision?.can_issue){
   const eligibleOwners=new Set(list.staff.map(staff=>staff.id));
   supervision.arrangement_supervision.candidates=list.items.filter(l=>l.needs_arrangement&&eligibleOwners.has(l.owner_user_id)).map(l=>l.id);

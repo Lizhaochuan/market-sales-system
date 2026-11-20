@@ -520,11 +520,56 @@
   }
   target.append(section);
  }
+ function renderTransferSupervision(target){
+  const supervision=report?.transfer_supervision;
+  if(!supervision||(!supervision.items.length&&(!supervision.candidates.length||!staff.length)))return;
+  const section=node('section','panel');
+  section.id='v34-transfer-supervision';
+  section.append(node('h3','','转交申请督办'));
+  const statuses={pending:'待独立复核',approved:'待接收人确认',completed:'已销项 · 接收人已确认',rejected:'已驳回',cancelled:'已取消'};
+  for(const item of supervision.items){
+   const row=node('article','lead-row');
+   row.dataset.supervisionId=item.id;
+   const active=['pending','approved'].includes(item.state);
+   let status=statuses[item.state];
+   if(item.state==='completed'&&!item.evidence_event_id)status='接手证据不足';
+   if(active&&Date.parse(item.due_at)<Date.now())status+=' · 督办已逾期';
+   row.append(node('strong','',(item.contact_name||'待识别客户')+' · '+item.target_owner_name),node('p','',item.reason),
+    node('p','fineprint',status+' · '+(item.accepted_at?'接手于 '+shSupervisionTime(item.accepted_at):'截止 '+shSupervisionTime(item.due_at))));
+   if(active)btn(row,'打开转交申请',async()=>{
+    await openLead(item.lead_id);
+    if(selected===item.lead_id&&detail&&options?.access?.enabled)setCard('records');
+   });
+   section.append(row);
+  }
+  if(supervision.candidates.length&&staff.length){
+   const issue=form(section,'v34-transfer-supervise','发起转交申请','提交转交督办',f=>{
+    const values=data(f),lead=supervision.candidates.find(item=>item.id===values.lead);
+    return post(lead.id,'supervise-transfer',{
+     expected_version:lead.version,owner_user_id:values.owner_user_id,reason:values.reason,
+     due_at:values.due_at+':00+08:00',
+    });
+   },{version:null});
+   const lead=select(issue.f,'客户','lead',[{id:'',label:'请选择客户'},...supervision.candidates.map(l=>({id:l.id,label:l.name}))],'',true);
+   const recipient=select(issue.f,'接收人','owner_user_id',[{id:'',label:'请选择接收人'},...staff],'',true);
+   function refreshRecipients(){
+    const owner=supervision.candidates.find(l=>l.id===lead.value)?.owner_id;
+    for(const option of recipient.options)option.disabled=option.value===owner;
+    if(recipient.value===owner)recipient.value='';
+   }
+   lead.addEventListener('change',refreshRecipients);
+   input(issue.f,'转交说明','reason','text','',true).maxLength=1000;
+   input(issue.f,'督办截止（上海时间）','due_at','datetime-local','',true);
+   issue.f.append(issue.submit);
+  }
+  target.append(section);
+ }
  function shSupervisionTime(value){
   return dayKey(new Date(value))+' '+shTimeText(value)+'（上海时间）';
  }
  function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(['event','snapshot'].includes(report.filters?.view_mode)){renderRecordedMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
   renderSupervision(p,{offer:true});
+  renderTransferSupervision(p);
   renderSalesPaths(p,metricsQuery);
   const grid=node('div','scope-grid'),cohortQuery=metricsQuery;
   for(const [key,title]of Object.entries(labels)){
