@@ -279,3 +279,11 @@ Mac 空白 PostgreSQL 独立库全量回归退出码为 `0`。LOGIN/RLS 12/12，
 微信真实 AppID、员工绑定、合法 HTTPS 域名、订阅消息配置待补充。真实校区映射及财务数据待补充。保持 `HOLD=true`、`EXT-001=UNVERIFIED`、Draft / CI-only。
 
 [GitHub Actions #44786761843](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44786761843) 对应 Phase 3 实现提交 `89469640ff97f82201915f5887037a23fcb7a2ac`，最终状态 `completed / success`。原始日志确认 LOGIN/RLS 12/12、Core API/UI/安全 781/781（含两项小程序测试）、PC Chromium 49/49、设计合约 8/8。Phase 3 保持 `REVIEW_REQUIRED`，等待原生模拟器与真机验收。
+
+### Phase 3 微信开发者工具模拟器复验（2026-11-21）
+
+在 Mac 微信开发者工具 2.02.2609250 中核对了 Sales 窗口的项目目录，并使用游客窗口连接本机独立 PostgreSQL。原生控制台发现三个页面缺少同名 JSON，导致路由注册失败。补齐页面配置后，原生登录、工作台和客户详情正常显示。新增配置回归断言覆盖 `app.json` 中的所有页面。
+
+顾问在原生界面记录跟进，将下一步选为上海时间 2026-11-22 03:19。提交后详情和独立库均保留该时刻。主管在审批列表打开虚构核验申请并独立批准，核验状态生效。暂时停用隔离库虚构顾问后点击刷新，模拟器回到登录页并清除客户列表。测试后恢复了虚构账号状态。
+
+视觉抽检覆盖 375 宽度的销售工作台、390 宽度的跟进和审批表单、414 宽度的客户列表。均使用开发者工具预设。当前版本 CLI 自动化拒绝游客 AppID，这次交互通过原生模拟器窗口执行。真机体验、正式 AppID、测试员工绑定、HTTPS 域名及订阅消息配置仍待验证。Phase 3 保持 `REVIEW_REQUIRED`、`HOLD=true` 和 Draft / CI-only。

@@ -181,6 +181,10 @@ test('Native mini program uses the PC workflow through the isolated HTTP boundar
 test('Native project does not persist credentials or private drafts to device storage',()=>{
  const config=JSON.parse(readFileSync(resolve(root,'app.json'),'utf8'));
  assert.deepEqual(config.pages,['pages/login/index','pages/workspace/index','pages/lead/index']);
+ for(const page of config.pages){
+  const settings=JSON.parse(readFileSync(resolve(root,page+'.json'),'utf8'));
+  assert.ok(settings && typeof settings==='object' && !Array.isArray(settings),page);
+ }
  for(const name of ['app.js','lib/session.js','lib/mutation-page.js','lib/presentation.js',...config.pages.map(page=>page+'.js')]){
   assert.doesNotMatch(readFileSync(resolve(root,name),'utf8'),/wx\.(setStorage|getStorage|uploadFile|requestSubscribeMessage|login)/,name);
  }
