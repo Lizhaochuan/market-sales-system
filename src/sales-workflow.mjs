@@ -317,14 +317,14 @@ async function listing(c,ctx,query={}){
    params.push('%'+digits+'%');
    dClause=` OR regexp_replace(COALESCE(w.contact_info,''),'[^0-9]','','g') ILIKE $${params.length}`;
   }
-  qWhere=` AND (c.display_name ILIKE ${qIdx} OR w.contact_info ILIKE ${qIdx} OR EXISTS(SELECT 1 FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.display_name ILIKE ${qIdx})${dClause})`;
+  qWhere=` AND (c.display_name ILIKE ${qIdx} OR w.contact_info ILIKE ${qIdx} OR EXISTS(SELECT 1 FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.archived_at IS NULL AND s.display_name ILIKE ${qIdx})${dClause})`;
  }
  const rows=(await c.query(`SELECT l.id,l.lead_state,l.owner_user_id,l.created_at,c.display_name AS contact_name,u.display_name AS owner_name,u.status AS owner_status,e.event_type AS original_source,(SELECT a.after_business_json->>'source' FROM ms.audit_events a WHERE a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='LEAD_SOURCE_UPDATED' ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS current_source,
   w.stage,w.version,w.updated_at,w.terminal_state,w.primary_activity_id,w.do_not_contact,w.contact_info,
   a.body AS next_action,a.state AS activity_state,a.kind AS activity_kind,
   (SELECT jsonb_build_object('result',ae.after_business_json->>'result','failure_reason',ae.after_business_json->>'failure_reason','method',ae.after_business_json->>'method','happened_at',ae.happened_at) FROM ms.audit_events ae WHERE ae.organization_id=l.organization_id AND ae.target_type='lead' AND ae.target_id=l.id AND ae.event_name='V34_COMMUNICATION' ORDER BY ae.happened_at DESC,ae.id DESC LIMIT 1) AS last_communication,
   (SELECT jsonb_build_object('type',ap.body->>'type','state',ap.state,'due_at',ap.body->>'due_at','actual_attendance',ap.body->>'actual_attendance') FROM ms_workspace.records ap WHERE ap.lead_id=l.id AND ap.organization_id=l.organization_id AND ap.kind='appointments' ORDER BY (ap.state IN('pending','confirmed','rescheduled','in_progress')) DESC,(ap.state<>'cancelled') DESC,ap.updated_at DESC,ap.created_at DESC,ap.id DESC LIMIT 1) AS latest_appointment,
-  (SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.display_name)) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id) AS students,
+  (SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.display_name)) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.archived_at IS NULL) AS students,
   (SELECT x.after_business_json->>'origin_group' FROM ms.audit_events x WHERE x.organization_id=l.organization_id AND x.target_type='lead' AND x.target_id=l.id AND x.event_name='LEAD_DESK_CREATED' ORDER BY x.happened_at LIMIT 1) AS origin_group
   FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id LEFT JOIN ms.contact_events e ON e.id=l.source_event_id
   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms_workspace.records a ON a.id=w.primary_activity_id

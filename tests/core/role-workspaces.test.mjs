@@ -65,5 +65,63 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
    const f3=good(await w('',{contact_name:'面谈免填地点家长',student_name:'面谈免填地点学生',contact_info:'13900000048',origin_group:'sales',source:'到店',initial_communication:{method:'campus',at:new Date().toISOString(),stage:'needs_confirmed'},next:{appointment:{type:'meeting',due_at:new Date(Date.now()+2*86400000).toISOString()}}})).lead_id;
    assert.equal(good(await w('/'+f3)).records.filter(r=>r.kind==='appointments').every(r=>r.body.place===null),true);
   });
+ await t.test('sales listing and current student counts exclude archived students without deleting lead history',async()=>{
+  const contactName='归档回归家长', phone='13900000049';
+  const firstName='归档回归甲学生', secondName='归档回归乙学生';
+  const id=good(await w('',{
+   contact_name:contactName,student_name:firstName,contact_info:phone,origin_group:'sales',source:'到店',
+   initial_communication:{method:'phone',at:new Date(Date.now()-60000).toISOString(),stage:'enrollment_intent'},
+   next:next(1),
+  })).lead_id;
+  const original=good(await w('/'+id));
+  const firstId=original.students[0].id;
+  const secondId=(await pool.query(
+   'INSERT INTO ms.students(organization_id,owner_user_id,display_name) VALUES($1,$2,$3) RETURNING id',
+   [org,A,secondName],
+  )).rows[0].id;
+  await pool.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'pending_review')",[id,secondId]);
+
+  const search=async(q,user=A)=>good(await w('?q='+encodeURIComponent(q),undefined,user)).items;
+  const listed=async()=>good(await w('')).items.find(item=>item.id===id);
+  const metrics=async()=>good(await w('/metrics'));
+  const archive=async(studentId)=>pool.query('UPDATE ms.students SET archived_at=now() WHERE id=$1',[studentId]);
+  const before=await metrics();
+  assert.equal(original.workflow.stage,'enrollment_intent');
+  assert.ok(original.events.some(event=>event.event_name==='V34_COMMUNICATION'));
+  assert.deepEqual((await listed()).students.map(student=>student.id).sort(),[firstId,secondId].sort());
+  assert.deepEqual((await search(firstName)).map(item=>item.id),[id]);
+
+  await archive(firstId);
+  assert.deepEqual((await listed()).students,[{id:secondId,name:secondName}]);
+  assert.deepEqual(await search(firstName),[]);
+  assert.deepEqual((await search(secondName)).map(item=>item.id),[id]);
+  assert.deepEqual(await search(secondName,B),[]);
+  assert.deepEqual(await search(phone,B),[]);
+  const partial=await metrics();
+  assert.equal(partial.counts.students,before.counts.students-1);
+  assert.equal(partial.counts.enrollment_intent_students,before.counts.enrollment_intent_students-1);
+  assert.equal(partial.counts.unidentified_leads,before.counts.unidentified_leads);
+
+  await archive(secondId);
+  assert.equal((await listed()).students,null);
+  assert.deepEqual(await search(secondName),[]);
+  for(const q of [contactName,phone]){
+   const items=await search(q);
+   assert.deepEqual(items.map(item=>item.id),[id]);
+   assert.equal(items[0].students,null);
+   assert.equal(items[0].contact_info,undefined);
+   assert.equal(items[0].contact_info_masked,'139****0049');
+  }
+  const empty=await metrics();
+  assert.equal(empty.counts.leads,before.counts.leads);
+  assert.equal(empty.counts.students,before.counts.students-2);
+  assert.equal(empty.counts.enrollment_intent_students,before.counts.enrollment_intent_students-2);
+  assert.equal(empty.counts.unidentified_leads,before.counts.unidentified_leads+1);
+  assert.deepEqual(empty.activity_counts,before.activity_counts);
+  const detail=good(await w('/'+id));
+  assert.deepEqual(detail.students,[]);
+  assert.deepEqual(detail.events,original.events);
+  assert.deepEqual(detail.records,original.records);
+ });
  }finally{if(app)await new Promise(r=>app.close(r));await pool.end();}
 });
