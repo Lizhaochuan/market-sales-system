@@ -114,6 +114,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
   const events=(await c.query("SELECT a.event_name,a.after_business_json,a.happened_at,a.actor_user_id,u.display_name AS actor_name FROM ms.audit_events a LEFT JOIN ms.staff_users u ON u.id=a.actor_user_id WHERE a.organization_id=$1 AND a.target_type='lead' AND a.target_id=$2 ORDER BY a.happened_at DESC,a.id DESC",[org,id])).rows;
   return {...flags,lead:l,workflow:w??null,students,records,events:ctx.roleWorkspaces?events.filter(e=>!e.event_name.startsWith('V34_MARKET_CAPTURED')):events,needs_arrangement:!w||w.terminal_state==='open'&&!records.some(r=>r.id===w.primary_activity_id&&active(r))};
  }
+ if(action==='supervise-appointment')return issueAppointmentSupervision(c,ctx,l,w,body);
  if(!w){if(['closed','invalid'].includes(l.lead_state))fail(409,'LEGACY_TERMINAL_REVIEW','旧终态须由主管先核实，不自动重新开启');if(action!=='arrange')fail(409,'ARRANGEMENT_REQUIRED','旧客户缺少后续安排，请先补充下一步');
   if(!l.owner_user_id||!(await c.query("SELECT 1 FROM ms.staff_users WHERE id=$1 AND status='active'",[l.owner_user_id])).rowCount){if(!ctx.manager||!body.owner_user_id)fail(422,'ASSIGNEE_REQUIRED','待分配客户需要主管指定有效负责人');await sameOrgStaff(c,ctx,body.owner_user_id);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,body.owner_user_id);const previous=l.owner_user_id;l.owner_user_id=body.owner_user_id;await c.query('UPDATE ms.leads SET owner_user_id=$2 WHERE id=$1',[id,l.owner_user_id]);await audit(c,ctx,l,'LEGACY_ASSIGNMENT_REPAIRED',{previous_owner:previous,new_owner:l.owner_user_id});}
   const r=await activity(c,ctx,l,body.next);w=(await c.query("INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,stage,terminal_state) VALUES($1,$2,$3,'unclassified','open') RETURNING *",[id,org,r.id])).rows[0];await auditWorkflow(c,ctx,l,'ARRANGEMENT_REPAIRED',w,{activity_id:r.id});return {...flags,workflow:w};}
@@ -314,6 +315,49 @@ async function corrections(c,ctx,l,w,action,b){
  await update(c,ctx,r,'verified',{...r.body,refund_id:ref.id,verified_by:ctx.user.id,verification_ref:ev});const n=await enrollmentState(c,ctx,l,e);
  if(b.cancel_enrollment===true){if(n.body.net_cents!==0)fail(409,'BALANCE_REMAINS','仍有有效净收款，不能直接取消报名');await update(c,ctx,n,'cancelled',{...n.body,cancelled_by:ctx.user.id,cancel_reason:r.body.reason});await c.query("UPDATE ms.sales_orders SET order_state='cancelled',version=version+1 WHERE id=$1",[e.body.order_id]);}
  const cor=await record(c,l,r.body.correction_id,'corrections');await update(c,ctx,cor,'completed',{...cor.body,completed_by:ctx.user.id});await audit(c,ctx,l,'CREDIT_ADJUSTMENT',{order_id:e.body.order_id,amount_cents:-r.body.amount_cents,refund_id:r.id});return bump(c,ctx,l,w,'REFUND_VERIFIED',{refund_id:r.id});
+}
+const canSuperviseAppointments=ctx=>ctx.manager&&(!ctx.roleWorkspaces||workspaceAccess(ctx).sales_manager);
+async function appointmentSupervisionAvailable(c){
+ return (await c.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=37')).rowCount>0;
+}
+async function issueAppointmentSupervision(c,ctx,lead,workflow,body){
+ if(!canSuperviseAppointments(ctx))fail(403,'FORBIDDEN','仅销售主管可发起预约督办');
+ if(!await appointmentSupervisionAvailable(c))fail(409,'SUPERVISION_UNAVAILABLE','当前工作台尚未启用预约督办');
+ fields(body,['appointment_id','appointment_version','due_at','reason']);
+ const deadline=date(body.due_at),reason=text(body.reason);
+ if(Date.parse(deadline)<=Date.now())fail(422,'VALIDATION_ERROR','督办截止时间须晚于当前时间');
+ const appointment=await record(c,lead,body.appointment_id,'appointments');
+ if(appointment.version!==body.appointment_version)fail(409,'VERSION_CONFLICT','预约已更新，请刷新后再发起督办');
+ if(workflow?.terminal_state!=='open'||!lead.owner_user_id||lead.owner_user_id!==appointment.owner_user_id||
+    !active(appointment)||!(Date.parse(appointment.body.due_at)<Date.now())){
+  fail(409,'APPOINTMENT_NOT_OVERDUE','只能督办有当前负责人且已到期未处理的预约');
+ }
+ const existing=await c.query(`
+  SELECT 1 FROM ms_workspace.appointment_supervision_status
+  WHERE organization_id=$1 AND lead_id=$2 AND appointment_id=$3 AND resolved_version IS NULL`,
+  [lead.organization_id,lead.id,appointment.id],
+ );
+ if(existing.rowCount)fail(409,'SUPERVISION_ALREADY_OPEN','该预约已有待处理的督办');
+ const {rows:[item]}=await c.query(`
+  INSERT INTO ms_workspace.appointment_supervision(organization_id,lead_id,appointment_id,appointment_version,issued_by,reason,due_at)
+  VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,appointment_id,due_at,created_at`,
+  [lead.organization_id,lead.id,appointment.id,appointment.version,ctx.user.id,reason,deadline],
+ );
+ return {...flags,item};
+}
+async function appointmentSupervision(c,ctx,scope){
+ if(!await appointmentSupervisionAvailable(c))return null;
+ const {where,params}=salesLeadScope(ctx,scope);
+ const {rows:items}=await c.query(`
+  SELECT a.id,a.lead_id,a.appointment_id,a.reason,a.due_at,a.created_at,a.resolved_version,
+   a.resolution_state,a.resolved_at,l.owner_user_id,r.body->>'title' AS appointment_title,
+   co.display_name AS contact_name,u.display_name AS owner_name
+  FROM ms.leads l JOIN ms_workspace.appointment_supervision_status a ON a.lead_id=l.id AND a.organization_id=l.organization_id
+  JOIN ms_workspace.records r ON r.id=a.appointment_id AND r.lead_id=l.id AND r.organization_id=l.organization_id
+  LEFT JOIN ms.contacts co ON co.id=l.contact_id AND co.organization_id=l.organization_id
+  LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id AND u.organization_id=l.organization_id
+  WHERE ${where} ORDER BY (a.resolved_version IS NULL) DESC,a.created_at DESC,a.id`,params);
+ return {can_issue:canSuperviseAppointments(ctx),items};
 }
 function maskPhone(v){if(!v)return '';const s=String(v).trim();if(s.length>=8)return s.slice(0,s.length-8)+'****'+s.slice(-4);if(s.length>=5)return s.slice(0,2)+'***'+s.slice(-2);return '****';}
 function metricsScope(query={}){
@@ -880,5 +924,6 @@ async function metrics(c,ctx,query){
   ...records.filter(r=>r.kind==='corrections'&&r.state==='pending').map(r=>({id:r.id,lead_id:r.lead_id,kind:r.body.type,title:r.body.type==='lead_transfer'?'客户转交待独立复核':'报名退款/取消纠正待审批',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.requested_by!==ctx.user.id&&r.body.target_owner!==ctx.user.id}))
  ]:[];
  const path_counts=await salesPathCounts(c,ctx,scope);
- return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
+ const appointment_supervision=await appointmentSupervision(c,ctx,scope);
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,appointment_supervision,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,version:r.version,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
 }

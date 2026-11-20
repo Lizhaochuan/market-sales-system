@@ -49,7 +49,7 @@
  function snapshotLead(leadId){if(!leadId)return null;const isDraftCard=card&&!['scheduled','recorded','trial-next'].includes(card);const forms=[...panel.querySelectorAll('form')].filter(f=>f.id!=='v35-lookup'&&!f.closest('#v35-lookup')).map(f=>({id:f.id,dirty:f.dataset.userDirty==='1',open:f.closest('details')?.open,fields:[...f.querySelectorAll('input,select,textarea')].filter(i=>i.type!=='file').map(i=>({name:i.name,value:i.value,checked:i.checked}))}));if(!forms.some(f=>f.dirty)&&!isDraftCard)return null;return {leadId,card:isDraftCard?card:null,activityTarget,editingQuoteId,forms};}
  function restoreLeadDraft(draft){if(!draft?.forms)return;if(draft.card)card=draft.card;if(draft.activityTarget)activityTarget=draft.activityTarget;if(draft.editingQuoteId)editingQuoteId=draft.editingQuoteId;for(const saved of draft.forms){const f=$(saved.id);if(!f)continue;if(saved.id==='v34-quote'){const count=saved.fields.filter(v=>v.name==='course').length;while(f.querySelectorAll('.v34-course').length<count){const add=[...f.querySelectorAll('button')].find(b=>b.textContent==='增加课程');if(add)add.click();else break;}}const used={};for(const v of saved.fields){const i=f.querySelectorAll('[name="'+v.name+'"]')[used[v.name]||0];used[v.name]=(used[v.name]||0)+1;if(!i)continue;if(i.type==='checkbox')i.checked=v.checked;else i.value=v.value;if(i.tagName==='SELECT')i.dispatchEvent(new Event('change',{bubbles:true}));}if(saved.open&&f.closest('details'))f.closest('details').open=true;if(saved.dirty)f.dataset.userDirty='1';f.dispatchEvent(new Event('input',{bubbles:true}));if(saved.id==='v34-quote')f.querySelector('[name="unit"]')?.dispatchEvent(new Event('input',{bubbles:true}));}}
  function saveCurrentLeadDraft(){if(!selected)return;const draft=snapshotLead(selected);if(draft)leadDrafts.set(selected,draft);}
- async function openLead(id,recordId=null){saveCurrentLeadDraft();const lp=panel.querySelector('.v35-split-list');if(lp)listScrollTop=lp.scrollTop;winScrollTop=window.scrollY;card=null;claim=null;activityTarget=null;pendingLostFeedback='';const token=state.token,ticket=++seq;selected=id;detail=null;display();try{const d=await api(root+'/'+id);if(token!==state.token||ticket!==seq)return;detail=d;if(recordId&&options?.access?.enabled){const r=d.records.find(r=>r.id===recordId&&isActive(r));if(r){activityTarget=r.id;card=r.kind==='appointments'?'activity-result':'followup';}}const savedDraft=leadDrafts.get(id);if(savedDraft){if(savedDraft.card)card=savedDraft.card;if(savedDraft.activityTarget)activityTarget=savedDraft.activityTarget;if(savedDraft.editingQuoteId)editingQuoteId=savedDraft.editingQuoteId;}display();if(savedDraft){restoreLeadDraft(savedDraft);announce('已恢复本客户未保存的临时草稿');}}catch(e){if(token===state.token&&ticket===seq){if(handleAuthFailure(e))return;announce(e.message);}}}
+ async function openLead(id,recordId=null,{preferTarget=false}={}){saveCurrentLeadDraft();const lp=panel.querySelector('.v35-split-list');if(lp)listScrollTop=lp.scrollTop;winScrollTop=window.scrollY;card=null;claim=null;activityTarget=null;pendingLostFeedback='';const token=state.token,ticket=++seq;selected=id;detail=null;display();try{const d=await api(root+'/'+id);if(token!==state.token||ticket!==seq)return;detail=d;if(recordId&&options?.access?.enabled){const r=d.records.find(r=>r.id===recordId&&isActive(r));if(r){activityTarget=r.id;card=r.kind==='appointments'?'activity-result':'followup';}}const draft=leadDrafts.get(id);const savedDraft=!preferTarget||draft?.activityTarget===recordId?draft:null;if(savedDraft){if(savedDraft.card)card=savedDraft.card;if(savedDraft.activityTarget)activityTarget=savedDraft.activityTarget;if(savedDraft.editingQuoteId)editingQuoteId=savedDraft.editingQuoteId;}display();if(savedDraft){restoreLeadDraft(savedDraft);announce('已恢复本客户未保存的临时草稿');}}catch(e){if(token===state.token&&ticket===seq){if(handleAuthFailure(e))return;announce(e.message);}}}
  async function mutate(run){if(busy)return;busy=true;const token=state.token,ticket=epoch;panel.querySelectorAll('button').forEach(b=>b.disabled=true);try{const destination=await run();if(token!==state.token||ticket!==epoch)return;if(options?.access?.enabled&&selected){card=typeof destination==='string'?destination:null;if(!['followup','activity','activity-result','activity-retime'].includes(card))activityTarget=null;}if(selected)leadDrafts.delete(selected);await refresh(true);if(token===state.token&&ticket===epoch)announce('已保存，后续安排已保留');}catch(e){if(token===state.token&&ticket===epoch){if(handleAuthFailure(e))return;announce(e.message);panel.querySelectorAll('button').forEach(b=>b.disabled=false);}}finally{if(ticket===epoch)busy=false;}}
  const post=(id,action,b)=>api(root+'/'+id+'/'+action,{method:'POST',body:{...b,expected_version:Number(b.expected_version)}});
  function timePresets(p,i){const row=node('div','trial-preset-row');for(const [title,days]of[['明天',1],['三天后',3],['一周后',7]])btn(row,title,()=>{const d=new Date();d.setDate(d.getDate()+days);d.setHours(10,0,0,0);i.value=local(d);i.dispatchEvent(new Event('input',{bubbles:true}));});p.append(row);}
@@ -82,7 +82,7 @@
   if(intakeOnly){c.d.open=true;return;}const list=node('div','panel');list.id='v34-leads';panel.append(list);const search=input(list,'查找客户','search','search');const filter=select(list,'客户状态','state_filter',[{id:'all',label:'全部'},{id:'open',label:'Open · 跟进中'},{id:'won',label:'Closed Won'},{id:'lost',label:'Closed Lost'},{id:'missing',label:'待补下一步安排'}],'all');const rowsEl=node('div');list.append(rowsEl);
   function draw(){rowsEl.replaceChildren();for(const l of rows.filter(l=>(group!=='market'||l.origin_group==='market')&&(!search.value||[l.contact_name,l.contact_info_masked,...(l.students||[]).map(s=>s.name)].some(v=>v?.includes(search.value)))&&(filter.value==='all'||filter.value==='missing'?filter.value!=='missing'||l.needs_arrangement:l.terminal_state===filter.value))){const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',stage(l.stage)+' · '+l.terminal_state+' · '+l.owner_name));if(l.needs_assignment)card.append(node('p','form-hint warning','负责人待分配，需主管处理；原待办保留'));if(l.next_action)card.append(node('p',l.overdue?'form-hint warning':'form-hint','下一步：'+l.next_action.title+' · '+dateText(l.next_action.due_at)+(l.overdue?' · 已逾期':'')));else card.append(node('p','form-hint warning','待补安排：旧数据未设置下一步，不会自动编造时间'));btn(card,'打开客户',()=>openLead(l.id));rowsEl.append(card);}if(!rowsEl.childElementCount)rowsEl.append(node('p','','暂无记录'));}search.addEventListener('input',draw);filter.addEventListener('change',draw);draw();
  }
- function renderTasks(){const p=node('div','panel');p.id='v34-tasks';panel.append(p);for(const r of incoming){const card=node('article','lead-row');card.append(node('p','','待接手客户 · '+r.reason));btn(card,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));p.append(card);}for(const a of report?.pending_approvals||[]){const card=node('article','lead-row');card.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));if(a.can_review)btn(card,'前往独立复核',()=>openLead(a.lead_id));else card.append(node('p','fineprint','本人关联事项 · 须另一位主管独立复核'));p.append(card);}for(const r of report?.reminders||[]){const l=rows.find(l=>l.id===r.lead_id);if(!l)continue;const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',r.title+' · '+dateText(r.due_at)+' · '+l.owner_name));if(r.overdue)card.append(node('p','form-hint warning','已逾期，仍须跟进；不会自动关闭'));btn(card,'执行 / 记结果',()=>openLead(l.id));p.append(card);}for(const l of rows.filter(l=>l.needs_arrangement)){const card=node('article','lead-row');card.append(node('p','','待补安排 · '+(l.contact_name||'待识别客户')+' · '+l.owner_name));btn(card,'补充安排',()=>openLead(l.id));p.append(card);}}
+ function renderTasks(){const p=node('div','panel');p.id='v34-tasks';panel.append(p);renderAppointmentSupervision(p);for(const r of incoming){const card=node('article','lead-row');card.append(node('p','','待接手客户 · '+r.reason));btn(card,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));p.append(card);}for(const a of report?.pending_approvals||[]){const card=node('article','lead-row');card.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));if(a.can_review)btn(card,'前往独立复核',()=>openLead(a.lead_id));else card.append(node('p','fineprint','本人关联事项 · 须另一位主管独立复核'));p.append(card);}for(const r of report?.reminders||[]){const l=rows.find(l=>l.id===r.lead_id);if(!l)continue;const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',r.title+' · '+dateText(r.due_at)+' · '+l.owner_name));if(r.overdue)card.append(node('p','form-hint warning','已逾期，仍须跟进；不会自动关闭'));btn(card,'执行 / 记结果',()=>openLead(l.id));p.append(card);}for(const l of rows.filter(l=>l.needs_arrangement)){const card=node('article','lead-row');card.append(node('p','','待补安排 · '+(l.contact_name||'待识别客户')+' · '+l.owner_name));btn(card,'补充安排',()=>openLead(l.id));p.append(card);}}
  function renderLead(host=panel){const l=rows.find(l=>l.id===selected);const backLabel=options?.access?.enabled?(view==='tasks'?'返回我的待办':view==='metrics'?'返回统计与提醒':'返回客户列表'):'返回客户列表';
   btn(host,backLabel,()=>{saveCurrentLeadDraft();selected=null;detail=null;card=null;activityTarget=null;if(options?.access?.enabled){if(view==='leads')lookupResult=null;refresh(true);}else{view='leads';display();}},'secondary');
   if(selected){
@@ -454,7 +454,55 @@
   }
   target.append(section);
  }
+ const supervisionOutcome={completed:'已完成',no_show:'未到场',cancelled:'已取消',rescheduled:'已改期'};
+ function renderAppointmentSupervision(target,{offer=false,onlyMine=false}={}){
+  const supervision=report?.appointment_supervision;
+  if(!supervision)return;
+  const openAppointments=new Set(supervision.items.filter(item=>!item.resolved_version).map(item=>item.appointment_id));
+  const items=supervision.items.filter(item=>(offer||!item.resolved_version)&&(!onlyMine||item.owner_user_id===state.user.staff_id));
+  const candidates=offer&&supervision.can_issue?(report.reminders||[]).filter(r=>{
+   if(r.kind!=='appointments'||!r.overdue||openAppointments.has(r.id))return false;
+   const lead=rows.find(item=>item.id===r.lead_id);
+   return lead?.terminal_state==='open'&&lead.owner_user_id===r.owner_user_id;
+  }):[];
+  if(!items.length&&!candidates.length)return;
+  const section=node('section','panel');
+  section.id='v34-appointment-supervision';
+  section.append(node('h3','','预约结果督办'));
+  for(const item of items){
+   const row=node('article','lead-row');
+   row.dataset.supervisionId=item.id;
+   const title=(item.contact_name||'待识别客户')+' · '+item.appointment_title;
+   row.append(node('strong','',title),node('p','',item.reason));
+   if(item.resolved_version){
+    row.append(node('p','fineprint','已销项 · '+supervisionOutcome[item.resolution_state]+' · 预约版本 '+item.resolved_version+' · '+shAppointmentTime(item.resolved_at)));
+   }else{
+    row.append(node('p','fineprint',(item.owner_name||'待分配')+' · '+(Date.parse(item.due_at)<Date.now()?'督办已逾期 · ':'待处理 · ')+shAppointmentTime(item.due_at)));
+    btn(row,'处理指定预约',()=>openLead(item.lead_id,item.appointment_id,{preferTarget:true}));
+   }
+   section.append(row);
+  }
+  for(const r of candidates){
+   const lead=rows.find(item=>item.id===r.lead_id);
+   const title=(lead.contact_name||'待识别客户')+' · '+r.title;
+   const actions=form(section,'v34-appointment-supervise-'+r.id,'催办 '+title,'下发预约督办',f=>{
+    const values=data(f);
+    return api(root+'/'+r.lead_id+'/supervise-appointment',{method:'POST',body:{
+     appointment_id:r.id,appointment_version:r.version,reason:values.reason,due_at:values.due_at+':00+08:00',
+    }});
+   },{version:null});
+   const reason=input(actions.f,'督办说明','reason','text','',true);
+   reason.maxLength=1000;
+   input(actions.f,'督办截止（上海时间）','due_at','datetime-local','',true);
+   actions.f.append(actions.submit);
+  }
+  target.append(section);
+ }
+ function shAppointmentTime(value){
+  return dayKey(new Date(value))+' '+shTimeText(value)+'（上海时间）';
+ }
  function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(['event','snapshot'].includes(report.filters?.view_mode)){renderRecordedMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
+  renderAppointmentSupervision(p,{offer:true});
   renderSalesPaths(p,metricsQuery);
   const grid=node('div','scope-grid'),cohortQuery=metricsQuery;
   for(const [key,title]of Object.entries(labels)){
@@ -527,6 +575,7 @@
   p.append(summary,dayHeading,today,overdue,handover,weekBox);today.id='v35-day-tasks';overdue.id='v35-overdue-tasks';
   function renderHandover(){
    handover.replaceChildren();
+   renderAppointmentSupervision(handover,{onlyMine:taskScope!=='team'});
    if(options.manager&&report?.pending_approvals?.length){
     const ap=node('section','panel');ap.id='v35-approvals';ap.append(node('h3','','待主管独立复核'));
     for(const a of report.pending_approvals){

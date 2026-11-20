@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import pg f
 test('Role workspaces: phone handoff, department privacy and persistent dated tasks',async t=>{
  process.env.MS_STAGE='isolated-test';const pool=new pg.Pool({connectionString:process.env.DATABASE_URL}),org=randomUUID(),A=randomUUID(),B=randomUUID(),M=randomUUID(),K=randomUUID(),K2=randomUUID(),KM=randomUUID(),G=randomUUID(),F=randomUUID();const secret='fictional-role-workspaces-test-key-2026';let app;
  try{
- for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
+ for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
  await pool.query("INSERT INTO ms.organizations(id,name) VALUES($1,'虚构部门验收机构')",[org]);
  for(const [id,name]of[[A,'销售A'],[B,'销售B'],[M,'销售主管'],[K,'市场A'],[K2,'市场B'],[KM,'市场主管'],[G,'总管理者'],[F,'收款核实员']])await pool.query('INSERT INTO ms.staff_users(id,organization_id,display_name) VALUES($1,$2,$3)',[id,org,name]);
  for(const [role,users]of[['sales_staff',[A,B]],['sales_manager',[M]],['marketing_staff',[K,K2]],['marketing_manager',[KM]],['super_admin',[G]],['finance_verifier',[F]]]){const r=(await pool.query('INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,$2,$2) RETURNING id',[org,role])).rows[0];for(const u of users)await pool.query('INSERT INTO ms.user_role_grants(user_id,role_id,granted_by) VALUES($1,$2,$3)',[u,r.id,G]);}
@@ -263,6 +263,68 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal((await requestDetail(both,KM)).status,403);
   assert.equal((await requestDetail(both,F)).status,403);
   await assert.rejects(pool.query('DELETE FROM ms_workspace.lead_student_history WHERE student_id=$1',[student]),/append only/);
+ });
+ await t.test('appointment supervision is scoped and closes only on newer evidence from the target appointment',async()=>{
+  const source='转介绍';
+  const intake=good(await w('',{
+   contact_name:'督办验收家长',student_name:'督办验收学生',contact_info:'13900000054',
+   origin_group:'sales',source,next:next(1),
+  }));
+  const leadId=intake.lead_id;
+  const detail=async()=>good(await w('/'+leadId));
+  const act=async(action,body)=>good(await w('/'+leadId+'/'+action,{expected_version:(await detail()).workflow.version,...body}));
+  const createAppointment=async(days)=>{
+   const result=await act('appointment',{appointment:{type:'meeting',due_at:next(days).due_at}});
+   return (await detail()).records.find(r=>r.id===result.workflow.primary_activity_id);
+  };
+  const unrelated=await createAppointment(-2);
+  const future=await createAppointment(2);
+  const target=await createAppointment(-1);
+  const deadline=next(1).due_at;
+  const issue=(appointment,user=M,key=randomUUID(),extra={})=>w('/'+leadId+'/supervise-appointment',{
+   appointment_id:appointment.id,appointment_version:appointment.version,due_at:deadline,reason:'核实家长预约结果',...extra,
+  },user,key);
+  const snapshot=async(user=A,filters={})=>good(await w('/metrics?'+new URLSearchParams(filters),undefined,user)).appointment_supervision;
+  const state=async(user=A)=>(await snapshot(user)).items.find(item=>item.appointment_id===target.id);
+  assert.equal((await issue(target,A)).status,403);
+  assert.equal((await issue(target,B)).status,403);
+  assert.equal((await issue(target,KM)).status,403);
+  assert.equal((await issue(target,F)).status,403);
+  assert.equal((await issue(future)).code,'APPOINTMENT_NOT_OVERDUE');
+  assert.equal((await issue(target,M,randomUUID(),{appointment_version:target.version+1})).code,'VERSION_CONFLICT');
+  assert.equal((await issue(target,M,randomUUID(),{due_at:next(-1).due_at})).status,422);
+  const workflowVersion=(await detail()).workflow.version;
+  const keys=[randomUUID(),randomUUID()];
+  const responses=await Promise.all(keys.map(key=>issue(target,M,key)));
+  assert.deepEqual(responses.map(r=>r.status).sort(),[200,409]);
+  const winner=responses.findIndex(r=>r.status===200);
+  const issued=good(responses[winner]).item;
+  assert.equal(good(await issue(target,M,keys[winner])).item.id,issued.id);
+  assert.equal((await detail()).workflow.version,workflowVersion);
+  assert.equal((await state()).resolved_version,null);
+  assert.equal((await state()).id,issued.id);
+  assert.equal((await snapshot()).can_issue,false);
+  assert.equal((await snapshot(M,{source})).can_issue,true);
+  assert.equal((await snapshot(M,{source:'到店'})).items.some(item=>item.id===issued.id),false);
+  assert.equal(await state(B),undefined);
+
+  await act('activity',{record_id:unrelated.id,transition:'no_show',feedback:'另一场预约未到'});
+  assert.equal((await state()).resolved_version,null);
+  await act('activity',{record_id:target.id,transition:'start'});
+  assert.equal((await state()).resolved_version,null);
+  const refreshed=(await detail()).records.find(r=>r.id===target.id);
+  assert.equal((await issue(refreshed)).code,'SUPERVISION_ALREADY_OPEN');
+  await act('activity',{record_id:target.id,transition:'reschedule',due_at:next(3).due_at,reason:'家长重新确认日期'});
+  const resolved=await state(M);
+  assert.equal(resolved.resolution_state,'rescheduled');
+  assert.equal(resolved.resolved_version,refreshed.version+1);
+  assert.ok(resolved.resolved_at);
+  assert.equal(resolved.owner_user_id,A);
+  const updated=await detail();
+  assert.equal(updated.workflow.primary_activity_id,target.id);
+  await act('activity',{record_id:target.id,transition:'completed',feedback:'改期后完成',next:next(4)});
+  assert.equal((await state()).resolved_version,resolved.resolved_version);
+  assert.equal((await state()).resolution_state,'rescheduled');
  });
  await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
   const drill='/metrics/drilldown?metric=leads';

@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';import pg from 'pg';import {readFile} from 'node:fs/promises';import {createApp} from '../../src/app.mjs';
 let pool,app,url;const pass='0';
-test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
+test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
 test.afterAll(async()=>{if(app)await new Promise(r=>app.close(r));await pool?.end();});
 async function login(page,who='sales-a'){await page.goto(url);await page.locator('#login-form [name="account_code"]').selectOption(who);await page.locator('#login-form [name="passphrase"]').fill(pass);await page.locator('#login-form').getByRole('button',{name:'进入工作台'}).click();await expect(page.locator('#sales-workflow')).toBeVisible();}
 async function lookup(page,phone){await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();await page.locator('#v35-lookup [name="phone"]').fill(phone);await page.locator('#v35-lookup [name="phone"]').press('Enter');}
@@ -1103,4 +1103,49 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await expect(start).toHaveValue('');
  await expect(owners).toHaveValue('');
  await expect.poll(async()=>Number(await count.textContent())).toBeGreaterThan(2);
+});
+
+
+test('Boss appointment supervision issues an internal request and resolves it on the assigned appointment',async({page})=>{
+ const root='/api/v1/isolated-workspace/workflow';
+ await login(page,'sales-a');
+ const result=await page.evaluate(({root,number})=>api(root,{
+  method:'POST',body:{
+   contact_name:'督办回归家长',student_name:'督办回归学生',contact_info:number,origin_group:'sales',source:'到店',
+   next:{appointment:{type:'meeting',due_at:new Date(Date.now()-86400000).toISOString()}},
+  },
+ }),{root,number:phone()});
+ const appointmentId=result.workflow.primary_activity_id;
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ const supervision=page.locator('#v34-appointment-supervision');
+ const issue=supervision.locator('#v34-appointment-supervise-'+appointmentId);
+ await issue.locator('..').locator('summary').click();
+ await issue.getByLabel('督办说明').fill('核实该场面谈结果');
+ const shanghaiDeadline=new Date(Date.now()+86400000+8*3600000).toISOString().slice(0,16);
+ await issue.getByLabel('督办截止（上海时间）').fill(shanghaiDeadline);
+ await issue.getByRole('button',{name:'下发预约督办'}).click();
+ const row=supervision.locator('article').filter({hasText:'核实该场面谈结果'});
+ await expect(row).toContainText('待处理');
+ await expect(issue).toHaveCount(0);
+
+ await login(page,'sales-b');
+ await expect(page.locator('#v34-tasks')).toBeVisible();
+ await expect(row).toHaveCount(0);
+ await login(page,'sales-a');
+ await expect(row).toContainText('督办回归家长');
+ await row.getByRole('button',{name:'处理指定预约'}).click();
+ const activity=page.locator('#activity-'+appointmentId);
+ await expect(activity).toBeVisible();
+ await activity.getByRole('button',{name:'改期，尚未完成'}).click();
+ const reschedule=page.locator('#retime-'+appointmentId);
+ const localDate=new Date(Date.now()+2*86400000);
+ const localTime=new Date(localDate.getTime()-localDate.getTimezoneOffset()*60000).toISOString().slice(0,16);
+ await reschedule.getByLabel('新执行时间').fill(localTime);
+ await reschedule.getByLabel('改期原因').fill('家长确认下次到校时间');
+ await reschedule.getByRole('button',{name:'保存改期'}).click();
+ await expect(row).toHaveCount(0);
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ await expect(row).toContainText('已销项 · 已改期 · 预约版本 2');
 });
