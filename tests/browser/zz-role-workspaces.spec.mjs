@@ -909,3 +909,53 @@ test('PC-05: manually scheduled late follow-up keeps its exact time after sign-i
  await expect(task).toContainText(title);
  await expect(task).toContainText(displayTime);
 });
+
+
+test('Boss filters by Shanghai lead creation date and advisor and can clear the scope', async ({page}) => {
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ const panel=page.locator('#v34-metrics');
+ const filters=panel.locator('#v34-metrics-filters');
+ await expect(filters).toBeVisible();
+ const owners=filters.getByRole('combobox',{name:'顾问'});
+ const ownerIds=await owners.locator('option').evaluateAll(options=>options.map(option=>option.value).filter(Boolean));
+ expect(ownerIds.length).toBeGreaterThanOrEqual(2);
+ const seed=async(owner,createdAt,title)=>{
+  const result=await page.evaluate(({owner,number,title})=>api('/api/v1/isolated-workspace/workflow',{
+   method:'POST',body:{
+    owner_user_id:owner,contact_name:title+'家长',student_name:title+'学生',contact_info:number,origin_group:'sales',source:'到店',
+    next:{action:'call',method:'phone',title,due_at:new Date(Date.now()+86400000).toISOString()},
+   },
+  }),{owner,number:phone(),title});
+  await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[result.lead_id,createdAt]);
+ };
+ await seed(ownerIds[0],'2024-04-01T00:00:00+08:00','窗口首位顾问测试');
+ await seed(ownerIds[1],'2024-04-01T23:59:59+08:00','窗口第二位顾问测试');
+ await seed(ownerIds[0],'2024-04-02T00:00:00+08:00','窗口之外测试');
+ const count=panel.locator('.stat-card').filter({has:page.getByText('Lead 数',{exact:true})}).locator('strong');
+
+ const start=filters.getByLabel('建档开始日期');
+ const end=filters.getByLabel('建档结束日期');
+ const apply=filters.getByRole('button',{name:'应用筛选'});
+ await start.fill('2024-04-01');
+ await apply.click();
+ await expect(filters.getByRole('status')).toContainText('请同时选择');
+ await end.fill('2024-04-01');
+ await apply.click();
+ await expect(count).toHaveText('2');
+ await owners.selectOption(ownerIds[1]);
+ await apply.click();
+ await expect(count).toHaveText('1');
+ await expect(owners).toHaveValue(ownerIds[1]);
+ await expect(start).toHaveValue('2024-04-01');
+ await expect(end).toHaveValue('2024-04-01');
+
+ await page.getByRole('button',{name:'我的待办',exact:true}).click();
+ await expect(page.locator('#v34-tasks')).toBeVisible();
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ await expect(count).toHaveText('1');
+ await filters.getByRole('button',{name:'清除筛选'}).click();
+ await expect(start).toHaveValue('');
+ await expect(owners).toHaveValue('');
+ await expect.poll(async()=>Number(await count.textContent())).toBeGreaterThan(2);
+});
