@@ -24,7 +24,7 @@ test('role UI: market handoff retains one Lead, sales cannot see private notes, 
  await login(page,'market-manager');await expect(page.locator('#v35-market')).toContainText(name);
  const marketMetrics=page.locator('#v35-market-metrics');
  await expect(marketMetrics.getByRole('heading',{name:'市场录入与交接'})).toBeVisible();
- await expect(marketMetrics).toContainText('校区筛选：等待线索与校区的归属映射');
+ await expect(marketMetrics).toContainText('校区筛选：规则已确认，真实校区映射待补充');
  await expect(marketMetrics.getByRole('combobox',{name:'校区',exact:true})).toHaveCount(0);
  await marketMetrics.getByRole('button',{name:/查看市场来源明细/}).first().click();
  await expect(marketMetrics).toContainText(/共 [1-9]\d* 条市场线索/);
@@ -968,8 +968,8 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  const filters=panel.locator('#v34-metrics-filters');
  await expect(filters).toBeVisible();
  await expect(panel.getByRole('heading',{name:'首响 SLA · 30 分钟（连续自然时间）'})).toBeVisible();
- await expect(panel).toContainText('有效线索率：等待核验规则确认');
- await expect(filters).toContainText('校区筛选：等待线索与校区的归属映射');
+ await expect(panel).toContainText('有效线索率：规则已确认，核验流程待接入');
+ await expect(filters).toContainText('校区筛选：规则已确认，真实校区映射待补充');
  await expect(panel.getByRole('heading',{name:'24 小时接通率'})).toBeVisible();
  const owners=filters.getByRole('combobox',{name:'顾问'});
  const ownerIds=await owners.locator('option').evaluateAll(options=>options.map(option=>option.value).filter(Boolean));

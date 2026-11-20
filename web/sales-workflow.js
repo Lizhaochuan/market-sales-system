@@ -188,7 +188,7 @@
   const instantValue=at?dayKey(at)+'T'+shTimeText(at):'';
   const asOf=input(instant,'历史时点（上海时间）','as_of_at','datetime-local',instantValue);
   form.append(range,instant);
-  form.append(node('p','form-hint','校区筛选：等待线索与校区的归属映射'));
+  form.append(node('p','form-hint','校区筛选：规则已确认，真实校区映射待补充'));
   function describe(){
    const snapshot=mode.value==='snapshot';
    conditional(range,!snapshot);
@@ -695,7 +695,7 @@
   section.append(scroll);
   target.append(section);
  }
- function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(report.filters?.view_mode!=='snapshot'){renderFirstResponse(p);p.append(node('p','form-hint','有效线索率：等待核验规则确认'));}if(['event','snapshot'].includes(report.filters?.view_mode)){renderRecordedMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
+ function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(report.filters?.view_mode!=='snapshot'){renderFirstResponse(p);p.append(node('p','form-hint','有效线索率：规则已确认，核验流程待接入'));}if(['event','snapshot'].includes(report.filters?.view_mode)){renderRecordedMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
   renderExceptionReview(p,metricsQuery);
   renderSupervision(p,{offer:true});
   renderTransferSupervision(p);
@@ -1087,7 +1087,7 @@
   const section=node('section','panel');
   section.id='v35-market-metrics';
   section.append(node('h3','','市场录入与交接'));
-  section.append(node('p','form-hint','校区筛选：等待线索与校区的归属映射'));
+  section.append(node('p','form-hint','校区筛选：规则已确认，真实校区映射待补充'));
   const appliedQuery=marketMetricsQuery;
   const scope=marketStats.filters;
   const filters=node('form','field-stack');
