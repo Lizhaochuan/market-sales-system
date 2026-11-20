@@ -112,9 +112,15 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
   });
   let payment;
   await t.test('TC21/22/27: salesperson cannot verify; first verified partial payment succeeds but does not win',async()=>{
+   const before=good(await req('/metrics')).counts;
    good(await act(enrollLead,'submit-payment',{enrollment_id:enrollment.id,amount_cents:10000,receipt_ref:randomUUID(),payment_kind:'deposit',received_at:when(-1),evidence_ref:'虚构付款资料'}));let d=await detail(enrollLead);payment=d.records.find(r=>r.kind==='payments');
    assert.equal((await act(enrollLead,'verify-payment',{record_id:payment.id,evidence_ref:'销售自核'})).status,403);
    good(await act(enrollLead,'verify-payment',{record_id:payment.id,evidence_ref:'核实员查验实际到账'},F));d=await detail(enrollLead);const e=d.records.find(r=>r.id===enrollment.id);assert.equal(e.state,'successful');assert.equal(e.body.balance_cents,90000);assert.equal(d.workflow.terminal_state,'open');assert.equal((await act(enrollLead,'close-won',{reason:'只有定金'})).status,409);assert.ok(d.workflow.primary_activity_id);
+   const after=good(await req('/metrics')).counts;
+   for(const key of ['enrollment_success_orders','enrollment_success_students','historical_enrollment_success_orders','historical_enrollment_success_students']){
+    assert.equal(after[key],before[key]+1,key);
+   }
+   assert.equal(after.won_leads,before.won_leads);
   });
   await t.test('finance-only staff cannot read sales metrics but can reject a pending payment',async()=>{
    assert.equal((await req('/metrics',undefined,F)).status,403);
@@ -179,8 +185,21 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    good(await act(enrollLead,'submit-payment',{enrollment_id:enrollment.id,amount_cents:90000,receipt_ref:randomUUID(),payment_kind:'tuition',received_at:when(-1),evidence_ref:'第二笔收款资料'}));let d=await detail(enrollLead),p=d.records.find(r=>r.kind==='payments'&&r.state==='pending');good(await act(enrollLead,'verify-payment',{record_id:p.id,evidence_ref:'查验剩余款到账'},F));good(await act(enrollLead,'close-won',{reason:'独立协议核实与两笔有效款全额到账'}));assert.equal((await detail(enrollLead)).workflow.terminal_state,'won');assert.equal((await pool.query('SELECT count(*)::int n FROM ms.sale_events WHERE order_id=$1',[order])).rows[0].n,1);
   });
   await t.test('TC25: post-close refund requires audited reopening and independent correction, old success retained',async()=>{
+   const before=good(await req('/metrics')).counts;
+   const firstSuccess=(await detail(enrollLead)).records.find(r=>r.id===enrollment.id).body.first_success_at;
+   assert.ok(firstSuccess);
    good(await act(enrollLead,'request-correction',{enrollment_id:enrollment.id,reason:'家长申请退回定金'}));let d=await detail(enrollLead),cor=d.records.find(r=>r.kind==='corrections');good(await act(enrollLead,'approve-correction',{record_id:cor.id,reason:'核实退款事由',next:next({action:'coordination',title:'内部核实退款后的订单余额'})},M));
+   const underCorrection=good(await req('/metrics')).counts;
+   assert.equal(underCorrection.enrollment_success_orders,before.enrollment_success_orders-1);
+   assert.equal(underCorrection.enrollment_success_students,before.enrollment_success_students-1);
+   assert.equal(underCorrection.historical_enrollment_success_orders,before.historical_enrollment_success_orders);
+   assert.equal(underCorrection.historical_enrollment_success_students,before.historical_enrollment_success_students);
+   assert.equal(underCorrection.won_leads,before.won_leads-1);
    good(await act(enrollLead,'submit-refund',{payment_id:payment.id,correction_id:cor.id,amount_cents:10000,refund_ref:randomUUID(),reason:'定金退回',evidence_ref:'已批准退款资料'}));d=await detail(enrollLead);const refund=d.records.find(r=>r.kind==='refunds');good(await act(enrollLead,'verify-refund',{record_id:refund.id,evidence_ref:'独立核实实际退款'},F));d=await detail(enrollLead);assert.equal(d.workflow.terminal_state,'open');assert.ok(d.workflow.primary_activity_id);assert.equal(d.records.find(r=>r.id===enrollment.id).body.balance_cents,10000);assert.equal((await pool.query('SELECT count(*)::int n FROM ms.sale_events WHERE order_id=$1',[order])).rows[0].n,1);assert.equal(d.events.filter(e=>e.event_name==='V34_ENROLLMENT_SUCCESS').length,1);
+   assert.equal(d.records.find(r=>r.id===enrollment.id).body.first_success_at,firstSuccess);
+   const afterRefund=good(await req('/metrics')).counts;
+   assert.equal(afterRefund.historical_enrollment_success_orders,before.historical_enrollment_success_orders);
+   assert.equal(afterRefund.historical_enrollment_success_students,before.historical_enrollment_success_students);
   });
   await t.test('TC26/28: legacy facts stay raw and missing arrangements become an exception list',async()=>{
    const old=(await pool.query("INSERT INTO ms.leads(organization_id,owner_user_id,lead_state) VALUES($1,$2,'working') RETURNING id",[org,A])).rows[0].id;await pool.query("INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,after_business_json,reason_zh) VALUES($1,$2,'lead',$3,'LEAD_DESK_FOLLOWUP','{\"result\":\"准备报名\"}','旧版记录')",[org,A,old]);const list=good(await req(''));assert.equal(list.items.find(l=>l.id===old).needs_arrangement,true);assert.equal((await detail(old)).workflow,null);assert.equal((await detail(old)).events[0].after_business_json.result,'准备报名');good(await actOld(old));
