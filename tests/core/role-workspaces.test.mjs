@@ -123,5 +123,72 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.deepEqual(detail.events,original.events);
   assert.deepEqual(detail.records,original.records);
  });
+ await t.test('market listing and phone lookup omit archived students while duplicate detection and handoff still work',async()=>{
+  const phone='13900000050', contactName='市场归档回归家长';
+  const firstName='市场归档甲学生', secondName='市场归档乙学生';
+  const intake={phone,contact_name:contactName,student_name:firstName,source:'市场活动',notes:'仅市场可见的归档回归备注'};
+  const id=good(await w('/market',intake,K2)).lead_id;
+  const firstId=(await pool.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[id])).rows[0].student_id;
+  const secondId=(await pool.query(
+   'INSERT INTO ms.students(organization_id,owner_user_id,display_name) VALUES($1,$2,$3) RETURNING id',
+   [org,K2,secondName],
+  )).rows[0].id;
+  await pool.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'pending_review')",[id,secondId]);
+
+  const market=async()=>good(await w('/market',undefined,K2)).items.find(item=>item.id===id);
+  const lookup=async(user=A)=>good(await w('/lookup',{phone},user)).items;
+  const archive=async(studentId)=>pool.query('UPDATE ms.students SET archived_at=now() WHERE id=$1',[studentId]);
+  const claim=()=>w('/'+id+'/claim',{phone,next:next(1)});
+
+  assert.deepEqual((await market()).students.sort(),[firstName,secondName].sort());
+  await archive(firstId);
+  assert.deepEqual((await market()).students,[secondName]);
+  assert.deepEqual(await lookup(),[{
+   lead_id:id,status:'market_available',contact_name:contactName,source:'市场活动',students:[{id:secondId,name:secondName}],
+  }]);
+
+  await archive(secondId);
+  assert.equal((await market()).students,null);
+  const [match]=await lookup();
+  assert.equal(match.status,'market_available');
+  assert.deepEqual(match.students,[]);
+  assert.equal((await w('/market',intake,K2)).code,'PHONE_EXISTS');
+  assert.equal((await w('',{contact_name:contactName,contact_info:phone,origin_group:'sales',source:'到店',next:next(1)})).code,'PHONE_MATCH_FOUND');
+
+  assert.equal(good(await claim()).lead_id,id);
+  assert.equal((await market()).handoff_state,'sales');
+  assert.deepEqual((await market()).students,null);
+  assert.deepEqual(await lookup(),[{
+   lead_id:id,status:'sales_available',contact_name:contactName,owner_name:'销售A',students:[],
+  }]);
+  assert.deepEqual(await lookup(B),[{status:'assigned',owner_name:'销售A'}]);
+  const detail=good(await w('/'+id));
+  assert.ok(detail.records.some(r=>r.id===detail.workflow.primary_activity_id&&r.kind==='tasks'));
+  assert.ok(detail.events.some(entry=>entry.event_name==='V34_MARKET_HANDOFF_ACCEPTED'));
+  assert.ok(!detail.events.some(entry=>entry.event_name==='V34_MARKET_CAPTURED'));
+  const audit=(await pool.query(
+   "SELECT event_name FROM ms.audit_events WHERE organization_id=$1 AND target_type='lead' AND target_id=$2 AND event_name IN ('V34_MARKET_CAPTURED','V34_MARKET_HANDOFF_ACCEPTED') ORDER BY event_name",
+   [org,id],
+  )).rows;
+  assert.deepEqual(audit.map(entry=>entry.event_name),['V34_MARKET_CAPTURED','V34_MARKET_HANDOFF_ACCEPTED']);
+  const linked=(await pool.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[id])).rows;
+  assert.deepEqual(linked.map(row=>row.student_id).sort(),[firstId,secondId].sort());
+ });
+
+ await t.test('hidden archived student still blocks handoff when linked to another lead',async()=>{
+  const phone='13900000051';
+  const id=good(await w('/market',{phone,contact_name:'历史共享关联家长',student_name:'历史共享关联学生',source:'市场活动'},K2)).lead_id;
+  const studentId=(await pool.query('SELECT student_id FROM ms.lead_students WHERE lead_id=$1',[id])).rows[0].student_id;
+  await pool.query("INSERT INTO ms.lead_students(lead_id,student_id,confirmation_state) VALUES($1,$2,'pending_review')",[lead,studentId]);
+  await pool.query('UPDATE ms.students SET archived_at=now() WHERE id=$1',[studentId]);
+
+  const [match]=good(await w('/lookup',{phone})).items;
+  assert.equal(match.status,'market_available');
+  assert.deepEqual(match.students,[]);
+  const result=await w('/'+id+'/claim',{phone,next:next(1)});
+  assert.equal(result.status,409);
+  assert.equal(result.code,'STUDENT_REVIEW_REQUIRED');
+  assert.equal(good(await w('/market',undefined,K2)).items.find(item=>item.id===id).handoff_state,'market');
+ });
  }finally{if(app)await new Promise(r=>app.close(r));await pool.end();}
 });

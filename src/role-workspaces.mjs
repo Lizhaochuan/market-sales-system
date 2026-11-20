@@ -21,7 +21,7 @@ const text=(v,max=1000)=>{if(typeof v!=='string'||!v.trim()||v.trim().length>max
 const check=(b,keys)=>{if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!keys.includes(k)))fail(422,'VALIDATION_ERROR','包含不支持的字段');};
 export async function lockPhone(c,org,phone){await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[org+':phone:'+phone]);}
 async function matches(c,ctx,phone){return (await c.query(`SELECT d.lead_id,d.department,l.owner_user_id,u.display_name AS owner_name,co.display_name AS contact_name,e.event_type AS source,
- (SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.display_name)) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id) AS students
+ (SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.display_name)) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.archived_at IS NULL) AS students
  FROM ms_workspace.lead_directory d JOIN ms.leads l ON l.id=d.lead_id JOIN ms.contacts co ON co.id=l.contact_id LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id LEFT JOIN ms.contact_events e ON e.id=l.source_event_id
  WHERE d.organization_id=$1 AND d.phone=$2 ORDER BY d.created_at,d.lead_id`,[ctx.user.organization_id,phone])).rows;}
 export async function salesAssignee(c,ctx,id){
@@ -42,7 +42,7 @@ export async function departmentRoute(c,ctx,{method,parts,body},helpers){
  if(id==='market'){
   if(!a.market)fail(403,'DEPARTMENT_FORBIDDEN','市场工作台仅限市场人员及总管理者');
   if(method==='GET')return {handled:true,value:{access:a,items:(await c.query(`SELECT d.lead_id AS id,d.phone,d.marketing_notes,d.created_at,d.market_owner_id,u.display_name AS market_owner_name,d.department AS handoff_state,co.display_name AS contact_name,e.event_type AS source,
-   (SELECT jsonb_agg(s.display_name) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id) AS students
+   (SELECT jsonb_agg(s.display_name) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.archived_at IS NULL) AS students
    FROM ms_workspace.lead_directory d JOIN ms.leads l ON l.id=d.lead_id JOIN ms.contacts co ON co.id=l.contact_id JOIN ms.contact_events e ON e.id=l.source_event_id LEFT JOIN ms.staff_users u ON u.id=d.market_owner_id
    WHERE d.organization_id=$1 AND d.market_owner_id IS NOT NULL AND (d.market_owner_id=$2 OR $3) ORDER BY d.created_at DESC`,[org,actor,a.market_manager])).rows}};
   check(body,['phone','contact_name','student_name','source','notes']);const phone=phoneNumber(body.phone);await lockPhone(c,org,phone);
