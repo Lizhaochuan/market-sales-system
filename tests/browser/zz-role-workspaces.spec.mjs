@@ -920,18 +920,18 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  const owners=filters.getByRole('combobox',{name:'顾问'});
  const ownerIds=await owners.locator('option').evaluateAll(options=>options.map(option=>option.value).filter(Boolean));
  expect(ownerIds.length).toBeGreaterThanOrEqual(2);
- const seed=async(owner,createdAt,title)=>{
-  const result=await page.evaluate(({owner,number,title})=>api('/api/v1/isolated-workspace/workflow',{
+ const seed=async(owner,createdAt,title,source='到店')=>{
+  const result=await page.evaluate(({owner,number,title,source})=>api('/api/v1/isolated-workspace/workflow',{
    method:'POST',body:{
-    owner_user_id:owner,contact_name:title+'家长',student_name:title+'学生',contact_info:number,origin_group:'sales',source:'到店',
+    owner_user_id:owner,contact_name:title+'家长',student_name:title+'学生',contact_info:number,origin_group:'sales',source,
     next:{action:'call',method:'phone',title,due_at:new Date(Date.now()+86400000).toISOString()},
    },
-  }),{owner,number:phone(),title});
+  }),{owner,number:phone(),title,source});
   await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[result.lead_id,createdAt]);
   return result;
  };
  await seed(ownerIds[0],'2024-04-01T00:00:00+08:00','窗口首位顾问测试');
- const lostLead=await seed(ownerIds[1],'2024-04-01T23:59:59+08:00','窗口第二位顾问测试');
+ const lostLead=await seed(ownerIds[1],'2024-04-01T23:59:59+08:00','窗口第二位顾问测试','网络咨询');
  await seed(ownerIds[0],'2024-04-02T00:00:00+08:00','窗口之外测试');
  await page.evaluate(({lead_id,workflow})=>api('/api/v1/isolated-workspace/workflow/'+lead_id+'/close-lost',{
   method:'POST',body:{expected_version:workflow.version,reason:'价格原因',feedback:'家长明确反馈',evidence_ref:'复验虚构依据'},
@@ -946,6 +946,17 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await expect(filters.getByRole('status')).toContainText('请同时选择');
  await end.fill('2024-04-01');
  await apply.click();
+ await expect(count).toHaveText('2');
+ const channels=panel.locator('#v34-metrics-sources');
+ await expect(channels).toContainText('待配置成本源');
+ await expect(channels.locator('article').filter({hasText:'网络咨询'})).toContainText('当前失单 1 条');
+ await channels.getByRole('button',{name:'筛选来源：网络咨询'}).click();
+ await expect(channels).toContainText('当前来源筛选：网络咨询');
+ await expect(count).toHaveText('1');
+ await panel.getByRole('button',{name:'查看线索明细'}).click();
+ await expect(panel.locator('#v34-metrics-leads')).toContainText('窗口第二位顾问测试家长');
+ await expect(panel.locator('#v34-metrics-leads')).not.toContainText('窗口首位顾问测试家长');
+ await channels.getByRole('button',{name:'清除来源筛选'}).click();
  await expect(count).toHaveText('2');
  const openDrilldown=panel.getByRole('button',{name:'查看线索明细'});
  const drilldown=panel.locator('#v34-metrics-leads');

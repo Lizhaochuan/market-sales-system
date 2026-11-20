@@ -199,10 +199,47 @@
     query.set('end_at',shDayShift(end.value,1)+'T00:00:00+08:00');
    }
    if(owner?.value)query.set('owner_id',owner.value);
+   if(filters?.source!=null)query.set('source',filters.source);
    metricsQuery=query.size?'?'+query.toString():'';
    submit.disabled=true;
    refresh(true);
   });
+ }
+ function renderOriginalSources(target){
+  const section=node('section','panel');
+  section.id='v34-metrics-sources';
+  section.append(node('h3','','原始来源对比'));
+  const selectedSource=report.filters?.source;
+  const sourceLabel=source=>source||'未记录来源';
+  const applySource=source=>{
+   const query=new URLSearchParams(metricsQuery);
+   if(source===null)query.delete('source');
+   else query.set('source',source);
+   metricsQuery=query.size?'?'+query.toString():'';
+   refresh(true);
+  };
+  if(selectedSource!=null){
+   section.append(node('p','form-hint','当前来源筛选：'+sourceLabel(selectedSource)));
+   btn(section,'清除来源筛选',()=>applySource(null));
+  }
+  if(report.channel_cost_status==='COST_NOT_CONFIGURED'){
+   section.append(node('p','form-hint','待配置成本源'));
+  }
+  const rows=report.by_source||[];
+  if(!rows.length)section.append(node('p','','当前筛选范围内没有线索'));
+  for(const source of rows){
+   const row=node('article','lead-row');
+   row.append(node('strong','',sourceLabel(source.source)));
+   row.append(node('p','fineprint',
+    '线索 '+source.leads+' 条 · 跟进中 '+source.open+' 条 · 正式成交 '+source.won+' 条 · 当前失单 '+source.lost+' 条'+
+    (source.legacy_closed?' · 旧记录已关闭 '+source.legacy_closed+' 条':''),
+   ));
+   if(selectedSource==null&&source.source.length<=200){
+    btn(row,'筛选来源：'+sourceLabel(source.source),()=>applySource(source.source));
+   }
+   section.append(row);
+  }
+  target.append(section);
  }
  const metricsDrilldownTitles={
   leads:'线索明细',
@@ -274,6 +311,7 @@
   if(options.manager){const c=form(panel,'v34-catalog','本地课程标准价目（主管）','保存本地价目',f=>{const b=data(f),old=options.catalog.find(p=>p.body.course_label.toLowerCase()===b.course_label.toLowerCase());return api(root+'/catalog',{method:'POST',body:{course_label:b.course_label,standard_unit_cents:cents(b.amount),reason:b.reason,expected_version:old?.version}});},{version:null});input(c.f,'课程名称','course_label','text','',true);input(c.f,'每课时标准价格（元）','amount','text','',true);input(c.f,'价格维护依据','reason','text','',true);c.f.append(c.submit);}
   const confirmed=report.counts.confirmed_meeting_students||0;p.append(node('p','','已确认预约到场率：'+(confirmed?((report.counts.scheduled_meeting_attended_students||0)/confirmed*100).toFixed(1)+'%':'暂无分母')+'（主动到访单列，不混入预约到场率分母）'));
   for(const o of report.by_owner)p.append(node('p','',o.name+' · 当前客户 '+o.leads+' · Open '+o.open+' · Won '+o.won+' · Lost '+o.lost+' · 当前有效报名订单 '+o.enrollment_success_orders+' · 当前客户已核实净收款 '+yuan(o.verified_net_cents)+' · 完成沟通 '+o.completed_communications+' 次 · 逾期活动 '+o.overdue_activities+' 项 · 首要安排逾期客户 '+o.overdue_primary_leads+' 条 · 待补安排 '+o.missing_next));
+  renderOriginalSources(p);
   const currentLosses=Object.entries(report.current_lost_reasons||{});
   p.append(node('h3','','当前失单原因'));
   if(!currentLosses.length)p.append(node('p','fineprint','暂无当前失单原因'));

@@ -316,16 +316,20 @@ async function corrections(c,ctx,l,w,action,b){
 }
 function maskPhone(v){if(!v)return '';const s=String(v).trim();if(s.length>=8)return s.slice(0,s.length-8)+'****'+s.slice(-4);if(s.length>=5)return s.slice(0,2)+'***'+s.slice(-2);return '****';}
 function metricsScope(query={}){
- fields(query,['view_mode','start_at','end_at','owner_id']);
- const {view_mode,start_at,end_at,owner_id}=query;
+ fields(query,['view_mode','start_at','end_at','owner_id','source']);
+ const {view_mode,start_at,end_at,owner_id,source}=query;
  if(view_mode!==undefined&&view_mode!=='cohort'){
   fail(422,'VALIDATION_ERROR','当前仅支持按线索建档时间统计');
  }
  if(owner_id!==undefined&&!uuid(owner_id)){
   fail(422,'VALIDATION_ERROR','请选择有效的顾问');
  }
+ if(source!==undefined&&(typeof source!=='string'||source.length>200)){
+  fail(422,'VALIDATION_ERROR','请选择有效的原始来源');
+ }
+ const dimensions={owner_id:owner_id??null,source:source?.trim()??null};
  const cohort=view_mode==='cohort'||start_at!==undefined||end_at!==undefined;
- if(!cohort)return {view_mode:'current',start_at:null,end_at:null,owner_id:owner_id??null};
+ if(!cohort)return {view_mode:'current',start_at:null,end_at:null,...dimensions};
  function boundary(value){
   const match=typeof value==='string'&&/^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-]\d{2}:[0-5]\d)$/.exec(value);
   if(!match)fail(422,'DATE_REQUIRED','请选择起止时间并指定时区');
@@ -337,13 +341,17 @@ function metricsScope(query={}){
  }
  const start=boundary(start_at),end=boundary(end_at);
  if(Date.parse(start)>=Date.parse(end))fail(422,'VALIDATION_ERROR','结束时间须晚于开始时间');
- return {view_mode:'cohort',start_at:start,end_at:end,owner_id:owner_id??null};
+ return {view_mode:'cohort',start_at:start,end_at:end,...dimensions};
 }
 function salesLeadScope(ctx,scope){
  const params=[ctx.user.organization_id,ctx.user.id,ctx.manager];
  const conditions=['l.organization_id=$1','(l.owner_user_id=$2 OR $3::boolean)'];
  if(ctx.roleWorkspaces)conditions.push("NOT EXISTS(SELECT 1 FROM ms_workspace.lead_directory d WHERE d.lead_id=l.id AND d.department='market')");
  if(scope?.owner_id)conditions.push(`l.owner_user_id=$${params.push(scope.owner_id)}::uuid`);
+ if(scope?.source!=null)conditions.push(`COALESCE((
+  SELECT NULLIF(btrim(source_event.event_type),'') FROM ms.contact_events source_event
+  WHERE source_event.id=l.source_event_id AND source_event.organization_id=l.organization_id
+ ),'')=$${params.push(scope.source)}`);
  if(scope?.start_at){
   conditions.push(`l.created_at>=$${params.push(scope.start_at)}::timestamptz`);
   conditions.push(`l.created_at<$${params.push(scope.end_at)}::timestamptz`);
@@ -408,14 +416,14 @@ async function listing(c,ctx,query={},scope=null){
   }
   qWhere=` AND (c.display_name ILIKE ${qIdx} OR w.contact_info ILIKE ${qIdx} OR EXISTS(SELECT 1 FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND ${activeScopedStudent} AND s.display_name ILIKE ${qIdx})${dClause})`;
  }
- const rows=(await c.query(`SELECT l.id,l.lead_state,l.owner_user_id,l.created_at,c.display_name AS contact_name,u.display_name AS owner_name,u.status AS owner_status,e.event_type AS original_source,(SELECT a.after_business_json->>'source' FROM ms.audit_events a WHERE a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='LEAD_SOURCE_UPDATED' ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS current_source,
+ const rows=(await c.query(`SELECT l.id,l.lead_state,l.owner_user_id,l.created_at,c.display_name AS contact_name,u.display_name AS owner_name,u.status AS owner_status,NULLIF(btrim(e.event_type),'') AS original_source,(SELECT a.after_business_json->>'source' FROM ms.audit_events a WHERE a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='LEAD_SOURCE_UPDATED' ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS current_source,
   w.stage,w.version,w.updated_at,w.terminal_state,w.primary_activity_id,w.do_not_contact,w.contact_info,
   a.body AS next_action,a.state AS activity_state,a.kind AS activity_kind,
   (SELECT jsonb_build_object('result',ae.after_business_json->>'result','failure_reason',ae.after_business_json->>'failure_reason','method',ae.after_business_json->>'method','happened_at',ae.happened_at) FROM ms.audit_events ae WHERE ae.organization_id=l.organization_id AND ae.target_type='lead' AND ae.target_id=l.id AND ae.event_name='V34_COMMUNICATION' ORDER BY ae.happened_at DESC,ae.id DESC LIMIT 1) AS last_communication,
   (SELECT jsonb_build_object('type',ap.body->>'type','state',ap.state,'due_at',ap.body->>'due_at','actual_attendance',ap.body->>'actual_attendance') FROM ms_workspace.records ap WHERE ap.lead_id=l.id AND ap.organization_id=l.organization_id AND ap.kind='appointments' ORDER BY (ap.state IN('pending','confirmed','rescheduled','in_progress')) DESC,(ap.state<>'cancelled') DESC,ap.updated_at DESC,ap.created_at DESC,ap.id DESC LIMIT 1) AS latest_appointment,
   (SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.display_name)) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND ${activeScopedStudent}) AS students,
   (SELECT x.after_business_json->>'origin_group' FROM ms.audit_events x WHERE x.organization_id=l.organization_id AND x.target_type='lead' AND x.target_id=l.id AND x.event_name='LEAD_DESK_CREATED' ORDER BY x.happened_at LIMIT 1) AS origin_group
-  FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id LEFT JOIN ms.contact_events e ON e.id=l.source_event_id
+  FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id LEFT JOIN ms.contact_events e ON e.id=l.source_event_id AND e.organization_id=l.organization_id
   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms_workspace.records a ON a.id=w.primary_activity_id
   WHERE ${where}${qWhere} ORDER BY l.created_at DESC,l.id`,params)).rows;
  const incoming=(await c.query("SELECT r.id,r.lead_id,r.body->>'reason' AS reason,w.version FROM ms_workspace.records r JOIN ms_workspace.lead_workflow w ON w.lead_id=r.lead_id WHERE r.organization_id=$1 AND r.kind='corrections' AND r.state='approved' AND r.body->>'type'='lead_transfer' AND r.body->>'target_owner'=$2",[ctx.user.organization_id,ctx.user.id])).rows;
@@ -466,6 +474,15 @@ async function metrics(c,ctx,query){
   // Workflow versions break timestamp ties and follow the lead's transition order.
   if(!previous||(version??0)>=previous.version)latestLossByLead.set(event.target_id,{reason,version:version??0});
  }
+ const sources=new Map();
+ for(const lead of list.items){
+  const source=lead.original_source??'';
+  if(!sources.has(source))sources.set(source,{source,leads:0,open:0,won:0,lost:0,legacy_closed:0});
+  const row=sources.get(source);
+  row.leads++;
+  row[lead.terminal_state]++;
+ }
+ const bySource=[...sources.values()].sort((a,b)=>b.leads-a.leads||a.source.localeCompare(b.source,'zh-CN'));
  const currentLostReasons=new Map();
  for(const lead of list.items){
   if(lead.terminal_state!=='lost')continue;
@@ -477,5 +494,5 @@ async function metrics(c,ctx,query){
   ...enroll.filter(r=>r.state!=='cancelled'&&!r.body.agreement_confirmed).map(r=>({id:r.id,lead_id:r.lead_id,kind:'agreement',title:'报名协议待独立核实',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.submitted_by!==ctx.user.id})),
   ...records.filter(r=>r.kind==='corrections'&&r.state==='pending').map(r=>({id:r.id,lead_id:r.lead_id,kind:r.body.type,title:r.body.type==='lead_transfer'?'客户转交待独立复核':'报名退款/取消纠正待审批',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.requested_by!==ctx.user.id&&r.body.target_owner!==ctx.user.id}))
  ]:[];
- return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons:Object.fromEntries(currentLostReasons),pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
 }

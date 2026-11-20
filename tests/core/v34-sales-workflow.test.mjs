@@ -306,16 +306,16 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
   });
   await t.test('metrics filters a lead creation cohort by an inclusive start, exclusive end and authorized owner',async()=>{
    const start='2024-04-01T00:00:00+08:00', end='2024-04-02T00:00:00+08:00';
-   const seed=async(user,createdAt)=>{
+   const seed=async(user,createdAt,source='主动咨询')=>{
     const response=good(await req('',{
-     contact_name:'统计窗口家长',student_name:'统计窗口学生',origin_group:'sales',source:'主动咨询',next:next(),
+     contact_name:'统计窗口家长',student_name:'统计窗口学生',origin_group:'sales',source,next:next(),
     },user));
     await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[response.lead_id,createdAt]);
     return response.lead_id;
    };
    const before=await seed(A,'2024-03-31T23:59:59+08:00');
    const first=await seed(A,start);
-   const other=await seed(B,'2024-04-01T12:00:00+08:00');
+   const other=await seed(B,'2024-04-01T12:00:00+08:00','网络咨询');
    const after=await seed(A,end);
    const foreignOrg=randomUUID();
    await pool.query("INSERT INTO ms.organizations(id,name) VALUES($1,'统计窗口其他机构')",[foreignOrg]);
@@ -325,7 +325,7 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    const window={view_mode:'cohort',start_at:start,end_at:end};
    const team=good(await scoped(window,M));
    assert.equal(team.counts.leads,2);
-   assert.deepEqual(team.filters,{view_mode:'cohort',start_at:'2024-03-31T16:00:00.000Z',end_at:'2024-04-01T16:00:00.000Z',owner_id:null});
+   assert.deepEqual(team.filters,{view_mode:'cohort',start_at:'2024-03-31T16:00:00.000Z',end_at:'2024-04-01T16:00:00.000Z',owner_id:null,source:null});
    assert.deepEqual(team.reminders.map(row=>row.lead_id).sort(),[first,other].sort());
    assert.ok(team.reminders.every(row=>![before,after].includes(row.lead_id)));
    assert.deepEqual(good(await scoped({...window,owner_id:B},M)).reminders.map(row=>row.lead_id),[other]);
@@ -354,6 +354,29 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.notEqual(studentPage.items[0].id,studentPage2.items[0].id);
    assert.equal(good(await drill({...window,metric:'students',owner_id:B},M)).total,1);
    assert.equal(good(await drill({...window,metric:'students',owner_id:B},A)).total,0);
+   assert.deepEqual(team.by_source.map(row=>row.source).sort(),['主动咨询','网络咨询'].sort());
+   assert.equal(team.by_source.reduce((total,row)=>total+row.leads,0),team.counts.leads);
+   assert.equal(team.channel_cost_status,'COST_NOT_CONFIGURED');
+   for(const row of team.by_source){
+    assert.equal(row.open+row.won+row.lost+row.legacy_closed,row.leads);
+    assert.deepEqual(Object.keys(row).sort(),['leads','legacy_closed','lost','open','source','won']);
+   }
+
+   good(await act(first,'source',{source:'到店'}));
+   assert.equal(good(await scoped({...window,source:'到店'},M)).counts.leads,0);
+   const original=good(await scoped({...window,source:'主动咨询'},M));
+   assert.equal(original.counts.leads,1);
+   assert.deepEqual(good(await drill({...window,source:'主动咨询'},M)).items.map(item=>item.id),[first]);
+   assert.equal(good(await drill({...window,source:'网络咨询',owner_id:B,metric:'students'},M)).total,1);
+   assert.equal(good(await drill({...window,source:'网络咨询',owner_id:B},A)).total,0);
+
+   const unknown=(await pool.query(
+    "INSERT INTO ms.leads(organization_id,owner_user_id,lead_state,created_at) VALUES($1,$2,'working',$3) RETURNING id",
+    [org,A,start],
+   )).rows[0].id;
+   const missing=good(await scoped({...window,source:''},M));
+   assert.deepEqual(missing.by_source,[{source:'',leads:1,open:1,won:0,lost:0,legacy_closed:0}]);
+   assert.deepEqual(good(await drill({...window,source:''},M)).items.map(item=>item.id),[unknown]);
    for(const invalid of [{metric:'unsupported'},{page:'0'},{page_size:'51'},{...window,view_mode:'event'}]){
     assert.equal((await drill(invalid,M)).status,422,JSON.stringify(invalid));
    }
