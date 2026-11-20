@@ -923,6 +923,7 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  const panel=page.locator('#v34-metrics');
  const filters=panel.locator('#v34-metrics-filters');
  await expect(filters).toBeVisible();
+ await expect(panel).toContainText('首响与 24 小时接通率：待确认统计规则');
  const owners=filters.getByRole('combobox',{name:'顾问'});
  const ownerIds=await owners.locator('option').evaluateAll(options=>options.map(option=>option.value).filter(Boolean));
  expect(ownerIds.length).toBeGreaterThanOrEqual(2);
@@ -1085,6 +1086,7 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await expect(cash).toContainText('已核实收款 ¥100.00 · 1 笔');
  await expect(cash).toContainText('已核实退款 ¥0.00 · 0 笔');
  await expect(cash).toContainText('净额 ¥100.00');
+ await expect(cash).toContainText('历史应收及未收余额：缺少可回溯的订单与款项分配版本');
  await cash.getByRole('button',{name:'查看历史已核实收款明细'}).click();
  const cashDetail=panel.locator('#v34-metrics-snapshot_verified_receipts');
  await expect(cashDetail).toContainText('共 1 笔款项');
