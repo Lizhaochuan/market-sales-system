@@ -176,6 +176,7 @@ test('UAT fixes: Step 2 notes/carryover/jump, Step 3 future default, Step 4 pres
  await expect(page.locator('#lead-link-form [name="evidence_ref"]')).toHaveValue('');
  await page.getByRole('button',{name:'关联学生（待核实）'}).click();
  await expect(page.locator('#leads-list')).toContainText('已关联学生（待核实）');
+ await expect(page.locator('#toast')).toHaveText('线索与学生已建立待核实关联');
 
  const leadCard=page.locator('#leads-list .record').filter({hasText:contactName});
  await leadCard.getByRole('combobox',{name:'当前线索来源'}).selectOption('市场转入');
