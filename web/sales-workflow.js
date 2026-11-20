@@ -647,6 +647,14 @@
    grid.append(tile);
   }
   p.append(grid);
+  if(report.activity_counts){
+   const {communications,appointments,completed_activities}=report.activity_counts;
+   const section=node('section','panel');
+   section.id='v34-activity-counts';
+   section.append(node('h3','','所选线索的活动记录'),
+    node('p','','沟通记录 '+communications+' 次 · 预约记录 '+appointments+' 项 · 已完成活动 '+completed_activities+' 项'));
+   p.append(section);
+  }
   p.append(node('p','','已核实净收款：'+yuan(report.counts.received_cents||0)+' · 未结清：'+yuan(report.counts.unsettled_cents||0)));
   const booked=report.counts.trial_booked_students||0,completed=report.counts.trial_completed_students||0;p.append(node('p','','试听完成率：'+(booked?(completed/booked*100).toFixed(1)+'%':'暂无分母')+' · 试听后报名率：'+(completed?((report.counts.trial_to_enrollment_students||0)/completed*100).toFixed(1)+'%':'暂无分母')));
   if(options.manager){const c=form(panel,'v34-catalog','本地课程标准价目（主管）','保存本地价目',f=>{const b=data(f),old=options.catalog.find(p=>p.body.course_label.toLowerCase()===b.course_label.toLowerCase());return api(root+'/catalog',{method:'POST',body:{course_label:b.course_label,standard_unit_cents:cents(b.amount),reason:b.reason,expected_version:old?.version}});},{version:null});input(c.f,'课程名称','course_label','text','',true);input(c.f,'每课时标准价格（元）','amount','text','',true);input(c.f,'价格维护依据','reason','text','',true);c.f.append(c.submit);}

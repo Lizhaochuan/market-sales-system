@@ -994,6 +994,10 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
   "INSERT INTO ms.audit_events(organization_id,service_actor,target_type,target_id,event_name,happened_at,after_business_json) SELECT organization_id,'playwright-fixture','lead',id,'V34_CLOSED_LOST',$2,$3 FROM ms.leads WHERE id=$1",
   [lostLead.lead_id,'2024-04-01T09:00:00+08:00',{workflow_version:2,stage:'declined',terminal_state:'lost'}],
  );
+ await pool.query(
+  "INSERT INTO ms.audit_events(organization_id,service_actor,target_type,target_id,event_name,happened_at,after_business_json) SELECT organization_id,'playwright-fixture','lead',id,'V34_COMMUNICATION',$2,$3 FROM ms.leads WHERE id=$1",
+  [lostLead.lead_id,'2024-04-01T09:15:00+08:00',{method:'phone',result:'communicated',category:'online'}],
+ );
  const oldActivity=(await pool.query(
   "INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,kind,state,body,version,created_at) SELECT organization_id,owner_user_id,id,'appointments','completed','{}',2,$2 FROM ms.leads WHERE id=$1 RETURNING id,owner_user_id",
   [lostLead.lead_id,'2024-04-01T08:15:00+08:00'],
@@ -1035,6 +1039,8 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await end.fill('2024-04-01');
  await apply.click();
  await expect(count).toHaveText('2');
+ const activityCounts=panel.locator('#v34-activity-counts');
+ await expect(activityCounts).toContainText('沟通记录 1 次 · 预约记录 2 项 · 已完成活动 1 项');
  const channels=panel.locator('#v34-metrics-sources');
  await expect(channels).toContainText('待配置成本源');
  await expect(channels.locator('article').filter({hasText:'网络咨询'})).toContainText('当前失单 1 条');
@@ -1053,10 +1059,14 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await expect(drilldown).toContainText('窗口首位顾问测试家长');
  await expect(drilldown).toContainText('窗口第二位顾问测试家长');
  await expect(drilldown).not.toContainText('窗口之外测试家长');
+ await owners.selectOption(ownerIds[0]);
+ await apply.click();
+ await expect(activityCounts).toContainText('沟通记录 0 次 · 预约记录 0 项 · 已完成活动 0 项');
  await owners.selectOption(ownerIds[1]);
  await apply.click();
  await expect(count).toHaveText('1');
  await expect(owners).toHaveValue(ownerIds[1]);
+ await expect(activityCounts).toContainText('沟通记录 1 次 · 预约记录 2 项 · 已完成活动 1 项');
  await expect(start).toHaveValue('2024-04-01');
  await expect(end).toHaveValue('2024-04-01');
  await expect(drilldown).toHaveCount(0);
@@ -1092,6 +1102,7 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await mode.selectOption('event');
  await apply.click();
  await expect(panel.getByRole('heading',{name:'当期发生量'})).toBeVisible();
+ await expect(activityCounts).toHaveCount(0);
  const reopened=panel.locator('.stat-card').filter({has:page.getByText('失单后重开（次）',{exact:true})});
  await expect(reopened.locator('strong')).toHaveText('1');
  await expect(panel.getByRole('button',{name:'查看线索明细'})).toHaveCount(0);
