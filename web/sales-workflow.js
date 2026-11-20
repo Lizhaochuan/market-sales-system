@@ -287,6 +287,7 @@
   };
  const snapshotMetricsLabels={
   snapshot_leads:'已建档线索（条）',
+  snapshot_students:'当时已关联学生（人）',
   snapshot_open:'当时跟进中（条）',
   snapshot_won:'当时正式成交（条）',
   snapshot_lost:'当时失单（条）',
@@ -311,7 +312,7 @@
  }
  function renderMetricsDrilldown(target,scope,metric){
   const section=node('section','panel');
-  const students=metric==='students',period=Object.hasOwn(eventMetricsLabels,metric);
+  const students=metric==='students'||metric==='snapshot_students',period=Object.hasOwn(eventMetricsLabels,metric);
   const cash=Object.hasOwn(cashDrilldownTitles,metric);
   const snapshot=cash||Object.hasOwn(snapshotMetricsLabels,metric);
   const activity=snapshot&&metric.endsWith('_activities');
@@ -338,8 +339,8 @@
     for(const item of data.items){
      const row=node('article','lead-row');
      if(students){
-      row.append(node('strong','',item.display_name||'未填写学生姓名'));
-      row.append(node('p','fineprint','在当前筛选范围内关联 '+item.lead_count+' 条线索'));
+      row.append(node('strong','',item.display_name||(snapshot?'当前不可查看学生姓名':'未填写学生姓名')));
+      row.append(node('p','fineprint',(snapshot?'所选时点关联 ':'在当前筛选范围内关联 ')+item.lead_count+' 条线索'));
      }else{
       row.append(node('strong','',item.contact_name||'未填写家长姓名'));
       const recordTime=item.recorded_at?dayKey(new Date(item.recorded_at))+' '+shTimeText(item.recorded_at)+' 记录':null;
@@ -390,6 +391,13 @@
   const appliedScope=metricsQuery;
   for(const [key,label]of Object.entries(labels)){
    const tile=node('div','stat-card');
+   if(key==='snapshot_students'&&!report.student_history?.available){
+    tile.append(node('p','',label),node('strong','','证据不足'));
+    const since=report.student_history?.started_at;
+    if(since)tile.append(node('p','fineprint','历史记录始于 '+dayKey(new Date(since))+' '+shTimeText(since)+'（上海时间）'));
+    grid.append(tile);
+    continue;
+   }
    tile.append(node('p','',label),node('strong','',String(counts[key]??0)));
    btn(tile,'查看'+label.replace(/（.）$/,'')+'明细',()=>{
     target.querySelector('[data-metrics-drilldown]')?.remove();

@@ -551,17 +551,70 @@ function historicalActivityStates(ctx,scope){
   WHERE r.kind IN ('tasks','appointments') AND r.created_at <= $${at}::timestamptz
  )`};
 }
-const snapshotCashMetrics=new Map([
- ['snapshot_verified_receipts','receipt'],['snapshot_verified_refunds','refund'],
-]);
-function historicalCashFacts(ctx,scope){
+function historicalVisibleLeads(ctx,scope){
  const {where,params}=salesLeadScope(ctx,scope);
  const at=params.push(scope.as_of_at);
  const sql=`
   WITH visible_leads AS (
    SELECT l.id,l.contact_id,l.owner_user_id FROM ms.leads l
    WHERE ${where} AND l.created_at <= $${at}::timestamptz
-  ), verified_records AS (
+  )`;
+ return {sql,params,at};
+}
+async function historicalStudentCoverage(c,scope){
+ const result=await c.query(
+  'SELECT to_jsonb(applied_at) AS started_at,applied_at <= $1::timestamptz AS available FROM ms_workspace.schema_versions WHERE version=36',
+  [scope.as_of_at],
+ );
+ return result.rows[0]??{started_at:null,available:false};
+}
+function historicalStudents(ctx,scope){
+ const {sql,params,at}=historicalVisibleLeads(ctx,scope);
+ return {params,sql:`${sql}, link_snapshot AS (
+  SELECT DISTINCT ON (h.lead_id,h.student_id) h.lead_id,h.student_id,h.linked
+  FROM visible_leads l JOIN ms_workspace.lead_student_history h ON h.lead_id=l.id
+  WHERE h.recorded_at <= $${at}::timestamptz
+  ORDER BY h.lead_id,h.student_id,h.recorded_at DESC,h.event_id DESC
+ ), linked_students AS (
+  SELECT student_id,count(*)::int AS lead_count FROM link_snapshot WHERE linked GROUP BY student_id
+ ), student_snapshot AS (
+  SELECT l.student_id,l.lead_count
+  FROM linked_students l
+  JOIN LATERAL (
+   SELECT active FROM ms_workspace.student_archive_history h
+   WHERE h.organization_id=$1 AND h.student_id=l.student_id AND h.recorded_at <= $${at}::timestamptz
+   ORDER BY h.recorded_at DESC,h.event_id DESC LIMIT 1
+  ) h ON h.active
+ )`};
+}
+async function snapshotStudentDrilldown(c,ctx,scope,page,pageSize){
+ const coverage=await historicalStudentCoverage(c,scope);
+ if(!coverage.available)fail(422,'STUDENT_HISTORY_UNAVAILABLE','所选时点缺少可核对的学生关联历史');
+ const {sql,params}=historicalStudents(ctx,scope);
+ const limit=params.push(pageSize),offset=params.push((page-1)*pageSize);
+ const result=(await c.query(`${sql}, matching AS (
+  SELECT snapshot.student_id AS sort_id,s.id,s.display_name,snapshot.lead_count
+  FROM student_snapshot snapshot
+  LEFT JOIN ms.students s ON s.id=snapshot.student_id AND s.organization_id=$1 AND s.archived_at IS NULL
+   AND EXISTS (
+    SELECT 1 FROM link_snapshot h JOIN ms.lead_students current_link
+     ON current_link.lead_id=h.lead_id AND current_link.student_id=h.student_id
+    WHERE h.linked AND h.student_id=snapshot.student_id AND current_link.confirmation_state<>'withdrawn'
+   )
+ ), page_rows AS (
+  SELECT * FROM matching ORDER BY display_name NULLS LAST,sort_id LIMIT $${limit} OFFSET $${offset}
+ )
+ SELECT (SELECT count(*)::int FROM matching) AS total,
+  COALESCE(jsonb_agg(to_jsonb(page_rows)-'sort_id' ORDER BY display_name NULLS LAST,sort_id),'[]'::jsonb) AS items
+ FROM page_rows`,params)).rows[0];
+ return {...flags,metric:'snapshot_students',filters:scope,page,page_size:pageSize,...result};
+}
+const snapshotCashMetrics=new Map([
+ ['snapshot_verified_receipts','receipt'],['snapshot_verified_refunds','refund'],
+]);
+function historicalCashFacts(ctx,scope){
+ const {sql:visible,params,at}=historicalVisibleLeads(ctx,scope);
+ const sql=`${visible}, verified_records AS (
    SELECT r.id,r.lead_id,r.kind,h.body
    FROM visible_leads l JOIN ms_workspace.records r ON r.lead_id=l.id AND r.organization_id=$1
    JOIN LATERAL (
@@ -636,7 +689,14 @@ async function snapshotMetrics(c,ctx,scope){
          ${activityCounts}
   FROM snapshot`,params)).rows[0];
  const snapshot_cash=await snapshotCash(c,ctx,scope);
- return {...flags,timezone:'Asia/Shanghai',filters:scope,snapshot_counts,snapshot_cash};
+ const student_history=await historicalStudentCoverage(c,scope);
+ if(student_history.available){
+  const studentQuery=historicalStudents(ctx,scope);
+  snapshot_counts.snapshot_students=(await c.query(
+   `${studentQuery.sql} SELECT count(*)::int AS total FROM student_snapshot`,studentQuery.params,
+  )).rows[0].total;
+ }
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,snapshot_counts,snapshot_cash,student_history};
 }
 async function snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize){
  const {sql,params}=historicalActivityStates(ctx,scope);
@@ -657,6 +717,7 @@ async function snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize){
  return {...flags,metric,filters:scope,page,page_size:pageSize,...result};
 }
 async function snapshotDrilldown(c,ctx,scope,metric,page,pageSize){
+ if(metric==='snapshot_students')return snapshotStudentDrilldown(c,ctx,scope,page,pageSize);
  if(snapshotCashMetrics.has(metric))return snapshotCashDrilldown(c,ctx,scope,metric,page,pageSize);
  if(snapshotActivityMetrics.has(metric))return snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize);
  if(!snapshotMetricStates.has(metric))fail(422,'VALIDATION_ERROR','该历史时点指标暂不支持查看明细');

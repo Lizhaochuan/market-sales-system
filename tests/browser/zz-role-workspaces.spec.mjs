@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';import pg from 'pg';import {readFile} from 'node:fs/promises';import {createApp} from '../../src/app.mjs';
 let pool,app,url;const pass='0';
-test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
+test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
 test.afterAll(async()=>{if(app)await new Promise(r=>app.close(r));await pool?.end();});
 async function login(page,who='sales-a'){await page.goto(url);await page.locator('#login-form [name="account_code"]').selectOption(who);await page.locator('#login-form [name="passphrase"]').fill(pass);await page.locator('#login-form').getByRole('button',{name:'进入工作台'}).click();await expect(page.locator('#sales-workflow')).toBeVisible();}
 async function lookup(page,phone){await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();await page.locator('#v35-lookup [name="phone"]').fill(phone);await page.locator('#v35-lookup [name="phone"]').press('Enter');}
@@ -1048,6 +1048,10 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await apply.click();
  await expect(panel.getByRole('heading',{name:'历史时点状态'})).toBeVisible();
  await expect(asOf).toHaveValue('2024-04-01T09:30');
+ const historicStudents=panel.locator('.stat-card').filter({has:page.getByText('当时已关联学生（人）',{exact:true})});
+ await expect(historicStudents).toContainText('证据不足');
+ await expect(historicStudents).toContainText('历史记录始于');
+ await expect(historicStudents.getByRole('button')).toHaveCount(0);
  const snapshotLost=panel.locator('.stat-card').filter({has:page.getByText('当时失单（条）',{exact:true})});
  await expect(snapshotLost.locator('strong')).toHaveText('1');
  await snapshotLost.getByRole('button',{name:'查看当时失单明细'}).click();

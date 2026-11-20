@@ -17,5 +17,6 @@ try{
  await c.query(await readFile(new URL('../tests/fixtures/isolated-business-workspace.sql',import.meta.url),'utf8'));
  if(process.env.MS_ENABLE_V34_WORKFLOW==='1'){await c.query(await readFile(new URL('../db/workspace-migrations/039_v34_sales_loop.sql',import.meta.url),'utf8'));await c.query(await readFile(new URL('../tests/fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));}
  if(process.env.MS_ENABLE_ROLE_WORKSPACES==='1'){await c.query(await readFile(new URL('../db/workspace-migrations/040_role_workspaces.sql',import.meta.url),'utf8'));await c.query(await readFile(new URL('../tests/fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));}
+ if(process.env.MS_ENABLE_V34_WORKFLOW==='1')await c.query(await readFile(new URL('../db/workspace-migrations/041_historical_student_links.sql',import.meta.url),'utf8'));
  console.log('Disposable isolated workspace initialized; HOLD remains active.');
 }finally{await c.end();}
