@@ -6,10 +6,10 @@
  panel.addEventListener('input',e=>{const f=e.target?.closest?.('form');if(f&&f.id!=='v35-lookup'&&!f.closest('#v35-lookup')){f.dataset.userDirty='1';const db=$('v35-discard-draft');if(db&&selected)db.hidden=false;}});
  panel.addEventListener('change',e=>{const f=e.target?.closest?.('form');if(f&&f.id!=='v35-lookup'&&!f.closest('#v35-lookup')){f.dataset.userDirty='1';const db=$('v35-discard-draft');if(db&&selected)db.hidden=false;}});
  let detailHost=panel,enabled=false,view='leads',group='sales',rows=[],staff=[],options=null,selected=null,detail=null,report=null,queue=[],epoch=0,seq=0,searchSeq=0,busy=false,session=null,incoming=[],legacy=new URLSearchParams(location.search).get('workspace')==='legacy';
- let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine',taskFilter='all',taskView='day',weekAnchorDay=taskDay,myLeadSearch='',myLeadSearchItems=null,myLeadState='all',myLeadSort='default',myLeadView='table',savedViews=[],savedViewSeq=0,listScrollTop=0,winScrollTop=0;
+ let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],marketStats=null,lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine',taskFilter='all',taskView='day',weekAnchorDay=taskDay,myLeadSearch='',myLeadSearchItems=null,myLeadState='all',myLeadSort='default',myLeadView='table',savedViews=[],savedViewSeq=0,listScrollTop=0,winScrollTop=0;
  let metricsQuery="";
  const leadDrafts=new Map();
- function wipeState(){epoch++;seq++;searchSeq++;busy=false;rows=[];staff=[];incoming=[];marketRows=[];options=null;selected=null;detail=null;card=null;activityTarget=null;editingQuoteId=null;pendingLostFeedback='';claim=null;lookupPhone='';lookupResult=null;queue=[];report=null;metricsQuery="";taskView='day';weekAnchorDay=dayKey(Date.now());myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';savedViews=[];listScrollTop=0;winScrollTop=0;detailHost=panel;leadDrafts.clear();box.hidden=true;}
+ function wipeState(){epoch++;seq++;searchSeq++;busy=false;rows=[];staff=[];incoming=[];marketRows=[];marketStats=null;options=null;selected=null;detail=null;card=null;activityTarget=null;editingQuoteId=null;pendingLostFeedback='';claim=null;lookupPhone='';lookupResult=null;queue=[];report=null;metricsQuery="";taskView='day';weekAnchorDay=dayKey(Date.now());myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';savedViews=[];listScrollTop=0;winScrollTop=0;detailHost=panel;leadDrafts.clear();box.hidden=true;}
  function handleAuthFailure(e){if([401,403,404].includes(e?.status)){wipeState();panel.replaceChildren(node('p','',e.status===403?'角色已撤销，工作台已关闭':e.status===404?'客户不存在或无权访问':'登录已过期，工作台已关闭'));return true;}return false;}
  const dayKey=d=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d));
  const shTimeText=d=>d?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(d)):'';
@@ -41,6 +41,9 @@
    if(session!==token){metricsQuery='';card=null;claim=null;lookupResult=null;lookupPhone='';taskView='day';weekAnchorDay=dayKey(Date.now());myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';savedViews=[];listScrollTop=0;winScrollTop=0;selected=null;detail=null;leadDrafts.clear();if(access?.enabled){view=access.admin?'metrics':access.sales?'tasks':access.market?'leads':access.finance?'finance':'leads';group=access.sales?'sales':'market';}else if(o.can_verify)view='finance';}else{myLeadSearchItems=null;}layout();
    if(selected){const d=await api(root+'/'+selected);if(ticket!==seq||token!==state.token)return;detail=d;}
    if(view==='metrics'||view==='tasks'){const r=await api(root+'/metrics'+(view==='metrics'?metricsQuery:''));if(ticket!==seq||token!==state.token)return;report=r;}
+   if(access?.market_manager&&view==='leads'&&group==='market'){
+    const m=await api(root+'/market-metrics');if(ticket!==seq||token!==state.token)return;marketStats=m;
+   }
    if(view==='finance'){const q=await api(root+'/finance');if(ticket!==seq||token!==state.token)return;queue=q.items;}
    if(!keepForm&&(force||session!==token&&!legacy||state.view==='sales-workflow'))display();session=token;
   }catch(e){if(ticket===seq&&token===state.token){if(keepForm&&![401,403,404].includes(e.status)){announce('刷新失败，未保存的输入已保留：'+e.message);return;}if(handleAuthFailure(e))return;panel.replaceChildren(node('p','','读取失败：'+e.message));}}
@@ -82,7 +85,7 @@
   if(intakeOnly){c.d.open=true;return;}const list=node('div','panel');list.id='v34-leads';panel.append(list);const search=input(list,'查找客户','search','search');const filter=select(list,'客户状态','state_filter',[{id:'all',label:'全部'},{id:'open',label:'Open · 跟进中'},{id:'won',label:'Closed Won'},{id:'lost',label:'Closed Lost'},{id:'missing',label:'待补下一步安排'}],'all');const rowsEl=node('div');list.append(rowsEl);
   function draw(){rowsEl.replaceChildren();for(const l of rows.filter(l=>(group!=='market'||l.origin_group==='market')&&(!search.value||[l.contact_name,l.contact_info_masked,...(l.students||[]).map(s=>s.name)].some(v=>v?.includes(search.value)))&&(filter.value==='all'||filter.value==='missing'?filter.value!=='missing'||l.needs_arrangement:l.terminal_state===filter.value))){const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',stage(l.stage)+' · '+l.terminal_state+' · '+l.owner_name));if(l.needs_assignment)card.append(node('p','form-hint warning','负责人待分配，需主管处理；原待办保留'));if(l.next_action)card.append(node('p',l.overdue?'form-hint warning':'form-hint','下一步：'+l.next_action.title+' · '+dateText(l.next_action.due_at)+(l.overdue?' · 已逾期':'')));else card.append(node('p','form-hint warning','待补安排：旧数据未设置下一步，不会自动编造时间'));btn(card,'打开客户',()=>openLead(l.id));rowsEl.append(card);}if(!rowsEl.childElementCount)rowsEl.append(node('p','','暂无记录'));}search.addEventListener('input',draw);filter.addEventListener('change',draw);draw();
  }
- function renderTasks(){const p=node('div','panel');p.id='v34-tasks';panel.append(p);renderSupervision(p);for(const r of incoming){const card=node('article','lead-row');card.append(node('p','','待接手客户 · '+r.reason));btn(card,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));p.append(card);}for(const a of report?.pending_approvals||[]){const card=node('article','lead-row');card.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));if(a.can_review)btn(card,'前往独立复核',()=>openLead(a.lead_id));else card.append(node('p','fineprint','本人关联事项 · 须另一位主管独立复核'));p.append(card);}for(const r of report?.reminders||[]){const l=rows.find(l=>l.id===r.lead_id);if(!l)continue;const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',r.title+' · '+dateText(r.due_at)+' · '+l.owner_name));if(r.overdue)card.append(node('p','form-hint warning','已逾期，仍须跟进；不会自动关闭'));btn(card,'执行 / 记结果',()=>openLead(l.id));p.append(card);}for(const l of rows.filter(l=>l.needs_arrangement)){const card=node('article','lead-row');card.append(node('p','','待补安排 · '+(l.contact_name||'待识别客户')+' · '+l.owner_name));btn(card,'补充安排',()=>openLead(l.id));p.append(card);}}
+ function renderTasks(){const p=node('div','panel');p.id='v34-tasks';panel.append(p);renderSupervision(p);renderCollaboration(p);for(const r of incoming){const card=node('article','lead-row');card.append(node('p','','待接手客户 · '+r.reason));btn(card,'确认接手并继承全部待办',()=>mutate(()=>post(r.lead_id,'accept-transfer',{record_id:r.id,expected_version:r.version})));p.append(card);}for(const a of report?.pending_approvals||[]){const card=node('article','lead-row');card.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));if(a.can_review)btn(card,'前往独立复核',()=>openLead(a.lead_id));else card.append(node('p','fineprint','本人关联事项 · 须另一位主管独立复核'));p.append(card);}for(const r of report?.reminders||[]){const l=rows.find(l=>l.id===r.lead_id);if(!l)continue;const card=node('article','lead-row');card.append(node('strong','',l.contact_name||'待识别客户'),node('p','',r.title+' · '+dateText(r.due_at)+' · '+l.owner_name));if(r.overdue)card.append(node('p','form-hint warning','已逾期，仍须跟进；不会自动关闭'));btn(card,'执行 / 记结果',()=>openLead(l.id));p.append(card);}for(const l of rows.filter(l=>l.needs_arrangement)){const card=node('article','lead-row');card.append(node('p','','待补安排 · '+(l.contact_name||'待识别客户')+' · '+l.owner_name));btn(card,'补充安排',()=>openLead(l.id));p.append(card);}}
  function renderLead(host=panel){const l=rows.find(l=>l.id===selected);const backLabel=options?.access?.enabled?(view==='tasks'?'返回我的待办':view==='metrics'?'返回统计与提醒':'返回客户列表'):'返回客户列表';
   btn(host,backLabel,()=>{saveCurrentLeadDraft();selected=null;detail=null;card=null;activityTarget=null;if(options?.access?.enabled){if(view==='leads')lookupResult=null;refresh(true);}else{view='leads';display();}},'secondary');
   if(selected){
@@ -266,6 +269,7 @@
    row.append(node('strong','',sourceLabel(source.source)));
    row.append(node('p','fineprint',
     '线索 '+source.leads+' 条 · 跟进中 '+source.open+' 条 · 正式成交 '+source.won+' 条 · 当前失单 '+source.lost+' 条'+
+    ' · 正式成交率 '+(source.won/source.leads).toLocaleString('zh-CN',{style:'percent',maximumFractionDigits:1})+
     (source.legacy_closed?' · 旧记录已关闭 '+source.legacy_closed+' 条':''),
    ));
    if(selectedSource==null&&source.source.length<=200){
@@ -520,6 +524,44 @@
   }
   target.append(section);
  }
+ function renderCollaboration(target,{offer=false,onlyMine=false}={}){
+  const supervision=report?.collaboration_supervision;
+  if(!supervision)return;
+  const candidates=offer?supervision.candidates||[]:[];
+  const items=supervision.items.filter(item=>(offer||!item.resolved_at)&&(!onlyMine||item.owner_user_id===state.user.staff_id));
+  if(!candidates.length&&!items.length)return;
+  const section=node('section','panel');
+  section.id='v34-collaboration';
+  section.append(node('h3','','重点协同'));
+  const request=(lead,action,body)=>api(root+'/'+lead+'/'+action,{method:'POST',body});
+  for(const item of items){
+   const row=node('article','lead-row');
+   row.append(node('strong','',item.contact_name||'待识别客户'),node('p','',item.reason));
+   if(item.resolved_at){
+    row.append(node('p','fineprint','已销项 · '+shSupervisionTime(item.resolved_at)),node('p','',item.evidence));
+   }else{
+    row.append(node('p','fineprint',(Date.parse(item.due_at)<Date.now()?'已逾期 · ':'待处理 · ')+shSupervisionTime(item.due_at)));
+    if(item.terminal_state==='open'&&item.owner_user_id===state.user.staff_id){
+     const result=form(row,'v34-collaboration-result-'+item.id,'记录协同结果','保存协同结果',f=>
+      request(item.lead_id,'complete-collaboration',{request_id:item.id,evidence:data(f).evidence}),{version:null});
+     input(result.f,'已完成的协同事项','evidence','textarea','',true).maxLength=1000;
+     result.f.append(result.submit);
+    }
+   }
+   section.append(row);
+  }
+  if(candidates.length){
+   const issue=form(section,'v34-collaboration-issue','标记重点协同','下发重点协同',f=>{
+    const values=data(f);
+    return request(values.lead,'supervise-collaboration',{reason:values.reason,due_at:values.due_at+':00+08:00'});
+   },{version:null});
+   select(issue.f,'协同客户','lead',[{id:'',label:'请选择客户'},...candidates],'',true);
+   input(issue.f,'协同说明','reason','text','',true).maxLength=1000;
+   input(issue.f,'协同截止（上海时间）','due_at','datetime-local','',true);
+   issue.f.append(issue.submit);
+  }
+  target.append(section);
+ }
  function renderTransferSupervision(target){
   const supervision=report?.transfer_supervision;
   if(!supervision||(!supervision.items.length&&(!supervision.candidates.length||!staff.length)))return;
@@ -570,6 +612,7 @@
  function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(['event','snapshot'].includes(report.filters?.view_mode)){renderRecordedMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
   renderSupervision(p,{offer:true});
   renderTransferSupervision(p);
+  renderCollaboration(p,{offer:true});
   renderSalesPaths(p,metricsQuery);
   const grid=node('div','scope-grid'),cohortQuery=metricsQuery;
   for(const [key,title]of Object.entries(labels)){
@@ -643,6 +686,7 @@
   function renderHandover(){
    handover.replaceChildren();
    renderSupervision(handover,{onlyMine:taskScope!=='team'});
+   renderCollaboration(handover,{onlyMine:taskScope!=='team'});
    if(options.manager&&report?.pending_approvals?.length){
     const ap=node('section','panel');ap.id='v35-approvals';ap.append(node('h3','','待主管独立复核'));
     for(const a of report.pending_approvals){
@@ -921,8 +965,43 @@
   }
  }
  function renderClaim(){const c=form(panel,'v35-claim','接收市场线索 · '+claim.contact_name,'接收并保存首次安排',async f=>{const token=state.token,ticket=epoch;const r=await api(root+'/'+claim.lead_id+'/claim',{method:'POST',body:{phone:lookupPhone,next:n.read(),...(initial.read()?{initial_communication:initial.read()}:{})}});if(token!==state.token||ticket!==epoch)return;selected=r.lead_id;claim=null;lookupResult=null;if(n.read().appointment)return 'scheduled';if(initial.read())return 'recorded';},{open:true,version:null}),initial=initialFields(c.f),n=nextFields(c.f,{allowExisting:false});initial.bind(n.allowBooking);c.f.append(c.submit);btn(panel,'返回查询结果',()=>{saveCurrentLeadDraft();claim=null;display();});}
+ function renderMarketMetrics(target){
+  if(!options.access.market_manager||!marketStats)return;
+  const section=node('section','panel');
+  section.id='v35-market-metrics';
+  section.append(node('h3','','市场录入与交接'));
+  const details=node('div');
+  let ticket=0;
+  async function open(source,page){
+   const token=state.token,requested=++ticket;
+   const query=new URLSearchParams({source,page});
+   details.replaceChildren(node('p','','读取市场明细…'));
+   try{
+    const data=await api(root+'/market-metrics/drilldown?'+query);
+    if(token!==state.token||requested!==ticket||!details.isConnected)return;
+    details.replaceChildren(node('p','','共 '+data.total+' 条市场线索'));
+    for(const item of data.items)details.append(node('p','fineprint',(item.market_owner_name||'原市场负责人不可用')+' · '+shSupervisionTime(item.created_at)+' · '+(item.handed_off?'已接收':'待接收')));
+    if(page>1)btn(details,'上一页',()=>open(source,page-1));
+    if(page*data.page_size<data.total)btn(details,'下一页',()=>open(source,page+1));
+   }catch(e){
+    if(token!==state.token||requested!==ticket||!details.isConnected||handleAuthFailure(e))return;
+    details.replaceChildren(node('p','warning',e.message));
+   }
+  }
+  for(const item of marketStats.by_source){
+   const row=node('div','lead-row');
+   const source=item.source||'未记录来源';
+   row.append(node('p','',source+' · 录入 '+item.leads+' 条 · 已接收 '+item.handed_off+' 条'));
+   btn(row,'查看市场来源明细：'+source,()=>open(item.source,1));
+   section.append(row);
+  }
+  if(!marketStats.by_source.length)section.append(node('p','','当前没有市场录入记录'));
+  section.append(details);
+  target.append(section);
+ }
  function renderMarket(){
   const p=node('section','panel');p.id='v35-market';panel.append(p);p.append(node('h2','',options.access.market_manager?'市场管理':'我的市场线索'));
+  renderMarketMetrics(p);
   const c=form(p,'v35-market-intake','录入市场线索','保存并提交销售交接',async f=>{const b=data(f);await api(root+'/market',{method:'POST',body:b});},{open:false,version:null});input(c.f,'电话号码','phone','tel','',true);input(c.f,'联系人姓名','contact_name','text','',true);input(c.f,'学生姓名（选填）','student_name');select(c.f,'获客来源','source',['市场活动','网络咨询','到店','转介绍','主动咨询','其他'],'市场活动');input(c.f,'市场内部备注（不向销售展示）','notes','textarea');c.f.append(c.submit);
   const search=input(p,'查询市场线索','market_search','search');const list=node('div');p.append(list);function draw(){list.replaceChildren();for(const r of marketRows.filter(r=>!search.value||[r.contact_name,r.phone,...(r.students||[])].some(v=>v?.includes(search.value)))){const q=node('article','lead-row');q.append(node('strong','',r.contact_name),node('p','',r.phone+' · '+r.source),node('p','',r.handoff_state==='market'?'待销售接收':'已交接销售'),node('p','fineprint','市场负责人：'+r.market_owner_name));if(r.marketing_notes)q.append(node('p','',r.marketing_notes));list.append(q);}if(!list.childElementCount)list.append(node('p','','暂无市场线索'));}search.addEventListener('input',draw);draw();
  }

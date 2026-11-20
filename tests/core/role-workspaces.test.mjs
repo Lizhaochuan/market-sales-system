@@ -468,6 +468,46 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal((await evidence()).resolution_state,'rescheduled');
   assert.equal((await evidence()).resolved_version,copied.version+1);
  });
+ await t.test('priority collaboration uses owner-scoped and request-specific evidence',async()=>{
+  const seed=async(phone)=>good(await w('',{contact_name:'重点协同验收',contact_info:phone,origin_group:'sales',source:'其他',next:next(1)}));
+  const first=await seed('13900000058'), other=await seed('13900000059');
+  const issue=(user=M)=>w('/'+first.lead_id+'/supervise-collaboration',{reason:'核对跨团队交接资料',due_at:next(2).due_at},user);
+  const items=async(user=A)=>good(await w('/metrics',undefined,user)).collaboration_supervision.items;
+  assert.equal((await issue(A)).status,403);
+  assert.equal((await issue(KM)).status,403);
+  assert.deepEqual((await Promise.all([issue(),issue()])).map(r=>r.status).sort(),[200,409]);
+  const [item]=await items();
+  assert.equal(item.lead_id,first.lead_id);
+  assert.equal((await items(B)).length,0);
+  const done=(id,user,evidence)=>w('/'+id+'/complete-collaboration',{request_id:item.id,evidence},user);
+  assert.equal((await done(first.lead_id,M,'已协调')).status,403);
+  assert.equal((await done(first.lead_id,B,'已协调')).status,403);
+  assert.equal((await done(other.lead_id,A,'已协调')).status,404);
+  assert.equal((await done(first.lead_id,A,' ')).status,422);
+  good(await w('/'+first.lead_id+'/draft',{expected_version:first.workflow.version,draft:{evidence:'未提交'}}));
+  assert.equal((await items())[0].resolved_at,null);
+  good(await done(first.lead_id,A,'已与教务核对资料并确认接收'));
+  assert.equal((await items(M))[0].evidence,'已与教务核对资料并确认接收');
+  assert.ok((await items())[0].evidence_event_id);
+  assert.equal((await done(first.lead_id,A,'再次提交')).status,409);
+  assert.equal(good(await w('/'+first.lead_id)).workflow.version,first.workflow.version);
+ });
+ await t.test('market manager metrics and drilldown expose only scoped market intake facts',async()=>{
+  const query='?source='+encodeURIComponent('市场活动');
+  const summary=good(await w('/market-metrics'+query,undefined,KM));
+  const aggregate=summary.by_source[0];
+  assert.ok(aggregate.leads>0);
+  assert.ok(aggregate.handed_off>0);
+  const detail=good(await w('/market-metrics/drilldown'+query,undefined,KM));
+  assert.equal(detail.total,aggregate.leads);
+  assert.equal(detail.items.filter(item=>item.handed_off).length,aggregate.handed_off);
+  assert.deepEqual(Object.keys(detail.items[0]).sort(),['created_at','handed_off','id','market_owner_name','source']);
+  assert.equal(good(await w('/market-metrics/drilldown'+query+'&owner_id='+A,undefined,KM)).total,0);
+  assert.equal(good(await w('/market-metrics/drilldown'+query+'&page=2',undefined,KM)).items.length,0);
+  for(const user of [A,M,F,K2])assert.equal((await w('/market-metrics'+query,undefined,user)).status,403);
+  assert.equal((await w('/metrics',undefined,KM)).status,403);
+  assert.equal(good(await w('/market-metrics/drilldown'+query,undefined,G)).total,detail.total);
+ });
  await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
   const drill='/metrics/drilldown?metric=leads';
   const general=good(await w(drill,undefined,G));

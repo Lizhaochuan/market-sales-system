@@ -73,6 +73,11 @@ async function enrollmentState(c,ctx,l,r){const o=(await c.query('SELECT * FROM 
 async function financialQueue(c,ctx){if(!isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','仅授权核实员或主管可查看核实队列');const r=await c.query(`SELECT r.*,w.version AS workflow_version,s.display_name AS student_name FROM ms_workspace.records r JOIN ms.leads l ON l.id=r.lead_id JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms.students s ON s.id=r.student_id WHERE l.organization_id=$1 AND r.kind IN('payments','refunds') AND r.state IN('pending','approved') ORDER BY r.created_at`,[ctx.user.organization_id]);return {...flags,items:r.rows,can_verify:isFinance(ctx)};}
 export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  const [,id,action]=parts,org=ctx.user.organization_id,actor=ctx.user.id;
+ if(id==='market-metrics'){
+  if(!ctx.roleWorkspaces||!workspaceAccess(ctx).market_manager)fail(403,'DEPARTMENT_FORBIDDEN','仅市场主管或总管理者可查看市场统计');
+  if(method!=='GET'||(action&&action!=='drilldown'))fail(404,'NOT_FOUND','未找到市场统计入口');
+  return marketMetrics(c,ctx,query,action==='drilldown');
+ }
  if(ctx.roleWorkspaces&&id!=='options'){const r=await departmentRoute(c,ctx,{method,parts,body},{activity,audit,auditWorkflow,initialCommunication});if(r.handled)return {...flags,...r.value};}
  if(method==='GET'&&id==='options')return {...flags,...(ctx.roleWorkspaces?{access:workspaceAccess(ctx)}:{}),methods,stages,actions,classrooms:[],failure_reasons:reasons,can_verify:isFinance(ctx),manager:ctx.manager,catalog:ctx.roleWorkspaces&&!workspaceAccess(ctx).sales?[]:(await c.query("SELECT id,version,body FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND state='active' ORDER BY body->>'course_label'",[org])).rows};
  if(method==='POST'&&id==='catalog'){fields(body,['course_label','standard_unit_cents','reason','expected_version']);if(!ctx.manager)fail(403,'FORBIDDEN','本地标准价目由主管维护');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[org+':catalog']);const name=text(body.course_label,120),unit=money(body.standard_unit_cents),old=(await c.query("SELECT * FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND lower(body->>'course_label')=lower($2) FOR UPDATE",[org,name])).rows[0];if(old&&old.version!==body.expected_version)fail(409,'VERSION_CONFLICT','本地价格已更新');const b={course_label:name,standard_unit_cents:unit,price_source:'LOCAL_APPROVED_PRICE',approved_by:actor,reason:text(body.reason),v34:true};const r=old?await update(c,ctx,old,'active',b):await save(c,ctx,{id:null,organization_id:org,owner_user_id:actor},'course-catalog','active',b);return {...flags,item:r};}
@@ -113,6 +118,9 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
   const records=(await c.query("SELECT * FROM ms_workspace.records WHERE lead_id=$1 AND(kind<>'workflow-drafts' OR body->>'recorded_by'=$2) ORDER BY created_at DESC,id",[id,actor])).rows;
   const events=(await c.query("SELECT a.event_name,a.after_business_json,a.happened_at,a.actor_user_id,u.display_name AS actor_name FROM ms.audit_events a LEFT JOIN ms.staff_users u ON u.id=a.actor_user_id WHERE a.organization_id=$1 AND a.target_type='lead' AND a.target_id=$2 ORDER BY a.happened_at DESC,a.id DESC",[org,id])).rows;
   return {...flags,lead:l,workflow:w??null,students,records,events:ctx.roleWorkspaces?events.filter(e=>!e.event_name.startsWith('V34_MARKET_CAPTURED')):events,needs_arrangement:!w||w.terminal_state==='open'&&!records.some(r=>r.id===w.primary_activity_id&&active(r))};
+ }
+ if(['supervise-collaboration','complete-collaboration'].includes(action)){
+  return collaborationAction(c,ctx,l,w,action,body);
  }
  if(action==='supervise-arrangement')return issueArrangementSupervision(c,ctx,l,w,body);
  const supervision=supervisionTypes.get(action);
@@ -413,6 +421,42 @@ async function issueSupervision(c,ctx,lead,workflow,body,{table,schemaVersion,ta
  );
  return {...flags,item};
 }
+const collaborationFacts=`
+ FROM ms.leads l
+ JOIN ms.audit_events a ON a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id
+  AND a.event_name='V34_COLLABORATION_REQUESTED'
+ LEFT JOIN LATERAL (
+  SELECT e.id,e.happened_at,e.after_business_json->>'evidence' AS evidence
+  FROM ms.audit_events e
+  WHERE e.organization_id=l.organization_id AND e.target_type='lead' AND e.target_id=l.id
+   AND e.event_name='V34_COLLABORATION_COMPLETED' AND e.after_business_json->>'request_id'=a.id::text
+  ORDER BY e.happened_at,e.id LIMIT 1
+ ) done ON true`;
+async function collaborationAction(c,ctx,lead,workflow,action,body){
+ if(workflow?.terminal_state!=='open')fail(409,'COLLABORATION_LEAD_UNAVAILABLE','仅可处理跟进中的客户协同');
+ if(action==='supervise-collaboration'){
+  if(!canSupervise(ctx))fail(403,'FORBIDDEN','仅销售主管可发起重点协同');
+  const {deadline,reason}=supervisionDetails(body);
+  if(!lead.owner_user_id)fail(409,'ASSIGNEE_REQUIRED','客户须有有效销售负责人');
+  if(ctx.roleWorkspaces)await salesAssignee(c,ctx,lead.owner_user_id);
+  else await sameOrgStaff(c,ctx,lead.owner_user_id);
+  const existing=await c.query(`SELECT a.id ${collaborationFacts}
+   WHERE l.organization_id=$1 AND l.id=$2 AND done.id IS NULL LIMIT 1`,[lead.organization_id,lead.id]);
+  if(existing.rowCount)fail(409,'SUPERVISION_ALREADY_OPEN','该客户已有待处理的重点协同');
+  await audit(c,ctx,lead,'COLLABORATION_REQUESTED',{reason,due_at:deadline});
+ }else{
+  if(lead.owner_user_id!==ctx.user.id)fail(403,'FORBIDDEN','仅当前负责人可提交协同结果');
+  fields(body,['request_id','evidence']);
+  if(!uuid(body.request_id))fail(422,'VALIDATION_ERROR','督办编号错误');
+  const evidence=text(body.evidence);
+  const request=await c.query(`SELECT done.id AS evidence_id ${collaborationFacts}
+   WHERE l.organization_id=$1 AND l.id=$2 AND a.id=$3`,[lead.organization_id,lead.id,body.request_id]);
+  if(!request.rowCount)fail(404,'NOT_FOUND','未找到该客户的协同请求');
+  if(request.rows[0].evidence_id)fail(409,'COLLABORATION_ALREADY_COMPLETED','该请求已销项');
+  await audit(c,ctx,lead,'COLLABORATION_COMPLETED',{request_id:body.request_id,evidence});
+ }
+ return {...flags,saved:true};
+}
 async function supervisionReports(c,ctx,scope){
  const types=[...supervisionTypes.values()];
  const installed=await c.query('SELECT version FROM ms_workspace.schema_versions WHERE version=ANY($1::int[])',
@@ -465,6 +509,15 @@ async function supervisionReports(c,ctx,scope){
    ORDER BY r.created_at DESC,r.id`,params);
   reports.transfer_supervision={items};
  }
+ const {rows:collaboration}=await c.query(`
+  SELECT a.id,l.id AS lead_id,l.owner_user_id,co.display_name AS contact_name,w.terminal_state,
+   a.after_business_json->>'reason' AS reason,a.after_business_json->>'due_at' AS due_at,
+   done.id AS evidence_event_id,done.happened_at AS resolved_at,done.evidence
+  ${collaborationFacts}
+  JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id AND w.organization_id=l.organization_id
+  LEFT JOIN ms.contacts co ON co.id=l.contact_id AND co.organization_id=l.organization_id
+  WHERE ${where} ORDER BY (done.id IS NULL) DESC,a.happened_at DESC,a.id`,params);
+ reports.collaboration_supervision={items:collaboration,can_issue:canSupervise(ctx)};
  return reports;
 }
 function maskPhone(v){if(!v)return '';const s=String(v).trim();if(s.length>=8)return s.slice(0,s.length-8)+'****'+s.slice(-4);if(s.length>=5)return s.slice(0,2)+'***'+s.slice(-2);return '****';}
@@ -504,6 +557,38 @@ function metricsScope(query={}){
  const start=boundary(start_at),end=boundary(end_at);
  if(Date.parse(start)>=Date.parse(end))fail(422,'VALIDATION_ERROR','结束时间须晚于开始时间');
  return {view_mode:view_mode??'cohort',start_at:start,end_at:end,...dimensions};
+}
+async function marketMetrics(c,ctx,query,drill){
+ const {page='1',...filters}=query;
+ if(!/^[1-9]\d{0,5}$/.test(page)||(!drill&&query.page!==undefined))fail(422,'VALIDATION_ERROR','请选择有效页码');
+ const scope=metricsScope(filters);
+ if(!['current','cohort'].includes(scope.view_mode))fail(422,'VALIDATION_ERROR','市场统计支持按建档时间查询交接进度');
+ const params=[ctx.user.organization_id];
+ const conditions=['d.organization_id=$1','d.market_owner_id IS NOT NULL'];
+ if(scope.owner_id)conditions.push(`d.market_owner_id=$${params.push(scope.owner_id)}`);
+ if(scope.source!==null)conditions.push(`COALESCE(e.event_type,'')=$${params.push(scope.source)}`);
+ if(scope.view_mode==='cohort'){
+  conditions.push(`d.created_at >= $${params.push(scope.start_at)}::timestamptz AND d.created_at < $${params.push(scope.end_at)}::timestamptz`);
+ }
+ const sql=`WITH scoped AS (
+  SELECT d.lead_id AS id,d.created_at,COALESCE(e.event_type,'') AS source,
+   d.department='sales' AS handed_off,u.display_name AS market_owner_name
+  FROM ms_workspace.lead_directory d JOIN ms.leads l ON l.id=d.lead_id AND l.organization_id=d.organization_id
+  LEFT JOIN ms.contact_events e ON e.id=l.source_event_id AND e.organization_id=l.organization_id
+  LEFT JOIN ms.staff_users u ON u.id=d.market_owner_id AND u.organization_id=d.organization_id
+  WHERE ${conditions.join(' AND ')}
+ )`;
+ if(drill){
+  const pageSize=20,offset=params.push((Number(page)-1)*pageSize);
+  const {rows:[result]}=await c.query(`${sql}, page_rows AS (
+   SELECT * FROM scoped ORDER BY created_at DESC,id LIMIT 20 OFFSET $${offset}
+  ) SELECT (SELECT count(*)::int FROM scoped) AS total,
+   COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY created_at DESC,id),'[]'::jsonb) AS items FROM page_rows`,params);
+  return {...flags,filters:scope,page:Number(page),page_size:pageSize,...result};
+ }
+ const {rows:by_source}=await c.query(`${sql} SELECT source,count(*)::int AS leads,
+  count(*) FILTER (WHERE handed_off)::int AS handed_off FROM scoped GROUP BY source ORDER BY leads DESC,source`,params);
+ return {...flags,filters:scope,by_source};
 }
 function salesLeadScope(ctx,scope){
  const params=[ctx.user.organization_id,ctx.user.id,ctx.manager];
@@ -1038,6 +1123,12 @@ async function metrics(c,ctx,query){
   supervision.transfer_supervision.candidates=list.items.filter(l=>l.version&&l.terminal_state==='open'&&!pendingTransfers.has(l.id)).map(l=>({
    id:l.id,name:l.contact_name||'待识别客户',owner_id:l.owner_user_id,version:l.version,
   }));
+ }
+ if(supervision.collaboration_supervision.can_issue){
+  const active=new Set(supervision.collaboration_supervision.items.filter(item=>!item.resolved_at).map(item=>item.lead_id));
+  const eligible=new Set(list.staff.map(staff=>staff.id));
+  supervision.collaboration_supervision.candidates=list.items.filter(l=>l.version&&l.terminal_state==='open'&&eligible.has(l.owner_user_id)&&!active.has(l.id))
+   .map(l=>({id:l.id,label:l.contact_name||'待识别客户'}));
  }
  if(supervision.arrangement_supervision?.can_issue){
   const eligibleOwners=new Set(list.staff.map(staff=>staff.id));

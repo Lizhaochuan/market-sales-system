@@ -17,6 +17,12 @@ test('role UI: sales lands on dated todo, phone intake opens one customer operat
 test('role UI: market handoff retains one Lead, sales cannot see private notes, roles have different home pages',async({page})=>{
  const number=phone(),name='市场交接'+number;await login(page,'market-a');await expect(page.locator('#v35-market')).toBeVisible();await expect(page.getByRole('button',{name:'我的待办',exact:true})).toBeHidden();const form=page.locator('#v35-market-intake');await form.locator('..').locator('summary').click();await form.locator('[name="phone"]').fill(number);await form.locator('[name="contact_name"]').fill(name);await form.locator('[name="student_name"]').fill('交接验收学生');await form.locator('[name="notes"]').fill('市场私有备注不得向销售展示');await form.getByRole('button',{name:'保存并提交销售交接'}).click();await expect(page.locator('#v35-market')).toContainText(name);
  await login(page,'market-b');await expect(page.locator('#v35-market')).not.toContainText(name);await login(page,'market-manager');await expect(page.locator('#v35-market')).toContainText(name);
+ const marketMetrics=page.locator('#v35-market-metrics');
+ await expect(marketMetrics.getByRole('heading',{name:'市场录入与交接'})).toBeVisible();
+ await marketMetrics.getByRole('button',{name:/查看市场来源明细/}).first().click();
+ await expect(marketMetrics).toContainText(/共 [1-9]\d* 条市场线索/);
+ await expect(marketMetrics).not.toContainText(number);
+
  await login(page);await lookup(page,number);await expect(page.locator('#v35-lookup')).toContainText('匹配到市场线索');await expect(page.locator('#sales-workflow')).not.toContainText('市场私有备注');await page.getByRole('button',{name:'接收并安排首次跟进'}).click();const claim=page.locator('#v35-claim');await nextTomorrow(page,claim);await claim.getByRole('button',{name:'接收并保存首次安排'}).click();await expect(page.locator('#v35-actions')).toBeVisible();await expect(page.locator('#sales-workflow')).toContainText('市场活动');
  await login(page,'sales-b');await lookup(page,number);await expect(page.locator('#v35-lookup')).toContainText('已有销售负责');await expect(page.locator('#v35-lookup')).not.toContainText('交接验收学生');await login(page,'general-admin');await expect(page.getByRole('button',{name:'市场 · 市场 Leads',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true})).toBeVisible();
 });
@@ -1259,4 +1265,34 @@ test('Boss transfer supervision tracks independent approval and the recipient ac
  await login(page,'supervisor');
  await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
  await expect(row).toContainText('已销项 · 接收人已确认');
+});
+
+
+test('Boss priority collaboration can be issued and completed by the assigned advisor',async({page})=>{
+ const root='/api/v1/isolated-workspace/workflow';
+ await login(page,'sales-a');
+ const lead=await page.evaluate(({root,number})=>api(root,{method:'POST',body:{
+  contact_name:'重点协同回归家长',origin_group:'sales',source:'到店',contact_info:number,
+  next:{action:'call',method:'phone',title:'协同回归联系',due_at:new Date(Date.now()+86400000).toISOString()},
+ }}),{root,number:phone()});
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ const section=page.locator('#v34-collaboration');
+ await section.getByText('标记重点协同',{exact:true}).click();
+ const issue=section.locator('#v34-collaboration-issue');
+ await issue.getByLabel('协同客户').selectOption(lead.lead_id);
+ await issue.getByLabel('协同说明').fill('核对教务交接');
+ await issue.getByLabel('协同截止（上海时间）').fill(new Date(Date.now()+115200000).toISOString().slice(0,16));
+ await issue.getByRole('button',{name:'下发重点协同'}).click();
+ const row=section.locator('article').filter({hasText:'核对教务交接'});
+ await expect(row).toContainText('待处理');
+ await login(page,'sales-a');
+ await row.getByText('记录协同结果',{exact:true}).click();
+ await row.getByLabel('已完成的协同事项').fill('已联系教务确认接收');
+ await row.getByRole('button',{name:'保存协同结果'}).click();
+ await expect(row).toHaveCount(0);
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ await expect(row).toContainText('已销项');
+ await expect(row).toContainText('已联系教务确认接收');
 });
