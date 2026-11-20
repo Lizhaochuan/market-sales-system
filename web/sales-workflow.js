@@ -169,7 +169,19 @@
   const booked=report.counts.trial_booked_students||0,completed=report.counts.trial_completed_students||0;p.append(node('p','','试听完成率：'+(booked?(completed/booked*100).toFixed(1)+'%':'暂无分母')+' · 试听后报名率：'+(completed?((report.counts.trial_to_enrollment_students||0)/completed*100).toFixed(1)+'%':'暂无分母')));
   if(options.manager){const c=form(panel,'v34-catalog','本地课程标准价目（主管）','保存本地价目',f=>{const b=data(f),old=options.catalog.find(p=>p.body.course_label.toLowerCase()===b.course_label.toLowerCase());return api(root+'/catalog',{method:'POST',body:{course_label:b.course_label,standard_unit_cents:cents(b.amount),reason:b.reason,expected_version:old?.version}});},{version:null});input(c.f,'课程名称','course_label','text','',true);input(c.f,'每课时标准价格（元）','amount','text','',true);input(c.f,'价格维护依据','reason','text','',true);c.f.append(c.submit);}
   const confirmed=report.counts.confirmed_meeting_students||0;p.append(node('p','','已确认预约到场率：'+(confirmed?((report.counts.scheduled_meeting_attended_students||0)/confirmed*100).toFixed(1)+'%':'暂无分母')+'（主动到访单列，不混入预约到场率分母）'));
-  for(const o of report.by_owner)p.append(node('p','',o.name+' · 当前客户 '+o.leads+' · Open '+o.open+' · Won '+o.won+' · Lost '+o.lost+' · 当前有效报名订单 '+o.enrollment_success_orders+' · 当前客户已核实净收款 '+yuan(o.verified_net_cents)+' · 完成沟通 '+o.completed_communications+' 次 · 逾期 '+o.overdue+' · 待补安排 '+o.missing_next));for(const [reason,n]of Object.entries(report.lost_reasons||{}))p.append(node('p','','流失原因：'+reason+' · '+n));const reminders=node('div','panel');reminders.append(node('h3','','到期与逾期提醒'));for(const r of report.reminders||[]){const row=node('p','',r.title+' · '+dateText(r.due_at)+(r.overdue?' · 已逾期':''));reminders.append(row);btn(reminders,'打开相关客户',()=>openLead(r.lead_id));}panel.append(reminders);}
+  for(const o of report.by_owner)p.append(node('p','',o.name+' · 当前客户 '+o.leads+' · Open '+o.open+' · Won '+o.won+' · Lost '+o.lost+' · 当前有效报名订单 '+o.enrollment_success_orders+' · 当前客户已核实净收款 '+yuan(o.verified_net_cents)+' · 完成沟通 '+o.completed_communications+' 次 · 逾期 '+o.overdue+' · 待补安排 '+o.missing_next));
+  const currentLosses=Object.entries(report.current_lost_reasons||{});
+  p.append(node('h3','','当前失单原因'));
+  if(!currentLosses.length)p.append(node('p','fineprint','暂无当前失单原因'));
+  for(const [reason,n]of currentLosses)p.append(node('p','',reason+' · '+n+' 条线索'));
+  const historicalLosses=Object.entries(report.lost_reasons||{});
+  if(historicalLosses.length){
+   const history=node('details');
+   history.append(node('summary','','历史失单原因（按结案次数）'));
+   for(const [reason,n]of historicalLosses)history.append(node('p','',reason+' · '+n+' 次'));
+   p.append(history);
+  }
+  const reminders=node('div','panel');reminders.append(node('h3','','到期与逾期提醒'));for(const r of report.reminders||[]){const row=node('p','',r.title+' · '+dateText(r.due_at)+(r.overdue?' · 已逾期':''));reminders.append(row);btn(reminders,'打开相关客户',()=>openLead(r.lead_id));}panel.append(reminders);}
  function setCard(value){if(value!=='quote')editingQuoteId=null;if(!value)activityTarget=null;card=value;display();(panel.querySelector('#v35-side-detail')||panel).querySelector('input:not([type="hidden"]),select,textarea')?.focus();}
  function renderCardOperations(l){
   const w=detail.workflow;if(card){btn(detailHost,'返回客户概览',()=>{saveCurrentLeadDraft();setCard(null);});}

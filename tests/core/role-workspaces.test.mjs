@@ -23,6 +23,7 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal(empty.timezone,'Asia/Shanghai');
   assert.deepEqual(empty.activity_counts,{communications:0,appointments:0,completed_activities:0});
   assert.deepEqual(empty.lost_reasons,{});
+  assert.deepEqual(empty.current_lost_reasons,{});
   for(const field of ['by_owner','pending_approvals','reminders','failures'])assert.deepEqual(empty[field],[],field);
   assert.equal(empty.hold_active,true);
   assert.equal(empty.release_eligible,false);

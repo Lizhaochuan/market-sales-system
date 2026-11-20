@@ -108,6 +108,41 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    good(await act(lead,'close-lost',{reason:'家长明确拒绝报名',feedback:'家长明确不再报名且不要再联系',evidence_ref:'家长明确反馈记录',do_not_contact:true}));const d=await detail(lead);assert.equal(d.workflow.terminal_state,'lost');assert.equal(d.workflow.do_not_contact,true);assert.equal(d.records.filter(r=>activeState(r.state)&&['tasks','appointments'].includes(r.kind)).length,0);
    assert.equal((await act(lead,'reopen',{evidence_ref:'无主动咨询',next:next()},M)).status,422);good(await act(lead,'reopen',{evidence_ref:'家长主动重新咨询',customer_initiated:true,next:next()},M));
   });
+  await t.test('loss reasons count current lost leads once and retain all historical closures',async()=>{
+   const lead=await create();
+   const firstReason='价格原因', latestReason='课程不匹配';
+   const metrics=async(user=A)=>good(await req('/metrics',undefined,user));
+   const before=await metrics();
+   const otherOwnerBefore=await metrics(B);
+   const close=reason=>act(lead,'close-lost',{reason,feedback:'家长明确反馈',evidence_ref:'本次失单记录'});
+   const reopen=()=>act(lead,'reopen',{evidence_ref:'家长重新咨询',next:next()},M);
+   const count=(m,field,reason)=>m[field][reason]??0;
+
+   good(await close(firstReason));
+   const lost=await metrics();
+   assert.equal(lost.counts.lost_leads,before.counts.lost_leads+1);
+   assert.equal(count(lost,'current_lost_reasons',firstReason),count(before,'current_lost_reasons',firstReason)+1);
+   assert.equal(count(lost,'lost_reasons',firstReason),count(before,'lost_reasons',firstReason)+1);
+
+   good(await reopen());
+   const reopened=await metrics();
+   assert.equal(reopened.counts.lost_leads,before.counts.lost_leads);
+   assert.deepEqual(reopened.current_lost_reasons,before.current_lost_reasons);
+   assert.deepEqual(reopened.lost_reasons,lost.lost_reasons);
+
+   good(await close(latestReason));
+   const lostAgain=await metrics();
+   assert.equal(lostAgain.counts.lost_leads,before.counts.lost_leads+1);
+   assert.equal(count(lostAgain,'current_lost_reasons',firstReason),count(before,'current_lost_reasons',firstReason));
+   assert.equal(count(lostAgain,'current_lost_reasons',latestReason),count(before,'current_lost_reasons',latestReason)+1);
+   for(const reason of [firstReason,latestReason]){
+    assert.equal(count(lostAgain,'lost_reasons',reason),count(before,'lost_reasons',reason)+1);
+   }
+   const otherOwner=await metrics(B);
+   assert.deepEqual(otherOwner.current_lost_reasons,otherOwnerBefore.current_lost_reasons);
+   assert.deepEqual(otherOwner.lost_reasons,otherOwnerBefore.lost_reasons);
+   good(await reopen());
+  });
   await t.test('full net payment creates one full-payment SaleEvent only on legitimate closure',async()=>{
    good(await act(enrollLead,'submit-payment',{enrollment_id:enrollment.id,amount_cents:90000,receipt_ref:randomUUID(),payment_kind:'tuition',received_at:when(-1),evidence_ref:'第二笔收款资料'}));let d=await detail(enrollLead),p=d.records.find(r=>r.kind==='payments'&&r.state==='pending');good(await act(enrollLead,'verify-payment',{record_id:p.id,evidence_ref:'查验剩余款到账'},F));good(await act(enrollLead,'close-won',{reason:'独立协议核实与两笔有效款全额到账'}));assert.equal((await detail(enrollLead)).workflow.terminal_state,'won');assert.equal((await pool.query('SELECT count(*)::int n FROM ms.sale_events WHERE order_id=$1',[order])).rows[0].n,1);
   });
