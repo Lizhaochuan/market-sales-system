@@ -125,6 +125,9 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
     assert.equal(after[key],before[key]+1,key);
    }
    assert.equal(after.won_leads,before.won_leads);
+   const partialWon=good(await req('/metrics/drilldown?metric=won_leads'));
+   assert.equal(partialWon.total,after.won_leads);
+   assert.ok(!partialWon.items.some(item=>item.id===enrollLead));
   });
   await t.test('finance-only staff cannot read sales metrics but can reject a pending payment',async()=>{
    assert.equal((await req('/metrics',undefined,F)).status,403);
@@ -156,6 +159,7 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    const metrics=async(user=A)=>good(await req('/metrics',undefined,user));
    const before=await metrics();
    const otherOwnerBefore=await metrics(B);
+   const drill=async(user=A)=>good(await req('/metrics/drilldown?metric=lost_leads',undefined,user));
    const close=reason=>act(lead,'close-lost',{reason,feedback:'家长明确反馈',evidence_ref:'本次失单记录'});
    const reopen=()=>act(lead,'reopen',{evidence_ref:'家长重新咨询',next:next()},M);
    const count=(m,field,reason)=>m[field][reason]??0;
@@ -165,12 +169,18 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal(lost.counts.lost_leads,before.counts.lost_leads+1);
    assert.equal(count(lost,'current_lost_reasons',firstReason),count(before,'current_lost_reasons',firstReason)+1);
    assert.equal(count(lost,'lost_reasons',firstReason),count(before,'lost_reasons',firstReason)+1);
+   const closedDrill=await drill();
+   assert.equal(closedDrill.total,lost.counts.lost_leads);
+   assert.equal(closedDrill.items.find(item=>item.id===lead).terminal_state,'lost');
 
    good(await reopen());
    const reopened=await metrics();
    assert.equal(reopened.counts.lost_leads,before.counts.lost_leads);
    assert.deepEqual(reopened.current_lost_reasons,before.current_lost_reasons);
    assert.deepEqual(reopened.lost_reasons,lost.lost_reasons);
+   const reopenedDrill=await drill();
+   assert.equal(reopenedDrill.total,reopened.counts.lost_leads);
+   assert.ok(!reopenedDrill.items.some(item=>item.id===lead));
 
    good(await close(latestReason));
    const lostAgain=await metrics();
@@ -180,6 +190,10 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    for(const reason of [firstReason,latestReason]){
     assert.equal(count(lostAgain,'lost_reasons',reason),count(before,'lost_reasons',reason)+1);
    }
+   const closedAgainDrill=await drill();
+   assert.equal(closedAgainDrill.total,lostAgain.counts.lost_leads);
+   assert.equal(closedAgainDrill.items.filter(item=>item.id===lead).length,1);
+   assert.ok(!(await drill(B)).items.some(item=>item.id===lead));
    const otherOwner=await metrics(B);
    assert.deepEqual(otherOwner.current_lost_reasons,otherOwnerBefore.current_lost_reasons);
    assert.deepEqual(otherOwner.lost_reasons,otherOwnerBefore.lost_reasons);
@@ -187,6 +201,11 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
   });
   await t.test('full net payment creates one full-payment SaleEvent only on legitimate closure',async()=>{
    good(await act(enrollLead,'submit-payment',{enrollment_id:enrollment.id,amount_cents:90000,receipt_ref:randomUUID(),payment_kind:'tuition',received_at:when(-1),evidence_ref:'第二笔收款资料'}));let d=await detail(enrollLead),p=d.records.find(r=>r.kind==='payments'&&r.state==='pending');good(await act(enrollLead,'verify-payment',{record_id:p.id,evidence_ref:'查验剩余款到账'},F));good(await act(enrollLead,'close-won',{reason:'独立协议核实与两笔有效款全额到账'}));assert.equal((await detail(enrollLead)).workflow.terminal_state,'won');assert.equal((await pool.query('SELECT count(*)::int n FROM ms.sale_events WHERE order_id=$1',[order])).rows[0].n,1);
+   const won=good(await req('/metrics/drilldown?metric=won_leads'));
+   assert.equal(won.total,good(await req('/metrics')).counts.won_leads);
+   const result=won.items.find(item=>item.id===enrollLead);
+   assert.equal(result.terminal_state,'won');
+   assert.deepEqual(Object.keys(result).sort(),['contact_name','created_at','id','owner_name','terminal_state']);
   });
   await t.test('TC25: post-close refund requires audited reopening and independent correction, old success retained',async()=>{
    const before=good(await req('/metrics')).counts;
@@ -199,6 +218,9 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal(underCorrection.historical_enrollment_success_orders,before.historical_enrollment_success_orders);
    assert.equal(underCorrection.historical_enrollment_success_students,before.historical_enrollment_success_students);
    assert.equal(underCorrection.won_leads,before.won_leads-1);
+   const underCorrectionDrill=good(await req('/metrics/drilldown?metric=won_leads'));
+   assert.equal(underCorrectionDrill.total,underCorrection.won_leads);
+   assert.ok(!underCorrectionDrill.items.some(item=>item.id===enrollLead));
    good(await act(enrollLead,'submit-refund',{payment_id:payment.id,correction_id:cor.id,amount_cents:10000,refund_ref:randomUUID(),reason:'定金退回',evidence_ref:'已批准退款资料'}));d=await detail(enrollLead);const refund=d.records.find(r=>r.kind==='refunds');good(await act(enrollLead,'verify-refund',{record_id:refund.id,evidence_ref:'独立核实实际退款'},F));d=await detail(enrollLead);assert.equal(d.workflow.terminal_state,'open');assert.ok(d.workflow.primary_activity_id);assert.equal(d.records.find(r=>r.id===enrollment.id).body.balance_cents,10000);assert.equal((await pool.query('SELECT count(*)::int n FROM ms.sale_events WHERE order_id=$1',[order])).rows[0].n,1);assert.equal(d.events.filter(e=>e.event_name==='V34_ENROLLMENT_SUCCESS').length,1);
    assert.equal(d.records.find(r=>r.id===enrollment.id).body.first_success_at,firstSuccess);
    const afterRefund=good(await req('/metrics')).counts;

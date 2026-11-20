@@ -204,9 +204,15 @@
    refresh(true);
   });
  }
+ const metricsDrilldownTitles={
+  leads:'线索明细',
+  students:'学生明细',
+  won_leads:'正式成交明细',
+  lost_leads:'当前失单明细',
+ };
  function renderMetricsDrilldown(target,scope,metric){
   const section=node('section','panel');
-  const students=metric==='students',title=students?'学生明细':'线索明细';
+  const students=metric==='students',title=metricsDrilldownTitles[metric];
   section.id='v34-metrics-'+metric;
   section.dataset.metricsDrilldown='';
   section.append(node('h3','',title));
@@ -254,8 +260,8 @@
   for(const [key,title]of Object.entries(labels)){
    const tile=node('div','stat-card');
    tile.append(node('p','',title),node('strong','',String(report.counts[key]??0)));
-   if(key==='leads'||key==='students'){
-    btn(tile,key==='students'?'查看学生明细':'查看线索明细',()=>{
+   if(Object.hasOwn(metricsDrilldownTitles,key)){
+    btn(tile,'查看'+metricsDrilldownTitles[key],()=>{
      p.querySelector('[data-metrics-drilldown]')?.remove();
      renderMetricsDrilldown(p,cohortQuery,key);
     });

@@ -353,7 +353,7 @@ function salesLeadScope(ctx,scope){
 const activeScopedStudent='s.organization_id=l.organization_id AND s.archived_at IS NULL';
 async function metricsDrilldown(c,ctx,query={}){
  const {metric,page='1',page_size='20',...filters}=query;
- if(!['leads','students'].includes(metric))fail(422,'VALIDATION_ERROR','当前仅支持线索数和已识别学生明细');
+ if(!['leads','students','won_leads','lost_leads'].includes(metric))fail(422,'VALIDATION_ERROR','该指标暂不支持查看明细');
  if(!/^[1-9]\d{0,5}$/.test(page)||!/^[1-9]\d?$/.test(page_size)||Number(page_size)>50){
   fail(422,'VALIDATION_ERROR','请选择有效页码，每页最多 50 条');
  }
@@ -361,6 +361,12 @@ async function metricsDrilldown(c,ctx,query={}){
  const {where,params}=salesLeadScope(ctx,scope);
  const limit=params.push(Number(page_size)),offset=params.push((Number(page)-1)*Number(page_size));
  const students=metric==='students';
+ const terminalState=metric==='won_leads'?'won':metric==='lost_leads'?'lost':null;
+ const terminalFilter=terminalState?` AND EXISTS (
+  SELECT 1 FROM ms_workspace.lead_workflow current_workflow
+  WHERE current_workflow.lead_id=l.id AND current_workflow.organization_id=l.organization_id
+    AND current_workflow.terminal_state=$${params.push(terminalState)}
+ )`:'';
  const matching=students?`
   SELECT s.id,s.display_name,count(DISTINCT l.id)::int AS lead_count
   FROM ms.leads l
@@ -368,7 +374,7 @@ async function metricsDrilldown(c,ctx,query={}){
   JOIN ms.students s ON s.id=ls.student_id AND ${activeScopedStudent}
   WHERE ${where}
   GROUP BY s.id,s.display_name
- `:`SELECT l.id,l.created_at,l.owner_user_id,l.contact_id,l.lead_state FROM ms.leads l WHERE ${where}`;
+ `:`SELECT l.id,l.created_at,l.owner_user_id,l.contact_id,l.lead_state FROM ms.leads l WHERE ${where}${terminalFilter}`;
  const order=students?'display_name,id':'created_at DESC,id';
  const pageQuery=`SELECT * FROM matching ORDER BY ${order} LIMIT $${limit} OFFSET $${offset}`;
  const projection=students?pageQuery:`

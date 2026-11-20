@@ -911,7 +911,7 @@ test('PC-05: manually scheduled late follow-up keeps its exact time after sign-i
 });
 
 
-test('Boss lead and student drilldown follow Shanghai creation date and advisor filters', async ({page}) => {
+test('Boss lead, student and closure drilldown follow Shanghai creation date and advisor filters', async ({page}) => {
  await login(page,'supervisor');
  await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
  const panel=page.locator('#v34-metrics');
@@ -928,10 +928,14 @@ test('Boss lead and student drilldown follow Shanghai creation date and advisor 
    },
   }),{owner,number:phone(),title});
   await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[result.lead_id,createdAt]);
+  return result;
  };
  await seed(ownerIds[0],'2024-04-01T00:00:00+08:00','窗口首位顾问测试');
- await seed(ownerIds[1],'2024-04-01T23:59:59+08:00','窗口第二位顾问测试');
+ const lostLead=await seed(ownerIds[1],'2024-04-01T23:59:59+08:00','窗口第二位顾问测试');
  await seed(ownerIds[0],'2024-04-02T00:00:00+08:00','窗口之外测试');
+ await page.evaluate(({lead_id,workflow})=>api('/api/v1/isolated-workspace/workflow/'+lead_id+'/close-lost',{
+  method:'POST',body:{expected_version:workflow.version,reason:'价格原因',feedback:'家长明确反馈',evidence_ref:'复验虚构依据'},
+ }),lostLead);
  const count=panel.locator('.stat-card').filter({has:page.getByText('Lead 数',{exact:true})}).locator('strong');
 
  const start=filters.getByLabel('建档开始日期');
@@ -970,6 +974,16 @@ test('Boss lead and student drilldown follow Shanghai creation date and advisor 
  await expect(studentDrilldown).not.toContainText('窗口首位顾问测试学生');
  await studentDrilldown.getByRole('button',{name:'关闭学生明细'}).click();
  await expect(studentDrilldown).toHaveCount(0);
+
+ const lostDrilldown=panel.locator('#v34-metrics-lost_leads');
+ await panel.getByRole('button',{name:'查看当前失单明细'}).click();
+ await expect(lostDrilldown).toContainText('共 1 条线索');
+ await expect(lostDrilldown).toContainText('窗口第二位顾问测试家长');
+ await expect(lostDrilldown).not.toContainText('窗口首位顾问测试家长');
+ const wonDrilldown=panel.locator('#v34-metrics-won_leads');
+ await panel.getByRole('button',{name:'查看正式成交明细'}).click();
+ await expect(lostDrilldown).toHaveCount(0);
+ await expect(wonDrilldown).toContainText('共 0 条线索');
 
  await page.getByRole('button',{name:'我的待办',exact:true}).click();
  await expect(page.locator('#v34-tasks')).toBeVisible();
