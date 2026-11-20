@@ -656,8 +656,13 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal((await decide(invalid,true,A)).status,403);
   assert.ok(good(await w('/metrics',undefined,M)).pending_approvals.some(item=>item.lead_id===invalid&&item.can_review));
   good(await decide(invalid,true));
-  good(await submit(duplicate,'duplicate',{primary_lead_id:primary}));
+  assert.equal((await submit(primary,'duplicate',{primary_lead_id:primary.toUpperCase()})).status,422);
+  assert.equal((await get(primary)).qualification_request,null);
+  good(await submit(duplicate,'duplicate',{primary_lead_id:primary.toUpperCase()}));
+  assert.equal((await get(duplicate)).qualification_request.facts.primary_lead_id,primary);
   good(await decide(duplicate,true));
+  assert.equal((await get(duplicate)).qualification.primary_lead_id,primary);
+  assert.equal((await submit(primary,'duplicate',{primary_lead_id:invalid})).code,'DUPLICATE_CHAIN');
   assert.equal((await submit(primary,'duplicate',{primary_lead_id:duplicate})).status,409);
   assert.equal((await submit(pending,'valid')).status,403);
   good(await submit(pending,'pending',{},B));

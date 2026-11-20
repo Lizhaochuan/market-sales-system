@@ -257,3 +257,9 @@ Antigravity 对原提交 `aa7e8d6` 的独立验收指出，测试可能把电话
 Mac 使用空白 PostgreSQL 16 独立测试库及虚拟校区、虚拟线索运行完整回归，退出码为 `0`。受限 SQL 冒烟、前后端 JavaScript 语法检查通过，LOGIN/RLS 12/12，Core API/UI/安全 779/779，真实 Chromium 49/49，设计合约 8/8。角色工作台单独复跑 31/31。
 
 用例覆盖无效审批、驳回、改判、重复归并、核验率及覆盖率、首次登记并发、跨校区审批、换顾问和预约改期、按历史归属回放、按事件时间归属、撤权与校区汇总及下钻一致。Chromium 实测顾问提交、主管从待办审批、按新校区筛选并通过核验明细找到该线索。真实校区目录、历史归属与主管授权，以及财务确认的费用与历史账本待补充。保持 `HOLD=true`、`EXT-001=UNVERIFIED` 和 Draft / CI-only。
+
+### Boss 验收复核与归并校验修正（2026-11-21）
+
+[GitHub Actions #44771565409](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44771565409) 对应 `739ca446e6d4afc6077f9b74860e1b11cf728230`，全部通过。后续源码复核发现归并校验对同一个 UUID 的大小写写法处理不一致。修正后拒绝自我归并，合法归并保留规范主线索编号，也不会形成多级归并。新增断言覆盖这三种情况。
+
+修正后在新建 Mac 独立 PostgreSQL 库全量复跑，退出码 `0`。LOGIN/RLS 12/12，Core API/UI/安全 779/779，真实 Chromium 49/49，设计合约 8/8。受限 SQL 冒烟和 JavaScript 语法检查通过。该修正当时只通过本地回归。Boss 保持 `REVIEW_REQUIRED`、`HOLD=true`、Draft / CI-only。真实校区映射和财务数据待补充。

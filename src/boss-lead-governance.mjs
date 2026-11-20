@@ -88,7 +88,7 @@ async function ensureCampusTarget(c,ctx,code){
  if(!result.rowCount)fail(422,'VALIDATION_ERROR','请选择有效的服务校区');
 }
 async function duplicateTarget(c,ctx,lead,target){
- if(typeof target!=='string'||!uuid.test(target)||target===lead.id)fail(422,'VALIDATION_ERROR','请选择不同的主线索');
+ if(typeof target!=='string'||!uuid.test(target)||target.toLowerCase()===lead.id)fail(422,'VALIDATION_ERROR','请选择不同的主线索');
  const {rows:[canonical]}=await c.query(`SELECT id,organization_id,owner_user_id FROM ms.leads l WHERE id=$1 AND organization_id=$2
   ${ctx.roleWorkspaces?"AND NOT EXISTS (SELECT 1 FROM ms_workspace.lead_directory d WHERE d.lead_id=l.id AND d.department='market')":''}`,
   [target,lead.organization_id]);
@@ -97,12 +97,13 @@ async function duplicateTarget(c,ctx,lead,target){
  const other=await latest(c,canonical,'LEAD_QUALIFICATION_EFFECTIVE');
  const referenced=await c.query(`SELECT 1 FROM ms.audit_events e
   WHERE e.organization_id=$1 AND e.event_name='V34_LEAD_QUALIFICATION_EFFECTIVE'
-   AND e.after_business_json->>'primary_lead_id'=$2 AND e.after_business_json->>'verdict'='duplicate'
+   AND lower(e.after_business_json->>'primary_lead_id')=$2 AND e.after_business_json->>'verdict'='duplicate'
    AND NOT EXISTS (SELECT 1 FROM ms.audit_events newer WHERE newer.organization_id=e.organization_id
     AND newer.target_id=e.target_id AND newer.target_type=e.target_type AND newer.event_name=e.event_name
     AND ((newer.happened_at,(newer.after_business_json->>'sequence')::int)>(e.happened_at,(e.after_business_json->>'sequence')::int)))
    LIMIT 1`,[lead.organization_id,lead.id]);
  if(other?.facts.verdict==='duplicate'||referenced.rowCount)fail(409,'DUPLICATE_CHAIN','主线索不能形成循环或多级归并');
+ return canonical.id;
 }
 const invalidReasons=['test','mistake','spam','false_contact'];
 export async function readGovernance(c,ctx,lead){
@@ -139,8 +140,9 @@ export async function applyGovernance(c,ctx,lead,action,body){
    if(typeof body.approved!=='boolean')fail(422,'VALIDATION_ERROR','请选择审批结果');
    const justification=evidence(body.evidence);
    if(body.approved){
-    if(request.facts.verdict==='duplicate')await duplicateTarget(c,ctx,lead,request.facts.primary_lead_id);
-    await audit(c,ctx,lead,'LEAD_QUALIFICATION_EFFECTIVE',{...request.facts,sequence,request_id:request.id,previous:effective?.facts.verdict??'pending'});
+    const facts={...request.facts};
+    if(facts.verdict==='duplicate')facts.primary_lead_id=await duplicateTarget(c,ctx,lead,facts.primary_lead_id);
+    await audit(c,ctx,lead,'LEAD_QUALIFICATION_EFFECTIVE',{...facts,sequence,request_id:request.id,previous:effective?.facts.verdict??'pending'});
    }
    await audit(c,ctx,lead,'LEAD_QUALIFICATION_DECIDED',{request_id:request.id,approved:body.approved,evidence:justification});
   }else{
@@ -150,8 +152,7 @@ export async function applyGovernance(c,ctx,lead,action,body){
    if(body.verdict==='invalid'&&!invalidReasons.includes(body.reason))fail(422,'VALIDATION_ERROR','请选择无效原因');
    const facts={verdict:body.verdict,evidence:evidence(body.evidence),...(body.verdict==='invalid'?{reason:body.reason}:{})};
    if(body.verdict==='duplicate'){
-    await duplicateTarget(c,ctx,lead,body.primary_lead_id);
-    facts.primary_lead_id=body.primary_lead_id;
+    facts.primary_lead_id=await duplicateTarget(c,ctx,lead,body.primary_lead_id);
    }
    const review=Boolean(effective)||['invalid','duplicate'].includes(body.verdict);
    if(review)await audit(c,ctx,lead,'LEAD_QUALIFICATION_REQUESTED',facts);
