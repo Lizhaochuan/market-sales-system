@@ -164,3 +164,16 @@ flowchart TD
 - 首响 SLA 采用 30 分钟连续自然时间。驾驶舱按销售建档或接收审计起算，以首次实际联系记录判定；失败尝试也计为首响。起算证据缺失单列，当前明确禁止联系的线索排除。24 小时接通率沿用同一起点，按明确的双向联系记录计算（电话、语音、视频、有效微信文字沟通，或有对应预约记录的实际面谈）。以系统记录时间判定，含恰好第 24 小时。仅纳入观察期已满且未明确禁止联系的线索，观察中和缺起算证据单列；无合格分母时显示暂无样本。
 - 渠道成本以财务已确认的真实费用记录为唯一来源。费用字段映射、有效线索与分摊归因规则需经确认。
 - 历史应收和余额支持查询账本覆盖范围内任意日期。以所选上海日期结束时点作为日末查询边界，覆盖范围由财务可回放的订单、分配和冲销版本确定。历史时点的收退款净额继续单列。
+
+### 财务样本校验入口
+
+使用 `node scripts/validate-boss-finance-sample.mjs <脱敏样本.json>` 校验。历史账本可加 `--date YYYY-MM-DD`，回放覆盖范围内任意上海日期的日末应收、净分配和余额。校验只读取本地文件，结果不包含单笔编号，不会导入数据库。样本通过表示样本可对账，真实账表的权限、来源和覆盖完整性仍需财务确认。
+
+两类文件均需提供 `organization_ref` 与 `source_ref`，分别填写脱敏机构编号和财务指定账表或接口标识。每个金额字段使用整数人民币分。
+
+| 文件 `kind` | 样本字段 |
+|---|---|
+| `channel_costs` | `costs` 数组，每条含 `expense_id`、`status: "finance_confirmed"`、`confirmation_ref`、`currency: "CNY"`、`period`（YYYY-MM）、`tax_basis`（`inclusive` 或 `exclusive`）、`amount_cents` 和 `allocations`（每项含 `channel_id`、`amount_cents`）。费用冲销用负数，分摊合计须等于该笔费用。 |
+| `historical_ledger` | `coverage: {from, through}` 为包含首尾的连续上海日期。 `opening` 是 `from` 前一日末的订单级余额组成（`order_id`、`receivable_cents`、`net_allocated_cents`）。 `events` 每条含 `event_id`、`order_id`、`evidence_ref`、带时区的 `effective_at` 与 `recorded_at`、`receivable_delta_cents` 和 `allocation_delta_cents`。 `checkpoints` 使用账单上的订单级核对点，含 `order_id`、`date`、`receivable_cents`、`net_allocated_cents`、`balance_cents` 和 `statement_ref`。 |
+
+历史样本按当日系统可见状态回放，生效与记录均到达所选上海日末才纳入。退款冲减净分配，用负的 `allocation_delta_cents`；订单折扣或冲销用负的 `receivable_delta_cents`。如财务要求报表在补录后重述过去日期，应提供该账本的重述规则和对账样本。目前仅校验样本，Boss 页面仍按现状显示渠道成本和历史余额的数据缺口。
