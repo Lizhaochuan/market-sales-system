@@ -419,6 +419,9 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
 
    const query={view_mode:'event',start_at:start,end_at:end};
    const read=(filters,user)=>req('/metrics?'+new URLSearchParams({...query,...filters}),undefined,user);
+   const drill=(metric,filters,user)=>req(
+    '/metrics/drilldown?'+new URLSearchParams({...query,...filters,metric}),undefined,user,
+   );
    const own=good(await read({},A));
    assert.equal(own.event_time_basis,'recorded_at');
    assert.equal(own.filters.view_mode,'event');
@@ -436,6 +439,28 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    const blocked=good(await read({owner_id:B},A));
    assert.ok(Object.values(blocked.event_counts).every(count=>count===0));
    assert.equal((await read({},F)).status,403);
+   for(const [metric,count] of Object.entries(own.event_counts)){
+    const detail=good(await drill(metric,{},A));
+    assert.equal(detail.total,count,metric);
+    assert.equal(detail.items.length,count,metric);
+    assert.equal(detail.event_time_basis,'recorded_at');
+   }
+   const communication=good(await drill('communication_events',{},A));
+   assert.deepEqual(communication.items.map(item=>item.lead_id),[oldLead]);
+   assert.equal(new Date(communication.items[0].recorded_at).toISOString(),'2024-04-30T16:00:00.000Z');
+   assert.deepEqual(Object.keys(communication.items[0]).sort(),['contact_name','id','lead_id','owner_name','recorded_at']);
+   assert.deepEqual(good(await drill('created_leads',{},A)).items.map(item=>item.lead_id),[newLead]);
+   const page1=good(await drill('communication_events',{page_size:1},M));
+   const page2=good(await drill('communication_events',{page_size:1,page:2},M));
+   const page3=good(await drill('communication_events',{page_size:1,page:3},M));
+   assert.equal(page1.total,team.event_counts.communication_events);
+   assert.equal(page2.total,page1.total);
+   assert.equal(page3.total,page1.total);
+   assert.deepEqual(page3.items,[]);
+   assert.deepEqual([page1.items[0].lead_id,page2.items[0].lead_id].sort(),[oldLead,otherLead].sort());
+   assert.equal(good(await drill('communication_events',{source:'到店'},M)).total,1);
+   assert.deepEqual(good(await drill('communication_events',{owner_id:B},A)).items,[]);
+   assert.equal((await drill('communication_events',{},F)).status,403);
   });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);

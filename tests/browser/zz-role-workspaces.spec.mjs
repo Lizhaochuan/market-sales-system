@@ -1011,6 +1011,12 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  const reopened=panel.locator('.stat-card').filter({has:page.getByText('失单后重开（次）',{exact:true})});
  await expect(reopened.locator('strong')).toHaveText('1');
  await expect(panel.getByRole('button',{name:'查看线索明细'})).toHaveCount(0);
+ await reopened.getByRole('button',{name:'查看失单后重开明细'}).click();
+ const eventDrilldown=panel.locator('#v34-metrics-reopened_events');
+ await expect(eventDrilldown).toContainText('共 1 条记录');
+ await expect(eventDrilldown).toContainText('窗口第二位顾问测试家长');
+ await expect(eventDrilldown).toContainText('2024-04-01 10:00 记录');
+ await expect(eventDrilldown).not.toContainText('窗口首位顾问测试家长');
  await mode.selectOption('cohort');
  await apply.click();
  await expect(count).toHaveText('1');

@@ -251,6 +251,16 @@
   }
   target.append(section);
  }
+ const eventMetricsLabels={
+   created_leads:'新建线索（条）',
+   communication_events:'沟通记录（次）',
+   meeting_completion_events:'完成面谈（次）',
+   trial_completion_events:'完成试听（次）',
+   first_enrollment_success_events:'首次报名成功（次）',
+   won_events:'正式成交结案（次）',
+   lost_events:'失单结案（次）',
+   reopened_events:'失单后重开（次）',
+  };
  const metricsDrilldownTitles={
   leads:'线索明细',
   students:'学生明细',
@@ -259,7 +269,8 @@
  };
  function renderMetricsDrilldown(target,scope,metric){
   const section=node('section','panel');
-  const students=metric==='students',title=metricsDrilldownTitles[metric];
+  const students=metric==='students',period=Object.hasOwn(eventMetricsLabels,metric);
+  const title=period?eventMetricsLabels[metric].replace(/（.）$/,'')+'明细':metricsDrilldownTitles[metric];
   section.id='v34-metrics-'+metric;
   section.dataset.metricsDrilldown='';
   section.append(node('h3','',title));
@@ -277,7 +288,7 @@
    try{
     const data=await api(root+'/metrics/drilldown?'+query);
     if(token!==state.token||!section.isConnected)return;
-    results.replaceChildren(node('p','form-hint','共 '+data.total+(students?' 名学生':' 条线索')));
+    results.replaceChildren(node('p','form-hint','共 '+data.total+(students?' 名学生':period&&metric!=='created_leads'?' 条记录':' 条线索')));
     for(const item of data.items){
      const row=node('article','lead-row');
      if(students){
@@ -285,13 +296,14 @@
       row.append(node('p','fineprint','在当前筛选范围内关联 '+item.lead_count+' 条线索'));
      }else{
       row.append(node('strong','',item.contact_name||'未填写家长姓名'));
-      row.append(node('p','fineprint',
-       (item.owner_name||'待分配')+' · '+dayKey(new Date(item.created_at))+' 建档 · '+terminalText(item.terminal_state),
-      ));
+      const description=period
+       ?dayKey(new Date(item.recorded_at))+' '+shTimeText(item.recorded_at)+' 记录'
+       :dayKey(new Date(item.created_at))+' 建档 · '+terminalText(item.terminal_state);
+      row.append(node('p','fineprint',(item.owner_name||'待分配')+' · '+description));
      }
      results.append(row);
     }
-    if(!data.items.length)results.append(node('p','','此页没有'+(students?'学生':'线索')));
+    if(!data.items.length)results.append(node('p','','此页没有'+(students?'学生':period?'记录':'线索')));
     if(data.page>1)btn(results,'上一页',()=>load(data.page-1));
     if(data.page*data.page_size<data.total)btn(results,'下一页',()=>load(data.page+1));
    }catch(e){
@@ -304,16 +316,7 @@
  }
  function renderEventMetrics(target){
   const grid=node('div','scope-grid');
-  const labels={
-   created_leads:'新建线索（条）',
-   communication_events:'沟通记录（次）',
-   meeting_completion_events:'完成面谈（次）',
-   trial_completion_events:'完成试听（次）',
-   first_enrollment_success_events:'首次报名成功（次）',
-   won_events:'正式成交结案（次）',
-   lost_events:'失单结案（次）',
-   reopened_events:'失单后重开（次）',
-  };
+
   target.append(node('h3','','当期发生量'));
   if(report.filters.source!=null){
    target.append(node('p','form-hint','当前来源筛选：'+(report.filters.source||'未记录来源')));
@@ -324,9 +327,14 @@
     refresh(true);
    });
   }
-  for(const [key,label]of Object.entries(labels)){
+  const appliedScope=metricsQuery;
+  for(const [key,label]of Object.entries(eventMetricsLabels)){
    const tile=node('div','stat-card');
    tile.append(node('p','',label),node('strong','',String(report.event_counts[key]??0)));
+   btn(tile,'查看'+label.replace(/（.）$/,'')+'明细',()=>{
+    target.querySelector('[data-metrics-drilldown]')?.remove();
+    renderMetricsDrilldown(target,appliedScope,key);
+   });
    grid.append(tile);
   }
   target.append(grid);

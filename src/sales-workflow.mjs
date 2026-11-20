@@ -361,12 +361,12 @@ function salesLeadScope(ctx,scope){
 const activeScopedStudent='s.organization_id=l.organization_id AND s.archived_at IS NULL';
 async function metricsDrilldown(c,ctx,query={}){
  const {metric,page='1',page_size='20',...filters}=query;
- if(!['leads','students','won_leads','lost_leads'].includes(metric))fail(422,'VALIDATION_ERROR','该指标暂不支持查看明细');
  if(!/^[1-9]\d{0,5}$/.test(page)||!/^[1-9]\d?$/.test(page_size)||Number(page_size)>50){
   fail(422,'VALIDATION_ERROR','请选择有效页码，每页最多 50 条');
  }
  const scope=metricsScope(filters);
- if(scope.view_mode==='event')fail(422,'VALIDATION_ERROR','当期事件明细暂未开放');
+ if(scope.view_mode==='event')return eventMetricsDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
+ if(!['leads','students','won_leads','lost_leads'].includes(metric))fail(422,'VALIDATION_ERROR','该指标暂不支持查看明细');
  const {where,params}=salesLeadScope(ctx,scope);
  const limit=params.push(Number(page_size)),offset=params.push((Number(page)-1)*Number(page_size));
  const students=metric==='students';
@@ -430,32 +430,62 @@ async function listing(c,ctx,query={},scope=null){
  const incoming=(await c.query("SELECT r.id,r.lead_id,r.body->>'reason' AS reason,w.version FROM ms_workspace.records r JOIN ms_workspace.lead_workflow w ON w.lead_id=r.lead_id WHERE r.organization_id=$1 AND r.kind='corrections' AND r.state='approved' AND r.body->>'type'='lead_transfer' AND r.body->>'target_owner'=$2",[ctx.user.organization_id,ctx.user.id])).rows;
  return {...flags,incoming,items:rows.map(({contact_info,...r})=>({...r,contact_info_masked:maskPhone(contact_info),terminal_state:r.terminal_state??(['closed','invalid'].includes(r.lead_state)?'legacy_closed':'open'),needs_arrangement:!r.version&&!['closed','invalid'].includes(r.lead_state),needs_assignment:!r.owner_user_id||r.owner_status!=='active',overdue:r.next_action?.due_at?Date.parse(r.next_action.due_at)<Date.now()&&r.terminal_state==='open':false})),staff:ctx.manager?(await c.query(`SELECT u.id,u.display_name FROM ms.staff_users u WHERE u.organization_id=$1 AND u.status='active' ${ctx.roleWorkspaces?"AND EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('sales_staff','sales_consultant','sales_manager','super_admin')) AND NOT EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('marketing','marketing_staff','marketing_manager','finance_verifier'))":''} ORDER BY u.display_name`,[ctx.user.organization_id])).rows:[]};
 }
-async function eventMetrics(c,ctx,scope){
+const eventMetricKeys=[
+ 'created_leads','communication_events','meeting_completion_events','trial_completion_events',
+ 'first_enrollment_success_events','won_events','lost_events','reopened_events',
+];
+function periodFacts(ctx,scope){
  const {where,params}=salesLeadScope(ctx,scope);
  const start=params.push(scope.start_at),end=params.push(scope.end_at);
- const eventCounts=(await c.query(`
+ const sql=`
   WITH visible_leads AS (
-   SELECT l.id,l.created_at FROM ms.leads l WHERE ${where}
-  ), period_events AS (
-   SELECT a.event_name,a.after_business_json
+   SELECT l.id,l.created_at,l.contact_id,l.owner_user_id FROM ms.leads l WHERE ${where}
+  ), period_facts AS (
+   SELECT l.id,l.id AS lead_id,l.created_at AS recorded_at,'created_leads' AS metric
+   FROM visible_leads l WHERE l.created_at >= $${start}::timestamptz AND l.created_at < $${end}::timestamptz
+   UNION ALL
+   SELECT a.id,l.id,a.happened_at,
+    CASE
+     WHEN a.event_name='V34_COMMUNICATION' THEN 'communication_events'
+     WHEN a.event_name='V34_WALK_IN_MEETING_COMPLETED'
+       OR (a.event_name='V34_ACTIVITY_COMPLETED' AND a.after_business_json->>'type'='meeting') THEN 'meeting_completion_events'
+     WHEN a.event_name='V34_ACTIVITY_COMPLETED' AND a.after_business_json->>'type'='trial' THEN 'trial_completion_events'
+     WHEN a.event_name='V34_ENROLLMENT_SUCCESS' THEN 'first_enrollment_success_events'
+     WHEN a.event_name='V34_CLOSED_WON' THEN 'won_events'
+     WHEN a.event_name='V34_CLOSED_LOST' THEN 'lost_events'
+     WHEN a.event_name='V34_REOPENED' THEN 'reopened_events'
+    END
    FROM visible_leads l JOIN ms.audit_events a
     ON a.target_id=l.id AND a.target_type='lead' AND a.organization_id=$1
    WHERE a.happened_at >= $${start}::timestamptz AND a.happened_at < $${end}::timestamptz
-    AND a.event_name IN ('V34_COMMUNICATION','V34_ACTIVITY_COMPLETED','V34_WALK_IN_MEETING_COMPLETED',
-                         'V34_ENROLLMENT_SUCCESS','V34_CLOSED_WON','V34_CLOSED_LOST','V34_REOPENED')
-  )
-  SELECT
-   (SELECT count(*)::int FROM visible_leads WHERE created_at >= $${start}::timestamptz AND created_at < $${end}::timestamptz) AS created_leads,
-   count(*) FILTER (WHERE event_name='V34_COMMUNICATION')::int AS communication_events,
-   count(*) FILTER (WHERE event_name='V34_ACTIVITY_COMPLETED' AND after_business_json->>'type'='meeting'
-                         OR event_name='V34_WALK_IN_MEETING_COMPLETED')::int AS meeting_completion_events,
-   count(*) FILTER (WHERE event_name='V34_ACTIVITY_COMPLETED' AND after_business_json->>'type'='trial')::int AS trial_completion_events,
-   count(*) FILTER (WHERE event_name='V34_ENROLLMENT_SUCCESS')::int AS first_enrollment_success_events,
-   count(*) FILTER (WHERE event_name='V34_CLOSED_WON')::int AS won_events,
-   count(*) FILTER (WHERE event_name='V34_CLOSED_LOST')::int AS lost_events,
-   count(*) FILTER (WHERE event_name='V34_REOPENED')::int AS reopened_events
-  FROM period_events`,params)).rows[0];
- return {...flags,timezone:'Asia/Shanghai',filters:scope,event_time_basis:'recorded_at',event_counts:eventCounts};
+  )`;
+ return {sql,params};
+}
+async function eventMetrics(c,ctx,scope){
+ const {sql,params}=periodFacts(ctx,scope);
+ const rows=(await c.query(`${sql}
+  SELECT metric,count(*)::int AS total FROM period_facts WHERE metric IS NOT NULL GROUP BY metric`,params)).rows;
+ const counts=new Map(rows.map(row=>[row.metric,row.total]));
+ const event_counts=Object.fromEntries(eventMetricKeys.map(metric=>[metric,counts.get(metric)??0]));
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,event_time_basis:'recorded_at',event_counts};
+}
+async function eventMetricsDrilldown(c,ctx,scope,metric,page,pageSize){
+ if(!eventMetricKeys.includes(metric))fail(422,'VALIDATION_ERROR','该当期指标暂不支持查看明细');
+ const {sql,params}=periodFacts(ctx,scope);
+ const key=params.push(metric),limit=params.push(pageSize),offset=params.push((page-1)*pageSize);
+ const result=(await c.query(`${sql}, matching AS (
+  SELECT id,lead_id,recorded_at FROM period_facts WHERE metric=$${key}
+ ), page_rows AS (
+  SELECT f.id,f.lead_id,f.recorded_at,co.display_name AS contact_name,u.display_name AS owner_name
+  FROM (SELECT * FROM matching ORDER BY recorded_at DESC,id LIMIT $${limit} OFFSET $${offset}) f
+  JOIN visible_leads l ON l.id=f.lead_id
+  LEFT JOIN ms.contacts co ON co.id=l.contact_id AND co.organization_id=$1
+  LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id AND u.organization_id=$1
+ )
+ SELECT (SELECT count(*)::int FROM matching) AS total,
+        COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY recorded_at DESC,id),'[]'::jsonb) AS items
+ FROM page_rows`,params)).rows[0];
+ return {...flags,metric,filters:scope,page,page_size:pageSize,event_time_basis:'recorded_at',...result};
 }
 async function metrics(c,ctx,query){
  const scope=metricsScope(query);
