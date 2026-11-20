@@ -41,10 +41,10 @@ export async function departmentRoute(c,ctx,{method,parts,body},helpers){
  const [,id,action]=parts,a=workspaceAccess(ctx),org=ctx.user.organization_id,actor=ctx.user.id;
  if(id==='market'){
   if(!a.market)fail(403,'DEPARTMENT_FORBIDDEN','市场工作台仅限市场人员及总管理者');
-  if(method==='GET')return {handled:true,value:{access:a,items:(await c.query(`SELECT d.lead_id AS id,d.phone,d.marketing_notes,d.created_at,d.market_owner_id,u.display_name AS market_owner_name,d.department AS handoff_state,co.display_name AS contact_name,e.event_type AS source,
+  if(method==='GET'){const params=[org,actor,a.market_manager],campus=helpers.campusConditions(ctx,params);return {handled:true,value:{access:a,items:(await c.query(`SELECT d.lead_id AS id,d.phone,d.marketing_notes,d.created_at,d.market_owner_id,u.display_name AS market_owner_name,d.department AS handoff_state,co.display_name AS contact_name,e.event_type AS source,
    (SELECT jsonb_agg(s.display_name) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.archived_at IS NULL) AS students
    FROM ms_workspace.lead_directory d JOIN ms.leads l ON l.id=d.lead_id JOIN ms.contacts co ON co.id=l.contact_id JOIN ms.contact_events e ON e.id=l.source_event_id LEFT JOIN ms.staff_users u ON u.id=d.market_owner_id
-   WHERE d.organization_id=$1 AND d.market_owner_id IS NOT NULL AND (d.market_owner_id=$2 OR $3) ORDER BY d.created_at DESC`,[org,actor,a.market_manager])).rows}};
+   WHERE d.organization_id=$1 AND d.market_owner_id IS NOT NULL AND (d.market_owner_id=$2 OR $3) ${campus.map(condition=>'AND '+condition).join(' ')} ORDER BY d.created_at DESC`,params)).rows}};}
   check(body,['phone','contact_name','student_name','source','notes']);const phone=phoneNumber(body.phone);await lockPhone(c,org,phone);
   if((await matches(c,ctx,phone)).length)fail(409,'PHONE_EXISTS','该电话号码已有线索，请联系主管核对，避免重复录入');
   const created=await leadDesk(c,{...ctx,manager:false},{method:'POST',parts:['leads'],body:{contact_name:body.contact_name,student_name:body.student_name||undefined,origin_group:'market',source:body.source}});
@@ -53,11 +53,13 @@ export async function departmentRoute(c,ctx,{method,parts,body},helpers){
  }
  if(id==='lookup'){
   if(!a.sales)fail(403,'DEPARTMENT_FORBIDDEN','电话号码查重仅限销售接单');check(body,['phone']);const phone=phoneNumber(body.phone);
-  const found=await matches(c,ctx,phone);return {handled:true,value:{phone,items:found.map(r=>{const own=r.owner_user_id===actor||a.sales_manager;return r.department==='market'?{lead_id:r.lead_id,status:'market_available',contact_name:r.contact_name,source:r.source,students:r.students||[]} :own?{lead_id:r.lead_id,status:'sales_available',contact_name:r.contact_name,owner_name:r.owner_name,students:r.students||[]}:{status:'assigned',owner_name:r.owner_name};})}};
+  const found=await matches(c,ctx,phone);
+  for(const row of found)await helpers.requireCampusLead(c,ctx,{id:row.lead_id,organization_id:org});
+  return {handled:true,value:{phone,items:found.map(r=>{const own=r.owner_user_id===actor||a.sales_manager;return r.department==='market'?{lead_id:r.lead_id,status:'market_available',contact_name:r.contact_name,source:r.source,students:r.students||[]} :own?{lead_id:r.lead_id,status:'sales_available',contact_name:r.contact_name,owner_name:r.owner_name,students:r.students||[]}:{status:'assigned',owner_name:r.owner_name};})}};
  }
  if(action==='claim'){
   if(!a.sales)fail(403,'DEPARTMENT_FORBIDDEN','只有销售可接收市场线索');check(body,['phone','next','initial_communication']);if(!/^[0-9a-f-]{36}$/i.test(id))fail(422,'VALIDATION_ERROR','线索编号错误');const phone=phoneNumber(body.phone);
-  const l=(await c.query('SELECT * FROM ms.leads WHERE id=$1 AND organization_id=$2 FOR UPDATE',[id,org])).rows[0];if(!l)fail(404,'NOT_FOUND','未找到匹配线索');await lockPhone(c,org,phone);
+  const l=(await c.query('SELECT * FROM ms.leads WHERE id=$1 AND organization_id=$2 FOR UPDATE',[id,org])).rows[0];if(!l)fail(404,'NOT_FOUND','未找到匹配线索');await helpers.requireCampusLead(c,ctx,l);await lockPhone(c,org,phone);
   const d=(await c.query('SELECT * FROM ms_workspace.lead_directory WHERE lead_id=$1 AND organization_id=$2 AND phone=$3 FOR UPDATE',[id,org,phone])).rows[0];if(!d)fail(404,'NOT_FOUND','未找到匹配线索');
   if(d.department!=='market'){if(l.owner_user_id===actor)return {handled:true,value:{lead_id:id}};fail(409,'ALREADY_ASSIGNED','该线索已由其他销售接收');}
   await salesAssignee(c,ctx,actor);

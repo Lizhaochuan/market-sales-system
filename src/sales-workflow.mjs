@@ -1,3 +1,4 @@
+import {loadCampusAccess,campusConditions,requireCampusLead,isGovernanceAction,applyGovernance,readGovernance,qualificationReport,qualificationMetrics} from './boss-lead-governance.mjs';
 import {workspaceAccess,departmentRoute,prepareSalesIntake,phoneNumber,lockPhone,salesAssignee} from './role-workspaces.mjs';
 // V3.4 standalone sales workflow. Reuses Lead, workspace records/history and the
 // existing financial ledger. No CRM client, external sync or messaging exists here.
@@ -70,24 +71,26 @@ async function validateStage(c,l,stage){
 }
 function evidence(b){const ref=text(b.evidence_ref,500);if(!b.attachment)return {evidence_ref:ref};const a=b.attachment;fields(a,['name','mime','base64']);const name=text(a.name,120),mime=a.mime;if(!['image/png','image/jpeg','application/pdf'].includes(mime)||typeof a.base64!=='string'||!/^[A-Za-z0-9+/]+={0,2}$/.test(a.base64))fail(422,'VALIDATION_ERROR','仅支持 PNG、JPEG、PDF 凭证');const bytes=Buffer.from(a.base64,'base64');if(bytes.length>1_048_576||bytes.length<4)fail(422,'VALIDATION_ERROR','凭证须小于1MB');const valid=mime==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):mime==='image/jpeg'?bytes[0]===255&&bytes[1]===216:bytes.subarray(0,5).toString()==='%PDF-';if(!valid)fail(422,'VALIDATION_ERROR','凭证格式与文件内容不符');return {evidence_ref:ref,attachment:{name,mime,base64:a.base64}};}
 async function enrollmentState(c,ctx,l,r){const o=(await c.query('SELECT * FROM ms.sales_orders WHERE id=$1 FOR UPDATE',[r.body.order_id])).rows[0];const pending=(await c.query("SELECT COALESCE(sum((p.body->>'amount_cents')::bigint-COALESCE((SELECT sum((r.body->>'amount_cents')::bigint) FROM ms_workspace.records r WHERE r.kind='refunds' AND r.state='verified' AND r.body->>'payment_id'=p.id::text),0)),0)::text AS n FROM ms_workspace.records p WHERE p.kind='payments' AND p.state='verified' AND p.body->>'enrollment_id'=$1 AND COALESCE(p.body->>'allocated','false')='false'",[r.id])).rows[0];const net=Number(o.net_allocated_cents)+Number(pending.n),due=Number(o.amount_due_cents);const state=r.state==='cancelled'?'cancelled':r.body.agreement_confirmed&&net>0?'successful':r.body.agreement_confirmed?'awaiting_payment':'awaiting_agreement';const first=state==='successful'&&!r.body.first_success_at;await c.query('UPDATE ms.sales_orders SET payment_state=$2,version=version+1,updated_at=now() WHERE id=$1',[o.id,Number(o.net_allocated_cents)===0?'unpaid':Number(o.net_allocated_cents)===due?'fully_paid':'partially_paid']);const body={...r.body,unallocated_verified_cents:Number(pending.n),net_cents:net,balance_cents:due-net,payment_state:net===0?'unpaid':net===due?'settled':'partially_paid',...(first?{first_success_at:new Date().toISOString()}:{} )};const n=await update(c,ctx,r,state,body);if(first)await audit(c,ctx,l,'ENROLLMENT_SUCCESS',{enrollment_id:r.id,student_id:r.student_id,order_id:o.id,amount_cents:net});return n;}
-async function financialQueue(c,ctx){if(!isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','仅授权核实员或主管可查看核实队列');const r=await c.query(`SELECT r.*,w.version AS workflow_version,s.display_name AS student_name FROM ms_workspace.records r JOIN ms.leads l ON l.id=r.lead_id JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms.students s ON s.id=r.student_id WHERE l.organization_id=$1 AND r.kind IN('payments','refunds') AND r.state IN('pending','approved') ORDER BY r.created_at`,[ctx.user.organization_id]);return {...flags,items:r.rows,can_verify:isFinance(ctx)};}
+async function financialQueue(c,ctx){if(!isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','仅授权核实员或主管可查看核实队列');const params=[ctx.user.organization_id],campus=campusConditions(ctx,params);const r=await c.query(`SELECT r.*,w.version AS workflow_version,s.display_name AS student_name FROM ms_workspace.records r JOIN ms.leads l ON l.id=r.lead_id JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms.students s ON s.id=r.student_id WHERE l.organization_id=$1 AND r.kind IN('payments','refunds') AND r.state IN('pending','approved') ${campus.map(condition=>'AND '+condition).join(' ')} ORDER BY r.created_at`,params);return {...flags,items:r.rows,can_verify:isFinance(ctx)};}
 async function recheckMetricsAccess(c,ctx,result){
  const latest=await staffContext(c,{staffId:ctx.user.id,orgId:ctx.user.organization_id});
  const before=new Set(ctx.roles),after=new Set(latest.roles);
- if(before.size!==after.size||[...before].some(role=>!after.has(role))){
+ const campus=await loadCampusAccess(c,latest);
+ if(before.size!==after.size||[...before].some(role=>!after.has(role))||campus.configured!==ctx.campusAccess.configured||JSON.stringify(campus.grants)!==JSON.stringify(ctx.campusAccess.grants)){
   fail(403,'FORBIDDEN','统计权限已变化，请重新打开驾驶舱');
  }
  return result;
 }
 export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  const [,id,action]=parts,org=ctx.user.organization_id,actor=ctx.user.id;
+ ctx.campusAccess=await loadCampusAccess(c,ctx);
  if(id==='market-metrics'){
   if(!ctx.roleWorkspaces||!workspaceAccess(ctx).market_manager)fail(403,'DEPARTMENT_FORBIDDEN','仅市场主管或总管理者可查看市场统计');
   if(method!=='GET'||(action&&action!=='drilldown'))fail(404,'NOT_FOUND','未找到市场统计入口');
   return recheckMetricsAccess(c,ctx,await marketMetrics(c,ctx,query,action==='drilldown'));
  }
- if(ctx.roleWorkspaces&&id!=='options'){const r=await departmentRoute(c,ctx,{method,parts,body},{activity,audit,auditWorkflow,initialCommunication});if(r.handled)return {...flags,...r.value};}
- if(method==='GET'&&id==='options')return {...flags,...(ctx.roleWorkspaces?{access:workspaceAccess(ctx)}:{}),methods,stages,actions,classrooms:[],failure_reasons:reasons,can_verify:isFinance(ctx),manager:ctx.manager,catalog:ctx.roleWorkspaces&&!workspaceAccess(ctx).sales?[]:(await c.query("SELECT id,version,body FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND state='active' ORDER BY body->>'course_label'",[org])).rows};
+ if(ctx.roleWorkspaces&&id!=='options'){const r=await departmentRoute(c,ctx,{method,parts,body},{activity,audit,auditWorkflow,initialCommunication,campusConditions,requireCampusLead});if(r.handled)return {...flags,...r.value};}
+ if(method==='GET'&&id==='options')return {...flags,...(ctx.roleWorkspaces?{access:workspaceAccess(ctx)}:{}),methods,stages,actions,classrooms:[],campus:ctx.campusAccess,failure_reasons:reasons,can_verify:isFinance(ctx),manager:ctx.manager,catalog:ctx.roleWorkspaces&&!workspaceAccess(ctx).sales?[]:(await c.query("SELECT id,version,body FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND state='active' ORDER BY body->>'course_label'",[org])).rows};
  if(method==='POST'&&id==='catalog'){fields(body,['course_label','standard_unit_cents','reason','expected_version']);if(!ctx.manager)fail(403,'FORBIDDEN','本地标准价目由主管维护');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[org+':catalog']);const name=text(body.course_label,120),unit=money(body.standard_unit_cents),old=(await c.query("SELECT * FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND lower(body->>'course_label')=lower($2) FOR UPDATE",[org,name])).rows[0];if(old&&old.version!==body.expected_version)fail(409,'VERSION_CONFLICT','本地价格已更新');const b={course_label:name,standard_unit_cents:unit,price_source:'LOCAL_APPROVED_PRICE',approved_by:actor,reason:text(body.reason),v34:true};const r=old?await update(c,ctx,old,'active',b):await save(c,ctx,{id:null,organization_id:org,owner_user_id:actor},'course-catalog','active',b);return {...flags,item:r};}
  if(method==='GET'&&id==='finance')return financialQueue(c,ctx);
  if(method==='GET'&&id==='metrics'){
@@ -119,13 +122,18 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  const financeAction=['verify-payment','verify-refund','reject-payment'].includes(action)&&isFinance(ctx);
  const acceptTransfer=action==='accept-transfer'&&(await c.query("SELECT 1 FROM ms_workspace.records WHERE lead_id=$1 AND kind='corrections' AND state='approved' AND body->>'type'='lead_transfer' AND body->>'target_owner'=$2",[id,actor])).rowCount>0;
  if(!ctx.manager&&l.owner_user_id!==actor&&!financeAction&&!acceptTransfer)fail(403,'FORBIDDEN','仅负责人或授权主管可操作该客户');
+ await requireCampusLead(c,ctx,l);
  let w=(await c.query('SELECT * FROM ms_workspace.lead_workflow WHERE lead_id=$1',[id])).rows[0];
  if(method==='GET'){
   if(action==='history')return {...flags,items:(await c.query("SELECT h.*,r.kind FROM ms_workspace.history h JOIN ms_workspace.records r ON r.id=h.record_id WHERE r.lead_id=$1 AND r.organization_id=$2 AND(r.kind<>'workflow-drafts' OR r.body->>'recorded_by'=$3) ORDER BY h.record_id,h.version",[id,org,actor])).rows};
   const students=(await c.query('SELECT s.id,s.display_name FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=$1 AND s.organization_id=$2 AND s.archived_at IS NULL',[id,org])).rows;
   const records=(await c.query("SELECT * FROM ms_workspace.records WHERE lead_id=$1 AND(kind<>'workflow-drafts' OR body->>'recorded_by'=$2) ORDER BY created_at DESC,id",[id,actor])).rows;
   const events=(await c.query("SELECT a.event_name,a.after_business_json,a.happened_at,a.actor_user_id,u.display_name AS actor_name FROM ms.audit_events a LEFT JOIN ms.staff_users u ON u.id=a.actor_user_id WHERE a.organization_id=$1 AND a.target_type='lead' AND a.target_id=$2 ORDER BY a.happened_at DESC,a.id DESC",[org,id])).rows;
-  return {...flags,lead:l,workflow:w??null,students,records,events:ctx.roleWorkspaces?events.filter(e=>!e.event_name.startsWith('V34_MARKET_CAPTURED')):events,needs_arrangement:!w||w.terminal_state==='open'&&!records.some(r=>r.id===w.primary_activity_id&&active(r))};
+  return {...flags,lead:l,workflow:w??null,governance:await readGovernance(c,ctx,l),students,records,events:ctx.roleWorkspaces?events.filter(e=>!e.event_name.startsWith('V34_MARKET_CAPTURED')):events,needs_arrangement:!w||w.terminal_state==='open'&&!records.some(r=>r.id===w.primary_activity_id&&active(r))};
+ }
+ if(isGovernanceAction(action)){
+  await applyGovernance(c,ctx,l,action,body);
+  return {...flags,saved:true};
  }
  if(['supervise-collaboration','complete-collaboration'].includes(action)){
   return collaborationAction(c,ctx,l,w,action,body);
@@ -530,7 +538,7 @@ async function supervisionReports(c,ctx,scope){
 }
 function maskPhone(v){if(!v)return '';const s=String(v).trim();if(s.length>=8)return s.slice(0,s.length-8)+'****'+s.slice(-4);if(s.length>=5)return s.slice(0,2)+'***'+s.slice(-2);return '****';}
 function metricsScope(query={}){
- fields(query,['view_mode','start_at','end_at','owner_id','source','as_of_at']);
+ fields(query,['view_mode','start_at','end_at','owner_id','source','as_of_at','campus_id']);
  const {view_mode,start_at,end_at,owner_id,source,as_of_at}=query;
  if(view_mode!==undefined&&!['cohort','event','snapshot'].includes(view_mode)){
   fail(422,'VALIDATION_ERROR','请选择有效的统计口径');
@@ -541,7 +549,8 @@ function metricsScope(query={}){
  if(source!==undefined&&(typeof source!=='string'||source.length>200)){
   fail(422,'VALIDATION_ERROR','请选择有效的原始来源');
  }
- const dimensions={owner_id:owner_id??null,source:source?.trim()??null};
+  if(query.campus_id!==undefined&&typeof query.campus_id!=='string')fail(422,'VALIDATION_ERROR','请选择有效校区');
+ const dimensions={owner_id:owner_id??null,source:source?.trim()??null,...(query.campus_id!==undefined?{campus_id:query.campus_id}:{})};
  function boundary(value){
 
   const match=typeof value==='string'&&/^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-]\d{2}:[0-5]\d)$/.exec(value);
@@ -572,7 +581,7 @@ async function marketMetrics(c,ctx,query,drill){
  const scope=metricsScope(filters);
  if(!['current','cohort'].includes(scope.view_mode))fail(422,'VALIDATION_ERROR','市场统计支持按建档时间查询交接进度');
  const params=[ctx.user.organization_id];
- const conditions=['d.organization_id=$1','d.market_owner_id IS NOT NULL'];
+ const conditions=['d.organization_id=$1','d.market_owner_id IS NOT NULL',...campusConditions(ctx,params,scope)];
  if(scope.owner_id)conditions.push(`d.market_owner_id=$${params.push(scope.owner_id)}`);
  if(scope.source!==null)conditions.push(`COALESCE(e.event_type,'')=$${params.push(scope.source)}`);
  if(scope.view_mode==='cohort'){
@@ -598,9 +607,9 @@ async function marketMetrics(c,ctx,query,drill){
   count(*) FILTER (WHERE handed_off)::int AS handed_off FROM scoped GROUP BY source ORDER BY leads DESC,source`,params);
  return {...flags,filters:scope,by_source};
 }
-function salesLeadScope(ctx,scope){
+function salesLeadScope(ctx,scope,{deferCampus=false}={}){
  const params=[ctx.user.organization_id,ctx.user.id,ctx.manager];
- const conditions=['l.organization_id=$1','(l.owner_user_id=$2 OR $3::boolean)'];
+ const conditions=['l.organization_id=$1','(l.owner_user_id=$2 OR $3::boolean)',...(deferCampus?[]:campusConditions(ctx,params,scope))];
  if(ctx.roleWorkspaces)conditions.push("NOT EXISTS(SELECT 1 FROM ms_workspace.lead_directory d WHERE d.lead_id=l.id AND d.department='market')");
  if(scope?.owner_id)conditions.push(`l.owner_user_id=$${params.push(scope.owner_id)}::uuid`);
  if(scope?.source!=null)conditions.push(`COALESCE((
@@ -670,11 +679,13 @@ async function communicationMetrics(c,ctx,scope){
 const activeScopedStudent='s.organization_id=l.organization_id AND s.archived_at IS NULL';
 const salesPathMetricKeys=['direct_to_trial_students','direct_enroll_without_trial_students'];
 function salesPathFacts(ctx,scope){
- const {where,params}=salesLeadScope(ctx,scope);
+ const byEvent=scope.view_mode==='event';
+ const {where,params}=salesLeadScope(ctx,scope,{deferCampus:byEvent});
  let period='';
- if(scope.view_mode==='event'){
+ if(byEvent){
   const start=params.push(scope.start_at),end=params.push(scope.end_at);
-  period=`WHERE recorded_at >= $${start}::timestamptz AND recorded_at < $${end}::timestamptz`;
+  const campus=campusConditions(ctx,params,scope,'l','paths.recorded_at');
+  period=`WHERE paths.recorded_at >= $${start}::timestamptz AND paths.recorded_at < $${end}::timestamptz ${campus.map(condition=>'AND '+condition).join(' ')}`;
  }
  const sql=`
   WITH scoped_students AS (
@@ -715,8 +726,8 @@ function salesPathFacts(ctx,scope){
    FROM first_milestones
    WHERE enrollment_succeeded IS NOT NULL AND (trial_completed IS NULL OR enrollment_succeeded<trial_completed)
   ), path_students AS (
-   SELECT metric,student_id AS id,display_name,min(recorded_at) AS recorded_at,count(*)::int AS lead_count
-   FROM paths ${period} GROUP BY metric,student_id,display_name
+   SELECT metric,student_id AS id,paths.display_name,min(recorded_at) AS recorded_at,count(*)::int AS lead_count
+   FROM paths JOIN ms.leads l ON l.id=paths.lead_id ${period} GROUP BY metric,student_id,paths.display_name
   )`;
  return {sql,params};
 }
@@ -861,6 +872,11 @@ async function metricsDrilldown(c,ctx,query={}){
   fail(422,'VALIDATION_ERROR','请选择有效页码，每页最多 50 条');
  }
  const scope=metricsScope(filters);
+ if(qualificationMetrics.includes(metric)){
+  if(scope.view_mode==='event'||reason!==undefined)fail(422,'VALIDATION_ERROR','有效线索核验不支持当期事件或失单原因筛选');
+  const result=await qualificationReport(c,scope,salesLeadScope(ctx,scope),metric,Number(page),Number(page_size));
+  return {...flags,metric,filters:scope,page:Number(page),page_size:Number(page_size),...result};
+ }
  const reviewMetric=metric==='current_lost_reason'||Object.hasOwn(reviewPredicates,metric);
  if(reason!==undefined&&metric!=='current_lost_reason')fail(422,'VALIDATION_ERROR','该明细不支持失单原因筛选');
  if(reviewMetric){
@@ -931,7 +947,13 @@ async function listing(c,ctx,query={},scope=null){
   FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id LEFT JOIN ms.contact_events e ON e.id=l.source_event_id AND e.organization_id=l.organization_id
   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms_workspace.records a ON a.id=w.primary_activity_id
   WHERE ${where}${qWhere} ORDER BY l.created_at DESC,l.id`,params)).rows;
- const incoming=(await c.query("SELECT r.id,r.lead_id,r.body->>'reason' AS reason,w.version FROM ms_workspace.records r JOIN ms_workspace.lead_workflow w ON w.lead_id=r.lead_id WHERE r.organization_id=$1 AND r.kind='corrections' AND r.state='approved' AND r.body->>'type'='lead_transfer' AND r.body->>'target_owner'=$2",[ctx.user.organization_id,ctx.user.id])).rows;
+ const incomingParams=[ctx.user.organization_id,ctx.user.id],incomingCampus=campusConditions(ctx,incomingParams);
+ const incoming=(await c.query(`SELECT r.id,r.lead_id,r.body->>'reason' AS reason,w.version
+  FROM ms_workspace.records r JOIN ms_workspace.lead_workflow w ON w.lead_id=r.lead_id
+  JOIN ms.leads l ON l.id=r.lead_id AND l.organization_id=r.organization_id
+  WHERE r.organization_id=$1 AND r.kind='corrections' AND r.state='approved'
+   AND r.body->>'type'='lead_transfer' AND r.body->>'target_owner'=$2
+   ${incomingCampus.map(condition=>'AND '+condition).join(' ')}`,incomingParams)).rows;
  return {...flags,incoming,items:rows.map(({contact_info,...r})=>({...r,contact_info_masked:maskPhone(contact_info),terminal_state:r.terminal_state??(['closed','invalid'].includes(r.lead_state)?'legacy_closed':'open'),needs_arrangement:!r.version&&!['closed','invalid'].includes(r.lead_state),needs_assignment:!r.owner_user_id||r.owner_status!=='active',overdue:r.next_action?.due_at?Date.parse(r.next_action.due_at)<Date.now()&&r.terminal_state==='open':false})),staff:ctx.manager?(await c.query(`SELECT u.id,u.display_name FROM ms.staff_users u WHERE u.organization_id=$1 AND u.status='active' ${ctx.roleWorkspaces?"AND EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('sales_staff','sales_consultant','sales_manager','super_admin')) AND NOT EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('marketing','marketing_staff','marketing_manager','finance_verifier'))":''} ORDER BY u.display_name`,[ctx.user.organization_id])).rows:[]};
 }
 const eventMetricKeys=[
@@ -939,14 +961,17 @@ const eventMetricKeys=[
  'first_enrollment_success_events','won_events','lost_events','reopened_events',
 ];
 function periodFacts(ctx,scope){
- const {where,params}=salesLeadScope(ctx,scope);
+ const {where,params}=salesLeadScope(ctx,scope,{deferCampus:true});
  const start=params.push(scope.start_at),end=params.push(scope.end_at);
+ const createdCampus=campusConditions(ctx,params,scope,'l','l.created_at');
+ const recordedCampus=campusConditions(ctx,params,scope,'l','a.happened_at');
  const sql=`
   WITH visible_leads AS (
-   SELECT l.id,l.created_at,l.contact_id,l.owner_user_id FROM ms.leads l WHERE ${where}
+   SELECT l.id,l.created_at,l.contact_id,l.owner_user_id,l.organization_id FROM ms.leads l WHERE ${where}
   ), period_facts AS (
    SELECT l.id,l.id AS lead_id,l.created_at AS recorded_at,'created_leads' AS metric
    FROM visible_leads l WHERE l.created_at >= $${start}::timestamptz AND l.created_at < $${end}::timestamptz
+    ${createdCampus.map(condition=>'AND '+condition).join(' ')}
    UNION ALL
    SELECT a.id,l.id,a.happened_at,
     CASE
@@ -962,6 +987,7 @@ function periodFacts(ctx,scope){
    FROM visible_leads l JOIN ms.audit_events a
     ON a.target_id=l.id AND a.target_type='lead' AND a.organization_id=$1
    WHERE a.happened_at >= $${start}::timestamptz AND a.happened_at < $${end}::timestamptz
+    ${recordedCampus.map(condition=>'AND '+condition).join(' ')}
   )`;
  return {sql,params};
 }
@@ -1190,7 +1216,8 @@ async function snapshotMetrics(c,ctx,scope){
    `${studentQuery.sql} SELECT count(*)::int AS total FROM student_snapshot`,studentQuery.params,
   )).rows[0].total;
  }
- return {...flags,timezone:'Asia/Shanghai',filters:scope,snapshot_counts,snapshot_cash,student_history};
+ const qualification=await qualificationReport(c,scope,salesLeadScope(ctx,scope));
+ return {...flags,qualification,timezone:'Asia/Shanghai',filters:scope,snapshot_counts,snapshot_cash,student_history};
 }
 async function snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize){
  const {sql,params}=historicalActivityStates(ctx,scope);
@@ -1296,9 +1323,29 @@ async function metrics(c,ctx,query){
   ...enroll.filter(r=>r.state!=='cancelled'&&!r.body.agreement_confirmed).map(r=>({id:r.id,lead_id:r.lead_id,kind:'agreement',title:'报名协议待独立核实',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.submitted_by!==ctx.user.id})),
   ...records.filter(r=>r.kind==='corrections'&&r.state==='pending').map(r=>({id:r.id,lead_id:r.lead_id,kind:r.body.type,title:r.body.type==='lead_transfer'?'客户转交待独立复核':'报名退款/取消纠正待审批',contact_name:leadBy(r.lead_id)?.contact_name,owner_name:leadBy(r.lead_id)?.owner_name,can_review:r.body.requested_by!==ctx.user.id&&r.body.target_owner!==ctx.user.id}))
  ]:[];
+ if(ctx.manager){
+  const {where,params}=salesLeadScope(ctx,scope);
+  const {rows:requests}=await c.query(`SELECT a.id,l.id AS lead_id,a.actor_user_id,
+   a.event_name,co.display_name AS contact_name,u.display_name AS owner_name
+   FROM ms.leads l JOIN ms.audit_events a ON a.organization_id=l.organization_id
+    AND a.target_type='lead' AND a.target_id=l.id
+   LEFT JOIN ms.contacts co ON co.id=l.contact_id AND co.organization_id=l.organization_id
+   LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id AND u.organization_id=l.organization_id
+   WHERE ${where} AND a.event_name IN ('V34_LEAD_QUALIFICATION_REQUESTED','V34_CAMPUS_TRANSFER_REQUESTED')
+    AND NOT EXISTS (SELECT 1 FROM ms.audit_events d WHERE d.organization_id=a.organization_id
+     AND d.target_type=a.target_type AND d.target_id=a.target_id AND d.event_name=replace(a.event_name,'_REQUESTED','_DECIDED')
+     AND d.after_business_json->>'request_id'=a.id::text)
+   ORDER BY a.happened_at,a.id`,params);
+  for(const {event_name,actor_user_id,...item} of requests){
+   const campus=event_name==='V34_CAMPUS_TRANSFER_REQUESTED';
+   pending_approvals.push({...item,kind:campus?'campus_transfer':'lead_qualification',
+    title:campus?'校区转归待审批':'线索核验待审核',can_review:actor_user_id!==ctx.user.id});
+  }
+ }
  const path_counts=await salesPathCounts(c,ctx,scope);
  const supervision=await supervisionReports(c,ctx,scope);
  const communication=await communicationMetrics(c,ctx,scope);
+ const qualification=await qualificationReport(c,scope,salesLeadScope(ctx,scope));
  if(supervision.transfer_supervision){
   const pendingTransfers=new Set(records.filter(r=>r.kind==='corrections'&&r.body.type==='lead_transfer'&&['pending','approved'].includes(r.state)).map(r=>r.lead_id));
   supervision.transfer_supervision.candidates=list.items.filter(l=>l.version&&l.terminal_state==='open'&&!pendingTransfers.has(l.id)).map(l=>({
@@ -1315,5 +1362,5 @@ async function metrics(c,ctx,query){
   const eligibleOwners=new Set(list.staff.map(staff=>staff.id));
   supervision.arrangement_supervision.candidates=list.items.filter(l=>l.needs_arrangement&&eligibleOwners.has(l.owner_user_id)).map(l=>l.id);
  }
- return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,appointment_recovery,conversion_cycle,...communication,...supervision,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons,pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,version:r.version,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,counts:count,path_counts,appointment_recovery,conversion_cycle,qualification,...communication,...supervision,by_source:bySource,channel_cost_status:'COST_NOT_CONFIGURED',activity_counts:{communications:comm.length,appointments:appointments.length,completed_activities:completed.length},by_owner:[...new Set(list.items.map(l=>l.owner_user_id))].map(owner=>{const owned=list.items.filter(l=>l.owner_user_id===owner),ownedIds=owned.map(l=>l.id),ownedEnrollment=enroll.filter(e=>ownedIds.includes(e.lead_id));return {owner_id:owner,name:owned[0].owner_name||'主管待分配',leads:owned.length,open:owned.filter(l=>l.terminal_state==='open').length,won:owned.filter(l=>l.terminal_state==='won').length,lost:owned.filter(l=>l.terminal_state==='lost').length,overdue:owned.filter(hasOverduePrimary).length,overdue_activities:owned.reduce((sum,l)=>sum+(overdueActivitiesByLead.get(l.id)??0),0),overdue_primary_leads:owned.filter(hasOverduePrimary).length,missing_next:owned.filter(l=>l.needs_arrangement).length,completed_communications:comm.filter(e=>e.actor_user_id===owner&&e.after_business_json.result==='communicated').length,enrollment_success_orders:ownedEnrollment.filter(e=>e.state==='successful').length,verified_net_cents:ownedEnrollment.reduce((n,e)=>n+(e.body.net_cents||0),0)};}),lost_reasons:Object.fromEntries(lostReasonHistory),current_lost_reasons,pending_approvals,reminders:pending.map(r=>({id:r.id,lead_id:r.lead_id,title:r.body.title,due_at:r.body.due_at,owner_user_id:r.owner_user_id,version:r.version,overdue:isPastDue(r),kind:r.kind,type:r.kind==='appointments'?r.body.type:(r.body.action||'call'),appointment_type:r.kind==='appointments'?r.body.type:null})),failures:list.items.map(l=>({lead_id:l.id,consecutive:failureStreak(l)})).filter(l=>l.consecutive>0)};
 }

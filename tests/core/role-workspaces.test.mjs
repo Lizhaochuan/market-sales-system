@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import pg f
 test('Role workspaces: phone handoff, department privacy and persistent dated tasks',async t=>{
  process.env.MS_STAGE='isolated-test';const pool=new pg.Pool({connectionString:process.env.DATABASE_URL}),org=randomUUID(),A=randomUUID(),B=randomUUID(),M=randomUUID(),K=randomUUID(),K2=randomUUID(),KM=randomUUID(),G=randomUUID(),F=randomUUID();const secret='fictional-role-workspaces-test-key-2026';let app;
  try{
- for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql'],[40,'045_appointment_supervision_evidence.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
+ for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql'],[40,'045_appointment_supervision_evidence.sql'],[41,'046_service_campus_directory.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
  await pool.query("INSERT INTO ms.organizations(id,name) VALUES($1,'虚构部门验收机构')",[org]);
  for(const [id,name]of[[A,'销售A'],[B,'销售B'],[M,'销售主管'],[K,'市场A'],[K2,'市场B'],[KM,'市场主管'],[G,'总管理者'],[F,'收款核实员']])await pool.query('INSERT INTO ms.staff_users(id,organization_id,display_name) VALUES($1,$2,$3)',[id,org,name]);
  for(const [role,users]of[['sales_staff',[A,B]],['sales_manager',[M]],['marketing_staff',[K,K2]],['marketing_manager',[KM]],['super_admin',[G]],['finance_verifier',[F]]]){const r=(await pool.query('INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,$2,$2) RETURNING id',[org,role])).rows[0];for(const u of users)await pool.query('INSERT INTO ms.user_role_grants(user_id,role_id,granted_by) VALUES($1,$2,$3)',[u,r.id,G]);}
@@ -633,6 +633,121 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   }
   assert.equal((await w(drill,undefined,G)).status,403);
   assert.equal((await w(students,undefined,G)).status,403);
+ });
+ await t.test('qualification, campus approval and historical dashboard share the authorized lead population',async()=>{
+  const record=async(suffix,name,user=A)=>good(await w('',{
+   contact_name:name,student_name:name+'学生',contact_info:'139000000'+suffix,origin_group:'sales',source:'其他',next:next(1),
+  },user)).lead_id;
+  const primary=await record('61','虚拟真实课程咨询');
+  const invalid=await record('62','虚拟误录');
+  const duplicate=await record('63','虚拟重复咨询');
+  const pending=await record('64','虚拟未接通',B);
+  const get=async(id,user)=>good(await w('/'+id,undefined,user)).governance;
+  const act=(id,action,body,user)=>w('/'+id+'/'+action,body,user);
+  const submit=(id,verdict,extra={},user=A)=>act(id,'submit-qualification',{verdict,evidence:'明确标注的虚拟核验依据',...extra},user);
+  const decide=async(id,approved,user=M)=>act(id,'decide-qualification',{
+   request_id:(await get(id)).qualification_request.id,approved,evidence:'虚拟主管独立审核',
+  },user);
+  const baseline=good(await w('/metrics',undefined,M)).qualification;
+  good(await submit(primary,'valid'));
+  assert.equal((await submit(invalid,'invalid')).status,422);
+  good(await submit(invalid,'invalid',{reason:'mistake'}));
+  assert.equal((await get(invalid)).qualification.verdict,'pending');
+  assert.equal((await decide(invalid,true,A)).status,403);
+  assert.ok(good(await w('/metrics',undefined,M)).pending_approvals.some(item=>item.lead_id===invalid&&item.can_review));
+  good(await decide(invalid,true));
+  good(await submit(duplicate,'duplicate',{primary_lead_id:primary}));
+  good(await decide(duplicate,true));
+  assert.equal((await submit(primary,'duplicate',{primary_lead_id:duplicate})).status,409);
+  assert.equal((await submit(pending,'valid')).status,403);
+  good(await submit(pending,'pending',{},B));
+  const checked=good(await w('/metrics',undefined,M)).qualification;
+  assert.deepEqual(checked,{total:baseline.total-1,valid:1,invalid:1,pending:baseline.total-3,checked:2,valid_rate:0.5,coverage:2/(baseline.total-1)});
+  for(const key of ['valid','invalid','pending']){
+   assert.equal(good(await w('/metrics/drilldown?metric=qualification_'+key,undefined,M)).total,checked[key]);
+  }
+  assert.equal((await w('/metrics/drilldown?metric=qualification_valid',undefined,F)).status,403);
+  good(await submit(invalid,'valid'));
+  good(await decide(invalid,false));
+  assert.equal((await get(invalid)).qualification.verdict,'invalid');
+  good(await submit(invalid,'valid'));
+  const now=async()=>{
+   await pool.query('SELECT pg_sleep(0.005)');
+   return new Date().toISOString();
+  };
+  const beforeCorrection=await now();
+  good(await decide(invalid,true));
+  const snapshot=at=>new URLSearchParams({view_mode:'snapshot',as_of_at:at}).toString();
+  assert.equal(good(await w('/metrics?'+snapshot(beforeCorrection),undefined,M)).qualification.invalid,1);
+  assert.equal((await get(invalid)).qualification.verdict,'valid');
+  assert.equal((await act(primary,'assign-campus',{campus_code:'FICTIONAL-NORTH',evidence:'虚拟首次校区'})).status,409);
+  await pool.query("INSERT INTO ms_workspace.service_campuses(organization_id,code,display_name) VALUES($1,'FICTIONAL-NORTH','虚拟北校区'),($1,'FICTIONAL-SOUTH','虚拟南校区')",[org]);
+  await pool.query("INSERT INTO ms_workspace.service_campus_grants(organization_id,staff_id,campus_code) VALUES($1,$2,'FICTIONAL-NORTH'),($1,$3,'FICTIONAL-NORTH')",[org,M,KM]);
+  assert.equal(good(await w('/metrics',undefined,M)).counts.leads,0);
+  assert.equal((await w('/metrics?campus_id=@unassigned',undefined,M)).status,403);
+  const campus=async(id,action,code,user=A)=>act(id,action,{campus_code:code,evidence:'独立库虚拟校区依据'},user);
+  const firstAssignments=await Promise.all([
+   campus(primary,'assign-campus','FICTIONAL-NORTH'),campus(primary,'assign-campus','FICTIONAL-NORTH'),
+  ]);
+  assert.deepEqual(firstAssignments.map(result=>result.status).sort(),[200,409]);
+  good(await campus(invalid,'assign-campus','FICTIONAL-SOUTH'));
+  assert.equal((await campus(primary,'assign-campus','FICTIONAL-SOUTH')).status,409);
+  assert.equal((await w('/'+invalid,undefined,M)).status,403);
+  assert.equal((await w('/lookup',{phone:'13900000062'},M)).status,403);
+  assert.equal((await w('/metrics?campus_id=FICTIONAL-SOUTH',undefined,M)).status,403);
+  assert.equal(good(await w('/market',undefined,KM)).items.length,0);
+  const north='campus_id=FICTIONAL-NORTH';
+  const northCurrent=good(await w('/metrics?'+north,undefined,M));
+  assert.equal(northCurrent.counts.leads,1);
+  assert.equal(northCurrent.qualification.valid,1);
+  assert.equal(good(await w('/metrics/drilldown?metric=qualification_valid&'+north,undefined,M)).items[0].id,primary);
+  const updatePrimary=async(action,body,user=A)=>act(primary,action,{
+   ...body,expected_version:good(await w('/'+primary,undefined,user===B?M:user)).workflow.version,
+  },user);
+  const appointment=good(await updatePrimary('appointment',{appointment:{type:'meeting',due_at:next(-2).due_at}}));
+  good(await updatePrimary('activity',{
+   record_id:appointment.workflow.primary_activity_id,transition:'reschedule',due_at:next(-1).due_at,reason:'虚拟改期',
+  }));
+  assert.equal((await get(primary)).campus_code,'FICTIONAL-NORTH');
+  good(await updatePrimary('activity',{
+   record_id:appointment.workflow.primary_activity_id,transition:'completed',feedback:'虚拟面谈已完成',next:next(3),
+  }));
+  good(await updatePrimary('followup',{method:'phone',result:'communicated',notes:'虚拟北校区课程回访',next:next(4)}));
+  good(await campus(primary,'request-campus-transfer','FICTIONAL-SOUTH'));
+  const requested=await get(primary);
+  assert.equal(requested.campus_code,'FICTIONAL-NORTH');
+  const approval={request_id:requested.campus_request.id,approved:true,evidence:'虚拟审批依据'};
+  assert.equal((await act(primary,'decide-campus-transfer',approval,M)).status,403);
+  const beforeTransfer=await now();
+  await pool.query("INSERT INTO ms_workspace.service_campus_grants(organization_id,staff_id,campus_code) VALUES($1,$2,'FICTIONAL-SOUTH'),($1,$2,'@unassigned')",[org,M]);
+  good(await act(primary,'decide-campus-transfer',approval,M));
+  assert.equal((await get(primary)).campus_code,'FICTIONAL-SOUTH');
+  assert.ok(good(await w('/metrics?campus_id=@unassigned',undefined,M)).counts.leads>0);
+  assert.equal(good(await w('/metrics?'+north,undefined,M)).counts.leads,0);
+  const historical=snapshot(beforeTransfer)+'&'+north;
+  assert.equal(good(await w('/metrics?'+historical,undefined,M)).qualification.valid,1);
+  assert.equal(good(await w('/metrics/drilldown?metric=qualification_valid&'+historical,undefined,M)).items[0].id,primary);
+  const period=new URLSearchParams({view_mode:'event',start_at:new Date(Date.parse(beforeTransfer)-60000).toISOString(),
+   end_at:new Date(Date.parse(beforeTransfer)+60000).toISOString()}).toString();
+  const eventDrill='&metric=communication_events';
+  assert.ok(good(await w('/metrics/drilldown?'+period+'&'+north+eventDrill,undefined,M)).items.some(item=>item.lead_id===primary));
+  assert.ok(!good(await w('/metrics/drilldown?'+period+'&campus_id=FICTIONAL-SOUTH'+eventDrill,undefined,M)).items.some(item=>item.lead_id===primary));
+  const events=good(await w('/'+primary)).events;
+  const assignment=events.find(event=>event.event_name==='V34_SERVICE_CAMPUS_EFFECTIVE'&&event.after_business_json.from_campus);
+  assert.equal(assignment.after_business_json.from_campus,'FICTIONAL-NORTH');
+  assert.equal(assignment.after_business_json.campus_code,'FICTIONAL-SOUTH');
+  assert.ok(Date.parse(assignment.after_business_json.effective_at)>=Date.parse(beforeTransfer));
+  await pool.query('UPDATE ms.user_role_grants SET revoked_at=NULL WHERE user_id=$1',[G]);
+  good(await updatePrimary('request-transfer',{owner_user_id:B,reason:'虚拟顾问转交'},M));
+  const handoff=good(await w('/'+primary)).records.find(record=>record.kind==='corrections'&&record.state==='pending');
+  good(await updatePrimary('approve-transfer',{record_id:handoff.id,reason:'虚拟独立批准'},G));
+  good(await updatePrimary('accept-transfer',{record_id:handoff.id},B));
+  assert.equal((await get(primary,B)).campus_code,'FICTIONAL-SOUTH');
+  assert.equal((await w('/'+primary)).status,403);
+  await pool.query("UPDATE ms_workspace.service_campus_grants SET revoked_at=now() WHERE organization_id=$1 AND staff_id=$2 AND campus_code='FICTIONAL-SOUTH'",[org,M]);
+  assert.equal((await w('/metrics/drilldown?metric=qualification_valid&campus_id=FICTIONAL-SOUTH',undefined,M)).status,403);
+  assert.equal((await w('/'+primary,undefined,M)).status,403);
+  assert.equal(good(await w('/metrics?'+historical,undefined,M)).qualification.valid,1);
  });
  }finally{if(app)await new Promise(r=>app.close(r));await pool.end();}
 });

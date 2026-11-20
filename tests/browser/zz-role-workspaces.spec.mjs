@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';import pg from 'pg';import {readFile} from 'node:fs/promises';import {createApp} from '../../src/app.mjs';
 let pool,app,url;const pass='0';
-test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql'],[40,'045_appointment_supervision_evidence.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
+test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql'],[39,'044_arrangement_supervision.sql'],[40,'045_appointment_supervision_evidence.sql'],[41,'046_service_campus_directory.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
 test.afterAll(async()=>{if(app)await new Promise(r=>app.close(r));await pool?.end();});
 async function login(page,who='sales-a'){await page.goto(url);await page.locator('#login-form [name="account_code"]').selectOption(who);await page.locator('#login-form [name="passphrase"]').fill(pass);await page.locator('#login-form').getByRole('button',{name:'进入工作台'}).click();await expect(page.locator('#sales-workflow')).toBeVisible();}
 async function lookup(page,phone){await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();await page.locator('#v35-lookup [name="phone"]').fill(phone);await page.locator('#v35-lookup [name="phone"]').press('Enter');}
@@ -968,7 +968,7 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  const filters=panel.locator('#v34-metrics-filters');
  await expect(filters).toBeVisible();
  await expect(panel.getByRole('heading',{name:'首响 SLA · 30 分钟（连续自然时间）'})).toBeVisible();
- await expect(panel).toContainText('有效线索率：规则已确认，核验流程待接入');
+ await expect(panel).toContainText('有效线索率');
  await expect(filters).toContainText('校区筛选：规则已确认，真实校区映射待补充');
  await expect(panel.getByRole('heading',{name:'24 小时接通率'})).toBeVisible();
  const owners=filters.getByRole('combobox',{name:'顾问'});
@@ -1364,4 +1364,82 @@ test('Boss priority collaboration can be issued and completed by the assigned ad
  await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
  await expect(row).toContainText('已销项');
  await expect(row).toContainText('已联系教务确认接收');
+});
+
+test('Boss UI: adviser submits qualification and campus transfer, reviewer approves and drills down',async({page})=>{
+ const org='20000000-0000-4000-8000-000000000001';
+ const number=phone(),name='独立库虚拟校区咨询'+number.slice(-4);
+ await pool.query(`INSERT INTO ms_workspace.service_campuses(organization_id,code,display_name)
+  VALUES($1,'FICTIONAL-EAST','虚拟东校区'),($1,'FICTIONAL-WEST','虚拟西校区')`,[org]);
+ try{
+  await login(page);
+  await lookup(page,number);
+  const intake=page.locator('#v34-intake');
+  await intake.locator('[name="contact_name"]').fill(name);
+  await nextTomorrow(page,intake);
+  await intake.getByRole('button',{name:'保存客户及首次安排'}).click();
+  const panel=page.locator('#v34-lead-governance');
+  const open=async()=>{
+   await expect(panel).toBeVisible();
+   const summary=panel.locator(':scope > summary');
+   await summary.click();
+  };
+  await open();
+  await panel.getByText('提交线索核验',{exact:true}).click();
+  const qualification=panel.locator('#v34-submit-qualification');
+  await qualification.getByLabel('核验结论').selectOption('invalid');
+  await qualification.getByLabel('无效原因').selectOption('test');
+  await qualification.getByLabel('核验依据').fill('虚拟测试记录已核对');
+  await qualification.getByRole('button',{name:'提交核验',exact:true}).click();
+  await expect(panel).not.toHaveAttribute('open','');
+  await expect(page.locator('#v34-message')).toContainText('已保存');
+  await open();
+  await expect(panel).toContainText('核验状态：待核验');
+  await panel.getByText('登记首次服务校区',{exact:true}).click();
+  const assign=panel.locator('#v34-assign-campus');
+  await assign.getByLabel('目标服务校区').selectOption('FICTIONAL-EAST');
+  await assign.getByLabel('归属依据').fill('虚拟首次服务校区');
+  await assign.getByRole('button',{name:'登记校区'}).click();
+  await expect(panel).not.toHaveAttribute('open','');
+  await expect(page.locator('#v34-message')).toContainText('已保存');
+  await open();
+  await expect(panel).toContainText('当前服务校区：虚拟东校区');
+  await panel.getByText('申请校区转归',{exact:true}).click();
+  const transfer=panel.locator('#v34-request-campus-transfer');
+  await transfer.getByLabel('目标服务校区').selectOption('FICTIONAL-WEST');
+  await transfer.getByLabel('归属依据').fill('虚拟主管需审核转归');
+  await transfer.getByRole('button',{name:'提交转归申请'}).click();
+  await expect(panel).not.toHaveAttribute('open','');
+  await expect(page.locator('#v34-message')).toContainText('已保存');
+  await login(page,'general-admin');
+  await page.getByRole('button',{name:'我的待办',exact:true}).click();
+  await page.getByRole('button',{name:'待审批/待接手',exact:true}).click();
+  await page.locator('#v35-approvals article').filter({hasText:name+' · 线索核验待审核'})
+   .getByRole('button',{name:'前往独立复核'}).click();
+  for(const action of ['decide-qualification','decide-campus-transfer']){
+   if(action==='decide-campus-transfer'){
+    await open();
+    await panel.getByText('审批校区转归',{exact:true}).click();
+   }
+   const approval=panel.locator('#v34-'+action);
+   await approval.getByLabel('审批结果').selectOption('yes');
+   await approval.getByLabel('审批依据').fill('虚拟独立审批');
+   await approval.getByRole('button',{name:'提交审批'}).click();
+   await expect(panel).not.toHaveAttribute('open','');
+   await expect(page.locator('#v34-message')).toContainText('已保存');
+  }
+  await open();
+  await expect(panel).toContainText('核验状态：无效');
+  await expect(panel).toContainText('当前服务校区：虚拟西校区');
+  await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+  const dashboard=page.locator('#v34-metrics');
+  await dashboard.getByLabel('服务校区',{exact:true}).selectOption('FICTIONAL-WEST');
+  await dashboard.getByRole('button',{name:'应用筛选'}).click();
+  const rate=dashboard.locator('#v34-qualification');
+  await expect(rate).toContainText('核验覆盖率 100%');
+  await rate.getByRole('button',{name:'无效 1',exact:true}).click();
+  await expect(rate.locator('#v34-metrics-qualification_invalid')).toContainText(name);
+ }finally{
+  await pool.query("DELETE FROM ms_workspace.service_campuses WHERE organization_id=$1 AND code IN ('FICTIONAL-EAST','FICTIONAL-WEST')",[org]);
+ }
 });

@@ -96,12 +96,91 @@
   if(!l){host.append(node('p','','该记录已转交或无权访问'));return;}host.append(node('h2','',l.contact_name||'待识别客户'));if(!detail){host.append(node('p','','读取中…'));return;}
   const w=detail.workflow;host.append(node('p','',((detail.students||[]).map(s=>s.display_name).join('、')||'学生待识别')+' · 负责人：'+l.owner_name),node('p','','来源：'+(l.original_source||'待确认')+' · 进展：'+stage(w?.stage)+' · '+(w?.terminal_state||'旧记录待核实')));host.append(node('p','','当前来源：'+(l.current_source||l.original_source||'待确认')));
   if(w?.do_not_contact)host.append(node('p','form-hint warning','客户已明确要求不再联系，常规招生待办已停止。'));if(w?.contact_info)host.append(node('p','','联系方式：'+w.contact_info));const courses=[...new Set(detail.records.filter(r=>r.kind==='quotes').flatMap(r=>(r.body.items||[]).map(i=>i.course_label)))];if(courses.length)host.append(node('p','','意向课程：'+courses.join('、')));const es=detail.records.filter(r=>r.kind==='enrollments');host.append(node('p','','报名：'+(es.length?es.map(r=>enrollLabel(r.state)).join('、'):'未发起报名')));
+  if(!card)renderGovernance(host,l);
   if(!w){const c=form(host,'v34-repair','补充下一步安排','保存安排',f=>post(selected,'arrange',{...data(f),next:n.read()}),{open:true,version:null}),n=nextFields(c.f,{allowExisting:false});c.f.append(c.submit);timeline();return;}
   const primary=detail.records.find(r=>r.id===w.primary_activity_id&&isActive(r));
   if(primary){const p=node('div','panel');p.id='v34-primary';p.append(node('h3','','下一步 · '+(Date.parse(primary.body.due_at)<Date.now()?'已逾期':primary.state==='pending'?'待家长确认':'待执行')),node('p','',primary.body.title),node('p','',dateText(primary.body.due_at)+' · '+label(options.methods,primary.body.method)+(primary.kind==='appointments'&&primary.body.type==='trial'&&primary.body.place?' · '+primary.body.place:'')+(primary.kind==='appointments'&&primary.body.course?' · '+primary.body.course:'')+' · '+l.owner_name));if(options?.access?.enabled){if(w.terminal_state==='open'&&!['followup','activity','activity-result','activity-retime'].includes(card)){const actions=node('div','trial-preset-row');p.append(actions);if(primary.kind==='tasks')btn(actions,'去跟进 / 记录沟通结果',()=>{activityTarget=primary.id;setCard('followup');},'primary');else{btn(actions,primary.body.type==='trial'?'记录试听结果':'记录面谈结果',()=>{activityTarget=primary.id;setCard('activity-result');},'primary');btn(actions,'预约改期',()=>{activityTarget=primary.id;setCard('activity-retime');});if(primary.state==='pending')btn(actions,'确认已与家长确定时间',()=>mutate(()=>post(selected,'activity',{expected_version:w.version,record_id:primary.id,transition:'confirmed'})));}}}else btn(p,'执行 / 记结果',()=>{if(primary.kind==='appointments')document.querySelector('[data-activity="'+primary.id+'"]')?.scrollIntoView({block:'center'});else{$('v34-followup')?.closest('details').setAttribute('open','');$('v34-followup')?.scrollIntoView({block:'center'});}});host.append(p);}
   if(options?.access?.enabled){renderCardOperations(l);return;}
   const open=w.terminal_state==='open';if(open){const contact=form(host,'v34-contact','补充 / 更新联系方式','保存联系方式',f=>post(selected,'contact',data(f)));input(contact.f,'联系方式','contact_info','text',w.contact_info||'',true);contact.f.append(contact.submit);const src=form(host,'v34-source','修正当前获客来源','保存当前来源',f=>post(selected,'source',data(f)));select(src.f,'当前获客来源','source',['市场活动','网络咨询','到店','转介绍','主动咨询','其他'],l.current_source||l.original_source);src.f.append(src.submit);followup();appointmentForm();quoteForm();enrollForm();closeLost();}
   records();managerForms();timeline();
+ }
+ const verdictLabels={valid:'有效',invalid:'无效',pending:'待核验',duplicate:'已归并'};
+ function campusName(code){
+  return code?options.campus?.choices.find(campus=>campus.code===code)?.display_name||code:'未归属';
+ }
+ function campusFilter(form,value){
+  const config=options.campus;
+  if(!config?.configured){
+   form.append(node('p','form-hint','校区筛选：规则已确认，真实校区映射待补充'));
+   return null;
+  }
+  const choices=[{id:'',label:config.restricted?'全部授权校区':'全部校区'}];
+  if(!config.restricted||config.grants.includes('@unassigned'))choices.push({id:'@unassigned',label:'未归属'});
+  choices.push(...config.choices.map(campus=>({id:campus.code,label:campus.display_name})));
+  return select(form,'服务校区','campus_id',choices,value??'');
+ }
+ function renderGovernance(host,lead){
+  const status=detail.governance;
+  if(!status)return;
+  const section=node('details','panel');
+  section.id='v34-lead-governance';
+  section.append(node('summary','','线索核验与服务校区'));
+  section.append(node('p','','核验状态：'+verdictLabels[status.qualification.verdict]));
+  section.append(node('p','','当前服务校区：'+campusName(status.campus_code)));
+  if(!options.campus?.configured)section.append(node('p','form-hint','真实校区映射待补充'));
+  host.append(section);
+  const owner=lead.owner_user_id===state.user.staff_id;
+  const send=(action,body)=>api(root+'/'+lead.id+'/'+action,{method:'POST',body});
+  const describe=(f,title)=>{const field=input(f,title,'evidence','textarea','',true);field.maxLength=500;};
+  function review(request,title,actionId,canApprove=true){
+   if(!options.manager||request.actor_user_id===state.user.staff_id)return;
+   const c=form(section,'v34-'+actionId,title,'提交审批',f=>send(actionId,{
+    request_id:request.id,approved:f.elements.approved.value==='yes',evidence:f.elements.evidence.value,
+   }),{version:null});
+   const decisions=[{id:'',label:'请选择'},{id:'no',label:'驳回'}];
+   if(canApprove)decisions.splice(1,0,{id:'yes',label:'批准'});
+   else c.f.append(node('p','form-hint','批准转归需要目标校区授权。'));
+   select(c.f,'审批结果','approved',decisions,'',true);
+   describe(c.f,'审批依据');
+   c.f.append(c.submit);
+  }
+  const invalid=[{id:'test',label:'测试'},{id:'mistake',label:'误录'},{id:'spam',label:'垃圾信息'},{id:'false_contact',label:'虚假联系方式'}];
+  const q=status.qualification_request;
+  if(q){
+   section.append(node('p','form-hint','待审核：'+verdictLabels[q.facts.verdict]+(q.facts.reason?' · '+label(invalid,q.facts.reason):'')+' · '+q.facts.evidence));
+   if(q.facts.primary_lead_id)section.append(node('p','fineprint','主线索：'+(rows.find(row=>row.id===q.facts.primary_lead_id)?.contact_name||q.facts.primary_lead_id)));
+   review(q,'审核线索核验','decide-qualification');
+  }else if(owner){
+   const c=form(section,'v34-submit-qualification','提交线索核验','提交核验',f=>send('submit-qualification',data(f)),{version:null});
+   const verdict=select(c.f,'核验结论','verdict',[{id:'',label:'请选择'},...Object.entries(verdictLabels).map(([id,label])=>({id,label:id==='duplicate'?'申请归并重复线索':label}))],'',true);
+   const reason=select(c.f,'无效原因','reason',[{id:'',label:'请选择'},...invalid],'',true);
+   const candidates=rows.filter(row=>row.id!==lead.id&&row.owner_user_id===state.user.staff_id).map(row=>({id:row.id,label:row.contact_name||row.id}));
+   const primary=select(c.f,'归并到主线索','primary_lead_id',[{id:'',label:'请选择'},...candidates],'',true);
+   const sync=()=>{
+    conditional(reason.closest('label'),verdict.value==='invalid');
+    conditional(primary.closest('label'),verdict.value==='duplicate');
+   };
+   verdict.addEventListener('change',sync);
+   sync();
+   describe(c.f,'核验依据');
+   c.f.append(c.submit);
+  }
+  const transfer=status.campus_request;
+  if(transfer){
+   section.append(node('p','form-hint','待审批：'+campusName(transfer.facts.from_campus)+' → '+campusName(transfer.facts.campus_code)+' · '+transfer.facts.evidence));
+   const canApprove=!options.campus.restricted||options.campus.grants.includes(transfer.facts.campus_code);
+   review(transfer,'审批校区转归','decide-campus-transfer',canApprove);
+  }else if(owner&&options.campus?.configured){
+   const current=status.campus_code;
+   const choices=options.campus.choices.filter(campus=>campus.active&&campus.code!==current);
+   if(choices.length){
+    const action=current?'request-campus-transfer':'assign-campus';
+    const c=form(section,'v34-'+action,current?'申请校区转归':'登记首次服务校区',current?'提交转归申请':'登记校区',f=>send(action,data(f)),{version:null});
+    select(c.f,'目标服务校区','campus_code',[{id:'',label:'请选择'},...choices.map(campus=>({id:campus.code,label:campus.display_name}))],'',true);
+    describe(c.f,'归属依据');
+    c.f.append(c.submit);
+   }
+  }
  }
  function followup(){
   const leadId=selected,w=detail.workflow;const c=form(detailHost,'v34-followup','记跟进','保存结果并安排下一步',async f=>{const b=payload(f);await post(leadId,'followup',b);if(b.next?.appointment)return 'scheduled';},{open:true});
@@ -165,8 +244,8 @@
  }
  function attachment(p,r){const a=r.body.attachment;if(!a)return;btn(p,'下载凭证 '+a.name,()=>{const bytes=Uint8Array.from(atob(a.base64),c=>c.charCodeAt(0)),url=URL.createObjectURL(new Blob([bytes],{type:a.mime})),link=document.createElement('a');link.href=url;link.download=a.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}
  async function history(p,r){const token=state.token,id=selected;try{const out=await api(root+'/'+id+'/history');if(token!==state.token||id!==selected)return;for(const h of out.items.filter(h=>h.record_id===r.id))p.append(node('p','fineprint','第'+h.version+'版 · '+stateLabel(h.state)+(h.body.due_at?' · '+dateText(h.body.due_at):'')+(h.body.total_cents!=null?' · '+yuan(h.body.total_cents):'')+(h.body.reschedule_reason?' · '+h.body.reschedule_reason:'')));}catch(e){if(token===state.token&&id===selected){if(handleAuthFailure(e))return;announce(e.message);}}}
- function timeline(){const p=node('details','panel');p.id='v34-timeline';p.append(node('summary','','完整历史'));detailHost.append(p);for(const e of detail.events){const row=node('article','lead-row'),b=e.after_business_json;row.append(node('p','',dateText(e.happened_at)+' · '+(e.actor_name||'历史员工')+' · '+eventName(e.event_name)));if(e.event_name==='V34_COMMUNICATION')row.append(node('p','',label(options.methods,b.method)+' · '+({failed:'未联系成功',waiting:'已发送消息待回复',communicated:'已完成沟通',other:'其他'}[b.result]||b.result)+(b.failure_reason?' · '+b.failure_reason:'')+(b.notes?' · '+b.notes:'')),node('p','','销售进展：'+stage(b.stage)));else if(e.event_name==='V34_TRANSFER_ACCEPTED')row.append(node('p','',(b.old_owner_name||'原负责人')+' → '+(b.new_owner_name||'新负责人')));else if(b.reason||b.feedback)row.append(node('p','',b.reason||b.feedback));else if(!e.event_name.startsWith('V34_'))row.append(node('p','fineprint','旧记录原文：'+(b.result||b.reason||b.source||'历史业务记录')+(b.notes?' · '+b.notes:'')));p.append(row);}}
- function eventName(name){return ({LEAD_DESK_CREATED:'线索录入（旧记录）',LEAD_SOURCE_UPDATED:'来源修正',LEAD_DESK_FOLLOWUP:'旧版跟进记录',LEAD_DESK_FOLLOWUP_V2:'旧版沟通与阶段记录',V34_WALK_IN_MEETING_COMPLETED:'主动到访面谈已完成',V34_COMMUNICATION:'沟通结果',V34_FOLLOWUP_COMPLETED:'本次跟进完成并保留下一步',V34_INTAKE:'接单与首次安排',V34_MARKET_HANDOFF_ACCEPTED:'接收市场线索并安排首次跟进',V34_NEXT_ARRANGED:'下一步安排',V34_APPOINTMENT_CREATED:'预约创建',V34_APPOINTMENT_CONFIRMED:'确认预约时间',V34_ACTIVITY_STARTED:'开始执行活动',V34_ACTIVITY_COMPLETED:'实际活动完成',V34_ACTIVITY_NO_SHOW:'预约未到场',V34_ACTIVITY_CANCELLED:'预约取消',V34_ACTIVITY_RESCHEDULED:'预约改期',V34_QUOTE_SAVED:'课程方案保存',V34_DISCOUNT_APPROVED:'独立批准优惠方案',V34_DISCOUNT_REJECTED:'退回优惠方案',V34_ENROLLMENT_SUBMITTED:'报名资料提交',V34_AGREEMENT_CONFIRMED:'协议独立核实',V34_PAYMENT_SUBMITTED:'登记收款',V34_PAYMENT_VERIFIED:'授权核实到账',V34_PAYMENT_REJECTED:'退回收款或退款资料',V34_ENROLLMENT_SUCCESS:'报名成功',V34_CLOSED_WON:'全额付款成交结案',V34_CLOSED_LOST:'流失结案',V34_REOPENED:'授权重新开启',V34_CORRECTION_REQUESTED:'纠正申请',V34_CORRECTION_APPROVED:'独立批准纠正',V34_CORRECTION_REJECTED:'驳回纠正申请',V34_REFUND_SUBMITTED:'登记退款资料',V34_REFUND_VERIFIED:'实际退款核实',V34_CREDIT_ADJUSTMENT:'退款金额调整',V34_TRANSFER_REQUESTED:'转交申请',V34_TRANSFER_APPROVED:'独立复核转交',V34_TRANSFER_REJECTED:'驳回转交申请',V34_TRANSFER_AWAITING_ACCEPTANCE:'转交已获独立批准，待接手',V34_TRANSFER_ACCEPTED:'新负责人确认接手',V34_CONTACT_UPDATED:'更新联系方式',V34_CONTACT_SAVED:'保存联系方式',V34_SOURCE_CORRECTED:'修正获客来源',V34_ARRANGEMENT_REPAIRED:'补充旧记录下一步安排',V34_LEGACY_ASSIGNMENT_REPAIRED:'主管分配历史客户负责人',V34_DRAFT_SAVED:'保存未完成草稿'}[name]||'历史业务变更');}
+ function timeline(){const p=node('details','panel');p.id='v34-timeline';p.append(node('summary','','完整历史'));detailHost.append(p);for(const e of detail.events){const row=node('article','lead-row'),b=e.after_business_json;row.append(node('p','',dateText(e.happened_at)+' · '+(e.actor_name||'历史员工')+' · '+eventName(e.event_name)));if(e.event_name==='V34_COMMUNICATION')row.append(node('p','',label(options.methods,b.method)+' · '+({failed:'未联系成功',waiting:'已发送消息待回复',communicated:'已完成沟通',other:'其他'}[b.result]||b.result)+(b.failure_reason?' · '+b.failure_reason:'')+(b.notes?' · '+b.notes:'')),node('p','','销售进展：'+stage(b.stage)));else if(e.event_name==='V34_TRANSFER_ACCEPTED')row.append(node('p','',(b.old_owner_name||'原负责人')+' → '+(b.new_owner_name||'新负责人')));else if(b.evidence)row.append(node('p','',[b.from_campus&&campusName(b.from_campus),b.campus_code&&campusName(b.campus_code),b.verdict&&verdictLabels[b.verdict],typeof b.approved==='boolean'&&(b.approved?'已批准':'已驳回'),b.evidence].filter(Boolean).join(' · ')));else if(b.reason||b.feedback)row.append(node('p','',b.reason||b.feedback));else if(!e.event_name.startsWith('V34_'))row.append(node('p','fineprint','旧记录原文：'+(b.result||b.reason||b.source||'历史业务记录')+(b.notes?' · '+b.notes:'')));p.append(row);}}
+ function eventName(name){return ({LEAD_DESK_CREATED:'线索录入（旧记录）',LEAD_SOURCE_UPDATED:'来源修正',LEAD_DESK_FOLLOWUP:'旧版跟进记录',LEAD_DESK_FOLLOWUP_V2:'旧版沟通与阶段记录',V34_WALK_IN_MEETING_COMPLETED:'主动到访面谈已完成',V34_COMMUNICATION:'沟通结果',V34_FOLLOWUP_COMPLETED:'本次跟进完成并保留下一步',V34_INTAKE:'接单与首次安排',V34_MARKET_HANDOFF_ACCEPTED:'接收市场线索并安排首次跟进',V34_NEXT_ARRANGED:'下一步安排',V34_APPOINTMENT_CREATED:'预约创建',V34_APPOINTMENT_CONFIRMED:'确认预约时间',V34_ACTIVITY_STARTED:'开始执行活动',V34_ACTIVITY_COMPLETED:'实际活动完成',V34_ACTIVITY_NO_SHOW:'预约未到场',V34_ACTIVITY_CANCELLED:'预约取消',V34_ACTIVITY_RESCHEDULED:'预约改期',V34_QUOTE_SAVED:'课程方案保存',V34_DISCOUNT_APPROVED:'独立批准优惠方案',V34_DISCOUNT_REJECTED:'退回优惠方案',V34_ENROLLMENT_SUBMITTED:'报名资料提交',V34_AGREEMENT_CONFIRMED:'协议独立核实',V34_PAYMENT_SUBMITTED:'登记收款',V34_PAYMENT_VERIFIED:'授权核实到账',V34_PAYMENT_REJECTED:'退回收款或退款资料',V34_ENROLLMENT_SUCCESS:'报名成功',V34_CLOSED_WON:'全额付款成交结案',V34_CLOSED_LOST:'流失结案',V34_REOPENED:'授权重新开启',V34_CORRECTION_REQUESTED:'纠正申请',V34_CORRECTION_APPROVED:'独立批准纠正',V34_CORRECTION_REJECTED:'驳回纠正申请',V34_REFUND_SUBMITTED:'登记退款资料',V34_REFUND_VERIFIED:'实际退款核实',V34_CREDIT_ADJUSTMENT:'退款金额调整',V34_TRANSFER_REQUESTED:'转交申请',V34_TRANSFER_APPROVED:'独立复核转交',V34_TRANSFER_REJECTED:'驳回转交申请',V34_TRANSFER_AWAITING_ACCEPTANCE:'转交已获独立批准，待接手',V34_TRANSFER_ACCEPTED:'新负责人确认接手',V34_CONTACT_UPDATED:'更新联系方式',V34_CONTACT_SAVED:'保存联系方式',V34_SOURCE_CORRECTED:'修正获客来源',V34_ARRANGEMENT_REPAIRED:'补充旧记录下一步安排',V34_LEGACY_ASSIGNMENT_REPAIRED:'主管分配历史客户负责人',V34_LEAD_QUALIFICATION_REQUESTED:'提交线索核验审批',V34_LEAD_QUALIFICATION_EFFECTIVE:'线索核验生效',V34_LEAD_QUALIFICATION_DECIDED:'线索核验审批',V34_LEAD_QUALIFICATION_OBSERVED:'线索待核验证据',V34_SERVICE_CAMPUS_EFFECTIVE:'服务校区归属生效',V34_CAMPUS_TRANSFER_REQUESTED:'提交校区转归申请',V34_CAMPUS_TRANSFER_DECIDED:'校区转归审批',V34_DRAFT_SAVED:'保存未完成草稿'}[name]||'历史业务变更');}
  function renderFinance(){const p=node('div','panel');p.id='v34-finance';p.append(node('h2','','待独立核实的款项'));panel.append(p);if(!queue.length)p.append(node('p','','当前无待核实款项'));for(const r of queue){const row=node('article','lead-row');row.append(node('strong','',(r.student_name||'学生')+' · '+(r.kind==='payments'?'收款':'退款')+' '+yuan(r.body.amount_cents)),node('p','','参考号：'+(r.body.receipt_ref||r.body.refund_ref)),node('p','','登记凭证：'+r.body.evidence_ref));attachment(row,r);if(options.can_verify){const reject=form(row,'reject-'+r.id,'资料不符合核实要求 / 退回','退回资料',f=>post(r.lead_id,'reject-payment',{record_id:r.id,expected_version:r.workflow_version,reason:data(f).reason}),{version:null});input(reject.f,'退回原因','reason','text','',true);reject.f.append(reject.submit);const c=form(row,'verify-'+r.id,'核实实际'+(r.kind==='payments'?'到账':'退款'),'提交授权核实',f=>{const b=data(f);return post(r.lead_id,r.kind==='payments'?'verify-payment':'verify-refund',{expected_version:r.workflow_version,record_id:r.id,evidence_ref:b.evidence_ref,...(r.kind==='refunds'?{cancel_enrollment:f.elements.cancel_enrollment.checked}:{})});},{version:null});input(c.f,'独立查验实际资金的依据','evidence_ref','text','',true);if(r.kind==='refunds')input(c.f,'净收款为零时同时取消报名','cancel_enrollment','checkbox');c.f.append(c.submit);}else row.append(node('p','fineprint','主管可查看队列，到账和退款仅由独立收款核实员确认。'));p.append(row);}}
  function renderMetricsFilters(panel){
   const filters=report.filters;
@@ -188,13 +267,13 @@
   const instantValue=at?dayKey(at)+'T'+shTimeText(at):'';
   const asOf=input(instant,'历史时点（上海时间）','as_of_at','datetime-local',instantValue);
   form.append(range,instant);
-  form.append(node('p','form-hint','校区筛选：规则已确认，真实校区映射待补充'));
+  const campus=campusFilter(form,filters?.campus_id);
   function describe(){
    const snapshot=mode.value==='snapshot';
    conditional(range,!snapshot);
    conditional(instant,snapshot);
    hint.textContent=snapshot
-    ?'根据截至所选时点的审计记录还原线索状态。筛选按当前权限、当前顾问和原始来源。'
+    ?'根据截至所选时点的审计记录还原线索状态。使用当前权限，校区归属按所选时点还原。'
     :mode.value==='event'
      ?'按上海日期统计系统在当期记录的事件，包含更早建档的线索。'
      :'按上海时间的建档日期筛选，指标显示所选线索的当前进展。';
@@ -237,6 +316,7 @@
     }
    }
    if(owner?.value)query.set('owner_id',owner.value);
+   if(campus?.value)query.set('campus_id',campus.value);
    if(filters?.source!=null)query.set('source',filters.source);
    metricsQuery=query.size?'?'+query.toString():'';
    submit.disabled=true;
@@ -333,7 +413,8 @@
   const cash=Object.hasOwn(cashDrilldownTitles,metric);
   const snapshot=cash||Object.hasOwn(snapshotMetricsLabels,metric);
   const activity=snapshot&&metric.endsWith('_activities');
-  const metricLabel=eventMetricsLabels[metric]??snapshotMetricsLabels[metric];
+  const qualification=metric.startsWith('qualification_');
+  const metricLabel=eventMetricsLabels[metric]??snapshotMetricsLabels[metric]??(qualification?verdictLabels[metric.slice('qualification_'.length)]:null);
   const title=reason?reason+' · 当前失单明细':Object.hasOwn(exceptionLabels,metric)?exceptionLabels[metric]+'明细':metricLabel?metricLabel.replace(/（.）$/,'')+'明细':path?salesPathTitles[metric]+'明细':cashDrilldownTitles[metric]??metricsDrilldownTitles[metric];
   section.id='v34-metrics-'+metric;
   section.dataset.metricsDrilldown='';
@@ -367,6 +448,7 @@
       const recordTime=item.recorded_at?dayKey(new Date(item.recorded_at))+' '+shTimeText(item.recorded_at)+' 记录':null;
       let description;
       if(cash)description=historicalYuan(item.amount_cents)+' · '+dayKey(new Date(item.verified_at))+' '+shTimeText(item.verified_at)+' 核实';
+      else if(qualification)description=verdictLabels[item.terminal_state]+(recordTime?' · '+recordTime:'');
       else if(reason)description=recordTime;
       else if(Object.hasOwn(exceptionLabels,metric))description=exceptionLabels[metric];
       else if(period)description=recordTime;
@@ -695,7 +777,21 @@
   section.append(scroll);
   target.append(section);
  }
- function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(report.filters?.view_mode!=='snapshot'){renderFirstResponse(p);p.append(node('p','form-hint','有效线索率：规则已确认，核验流程待接入'));}if(['event','snapshot'].includes(report.filters?.view_mode)){renderRecordedMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
+ function renderQualification(target){
+  const q=report.qualification;
+  if(!q)return;
+  const section=node('section','panel');
+  section.id='v34-qualification';
+  const percent=value=>value==null?'暂无可计算样本':new Intl.NumberFormat('zh-CN',{style:'percent',maximumFractionDigits:1}).format(value);
+  section.append(node('h3','','有效线索率'),node('p','','有效率 '+percent(q.valid_rate)+' · 核验覆盖率 '+percent(q.coverage)),node('p','fineprint','已核验 '+q.checked+' / '+q.total+' 条去重线索'));
+  const actions=node('div','filter-group');
+  for(const key of ['valid','invalid','pending']){
+   btn(actions,verdictLabels[key]+' '+q[key],()=>openReview(section,metricsQuery,'qualification_'+key));
+  }
+  section.append(actions);
+  target.append(section);
+ }
+ function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(report.filters?.view_mode!=='snapshot')renderFirstResponse(p);renderQualification(p);if(['event','snapshot'].includes(report.filters?.view_mode)){renderRecordedMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
   renderExceptionReview(p,metricsQuery);
   renderSupervision(p,{offer:true});
   renderTransferSupervision(p);
@@ -808,7 +904,21 @@
     const ap=node('section','panel');ap.id='v35-approvals';ap.append(node('h3','','待主管独立复核'));
     for(const a of report.pending_approvals){
      const q=node('article','lead-row');q.append(node('strong','',(a.contact_name||'待识别客户')+' · '+a.title),node('p','fineprint','负责人：'+(a.owner_name||'待分配')));
-     if(a.can_review)btn(q,'前往独立复核',async()=>{await openLead(a.lead_id);if(options?.access?.enabled&&selected===a.lead_id)setCard('records');});
+     if(a.can_review)btn(q,'前往独立复核',async()=>{
+      await openLead(a.lead_id);
+      if(!options?.access?.enabled||selected!==a.lead_id||!detail)return;
+      const governanceForm={lead_qualification:'v34-decide-qualification',campus_transfer:'v34-decide-campus-transfer'}[a.kind];
+      if(governanceForm){
+       if(card)setCard(null);
+       const block=$('v34-lead-governance');
+       const approval=$(governanceForm)?.closest('details');
+       if(block&&approval){
+        block.open=true;
+        approval.open=true;
+        approval.scrollIntoView({block:'nearest'});
+       }
+      }else setCard('records');
+     });
      else q.append(node('p','fineprint','本人关联事项 · 须由另一位主管独立复核'));
      ap.append(q);
     }
@@ -1087,7 +1197,7 @@
   const section=node('section','panel');
   section.id='v35-market-metrics';
   section.append(node('h3','','市场录入与交接'));
-  section.append(node('p','form-hint','校区筛选：规则已确认，真实校区映射待补充'));
+
   const appliedQuery=marketMetricsQuery;
   const scope=marketStats.filters;
   const filters=node('form','field-stack');
@@ -1099,12 +1209,17 @@
    if(row.market_owner_id)owners.set(row.market_owner_id,row.market_owner_name||'原市场负责人不可用');
   }
   const ownerOptions=[...owners].map(([id,label])=>({id,label})).sort((a,b)=>a.label.localeCompare(b.label,'zh-CN')||a.id.localeCompare(b.id));
+  const campus=campusFilter(filters,scope.campus_id);
   const owner=select(filters,'原市场负责人','owner_id',[{id:'',label:'全部负责人'},...ownerOptions],scope.owner_id??'');
   const actions=node('div','filter-group');
   const apply=node('button','primary','应用市场筛选');
   apply.type='submit';
   actions.append(apply);
-  btn(actions,'清除市场日期',()=>applyFilters(new URLSearchParams(scope.owner_id?{owner_id:scope.owner_id}:{})));
+  btn(actions,'清除市场日期',()=>{
+   const query=new URLSearchParams(appliedQuery);
+   for(const key of ['view_mode','start_at','end_at'])query.delete(key);
+   applyFilters(query);
+  });
   const message=node('p','form-hint');
   message.setAttribute('role','status');
   filters.append(actions,message);
@@ -1119,6 +1234,7 @@
     view_mode:'cohort',start_at:start.value+'T00:00:00+08:00',end_at:shDayShift(end.value,1)+'T00:00:00+08:00',
    }):new URLSearchParams();
    if(owner.value)query.set('owner_id',owner.value);
+   if(campus?.value)query.set('campus_id',campus.value);
    applyFilters(query);
   });
   function applyFilters(query){

@@ -251,3 +251,9 @@ Antigravity 对原提交 `aa7e8d6` 的独立验收指出，测试可能把电话
 ## 五、发布边界（保持不变）
 
 `EXT-001=UNVERIFIED`、`HOLD=true`、`release_eligible=false`、`merge_authorized=false`、`deploy_authorized=false`。禁止合并主分支、生产部署、主 CRM 代码修改和跨系统数据同步。
+
+## 六、Boss 驾驶舱有效线索核验与服务校区归属（2026-11-21）
+
+Mac 使用空白 PostgreSQL 16 独立测试库及虚拟校区、虚拟线索运行完整回归，退出码为 `0`。受限 SQL 冒烟、前后端 JavaScript 语法检查通过，LOGIN/RLS 12/12，Core API/UI/安全 779/779，真实 Chromium 49/49，设计合约 8/8。角色工作台单独复跑 31/31。
+
+用例覆盖无效审批、驳回、改判、重复归并、核验率及覆盖率、首次登记并发、跨校区审批、换顾问和预约改期、按历史归属回放、按事件时间归属、撤权与校区汇总及下钻一致。Chromium 实测顾问提交、主管从待办审批、按新校区筛选并通过核验明细找到该线索。真实校区目录、历史归属与主管授权，以及财务确认的费用与历史账本待补充。保持 `HOLD=true`、`EXT-001=UNVERIFIED` 和 Draft / CI-only。
