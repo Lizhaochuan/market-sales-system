@@ -1025,7 +1025,7 @@
   });
   function applyFilters(query){
    marketMetricsQuery=query.size?'?'+query.toString():'';
-   apply.disabled=true;
+   for(const control of filters.elements)control.disabled=true;
    refresh(true);
   }
 
