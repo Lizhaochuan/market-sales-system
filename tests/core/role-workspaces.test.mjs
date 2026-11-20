@@ -1,11 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';import pg from 'pg';import {randomUUID} from 'node:crypto';import {readFile} from 'node:fs/promises';import {createApp} from '../../src/app.mjs';import {demoToken} from '../../src/dev-login.mjs';
 test('Role workspaces: phone handoff, department privacy and persistent dated tasks',async t=>{
- process.env.MS_STAGE='isolated-test';const pool=new pg.Pool({connectionString:process.env.DATABASE_URL}),org=randomUUID(),A=randomUUID(),B=randomUUID(),M=randomUUID(),K=randomUUID(),K2=randomUUID(),KM=randomUUID(),G=randomUUID();const secret='fictional-role-workspaces-test-key-2026';let app;
+ process.env.MS_STAGE='isolated-test';const pool=new pg.Pool({connectionString:process.env.DATABASE_URL}),org=randomUUID(),A=randomUUID(),B=randomUUID(),M=randomUUID(),K=randomUUID(),K2=randomUUID(),KM=randomUUID(),G=randomUUID(),F=randomUUID();const secret='fictional-role-workspaces-test-key-2026';let app;
  try{
  for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
  await pool.query("INSERT INTO ms.organizations(id,name) VALUES($1,'虚构部门验收机构')",[org]);
- for(const [id,name]of[[A,'销售A'],[B,'销售B'],[M,'销售主管'],[K,'市场A'],[K2,'市场B'],[KM,'市场主管'],[G,'总管理者']])await pool.query('INSERT INTO ms.staff_users(id,organization_id,display_name) VALUES($1,$2,$3)',[id,org,name]);
- for(const [role,users]of[['sales_staff',[A,B]],['sales_manager',[M]],['marketing_staff',[K,K2]],['marketing_manager',[KM]],['super_admin',[G]]]){const r=(await pool.query('INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,$2,$2) RETURNING id',[org,role])).rows[0];for(const u of users)await pool.query('INSERT INTO ms.user_role_grants(user_id,role_id,granted_by) VALUES($1,$2,$3)',[u,r.id,G]);}
+ for(const [id,name]of[[A,'销售A'],[B,'销售B'],[M,'销售主管'],[K,'市场A'],[K2,'市场B'],[KM,'市场主管'],[G,'总管理者'],[F,'收款核实员']])await pool.query('INSERT INTO ms.staff_users(id,organization_id,display_name) VALUES($1,$2,$3)',[id,org,name]);
+ for(const [role,users]of[['sales_staff',[A,B]],['sales_manager',[M]],['marketing_staff',[K,K2]],['marketing_manager',[KM]],['super_admin',[G]],['finance_verifier',[F]]]){const r=(await pool.query('INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,$2,$2) RETURNING id',[org,role])).rows[0];for(const u of users)await pool.query('INSERT INTO ms.user_role_grants(user_id,role_id,granted_by) VALUES($1,$2,$3)',[u,r.id,G]);}
  app=createApp(pool,{secret,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+app.address().port,root='/api/v1/isolated-workspace/workflow';
  const req=async(path,body,user=A,key=randomUUID())=>{const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{authorization:'Bearer '+demoToken({id:user,organization_id:org},secret,'market-sales-test-issuer'),'content-type':'application/json','idempotency-key':key},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:r.status,...await r.json()};};
  const w=(p,b,u,k)=>req(root+p,b,u,k),good=r=>{assert.equal(r.status,200,JSON.stringify(r));return r.data;};const next=(days=0)=>({action:'call',method:'phone',title:'联系家长了解需求',due_at:new Date(Date.now()+days*86400000).toISOString()});let lead;
@@ -26,6 +26,16 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   for(const field of ['by_owner','pending_approvals','reminders','failures'])assert.deepEqual(empty[field],[],field);
   assert.equal(empty.hold_active,true);
   assert.equal(empty.release_eligible,false);
+ });
+ await t.test('finance-only staff can open the verification queue but cannot read sales metrics',async()=>{
+  assert.equal((await w('/metrics',undefined,F)).status,403);
+  assert.equal(good(await w('/options',undefined,F)).can_verify,true);
+  assert.equal(good(await w('/finance',undefined,F)).can_verify,true);
+  assert.equal((await w('/'+lead,undefined,F)).status,403);
+  for(const manager of [M,G]){
+   assert.equal(good(await w('/metrics',undefined,manager)).counts.leads,1);
+   assert.ok(Array.isArray(good(await w('/finance',undefined,manager)).items));
+  }
  });
  await t.test('existing sales assignment discloses no lead/student details to another salesperson',async()=>{const r=good(await w('/lookup',{phone:'13800000035'},B)).items[0];assert.equal(r.status,'assigned');assert.equal(r.lead_id,undefined);assert.equal(r.contact_name,undefined);assert.equal(r.students,undefined);assert.equal((await w('/'+lead,undefined,B)).status,403);assert.equal(good(await w('/lookup',{phone:'13800000035'},M)).items[0].lead_id,lead);});
  await t.test('new phone creates one sales lead; duplicate intake and market/finance assignment rejected',async()=>{const b={contact_name:'直接咨询',student_name:'虚构另一学生',contact_info:'13900000035',origin_group:'sales',source:'到店',next:next(1)};const x=good(await w('',b));assert.ok(x.lead_id);assert.equal((await w('',b)).status,409);assert.equal((await w('',{...b,contact_info:'13900000036',origin_group:'market'})).status,403);assert.equal((await w('',{...b,contact_info:'13900000036',owner_user_id:K},M)).status,422);assert.equal((await w('',{...b,contact_info:'13900000036'},K)).status,403);await pool.query('DELETE FROM ms_workspace.lead_directory WHERE lead_id=$1',[x.lead_id]);good(await w('/'+x.lead_id+'/contact',{expected_version:x.workflow.version,contact_info:'13900000039'}));assert.equal(good(await w('/lookup',{phone:'13900000039'})).items[0].lead_id,x.lead_id);});

@@ -67,7 +67,10 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  if(method==='GET'&&id==='options')return {...flags,...(ctx.roleWorkspaces?{access:workspaceAccess(ctx)}:{}),methods,stages,actions,classrooms:[],failure_reasons:reasons,can_verify:isFinance(ctx),manager:ctx.manager,catalog:ctx.roleWorkspaces&&!workspaceAccess(ctx).sales?[]:(await c.query("SELECT id,version,body FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND state='active' ORDER BY body->>'course_label'",[org])).rows};
  if(method==='POST'&&id==='catalog'){fields(body,['course_label','standard_unit_cents','reason','expected_version']);if(!ctx.manager)fail(403,'FORBIDDEN','本地标准价目由主管维护');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[org+':catalog']);const name=text(body.course_label,120),unit=money(body.standard_unit_cents),old=(await c.query("SELECT * FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND lower(body->>'course_label')=lower($2) FOR UPDATE",[org,name])).rows[0];if(old&&old.version!==body.expected_version)fail(409,'VERSION_CONFLICT','本地价格已更新');const b={course_label:name,standard_unit_cents:unit,price_source:'LOCAL_APPROVED_PRICE',approved_by:actor,reason:text(body.reason),v34:true};const r=old?await update(c,ctx,old,'active',b):await save(c,ctx,{id:null,organization_id:org,owner_user_id:actor},'course-catalog','active',b);return {...flags,item:r};}
  if(method==='GET'&&id==='finance')return financialQueue(c,ctx);
- if(method==='GET'&&id==='metrics')return metrics(c,ctx);
+ if(method==='GET'&&id==='metrics'){
+  if(isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','收款核实员不可访问销售统计');
+  return metrics(c,ctx);
+ }
  if(method==='GET'&&!id)return listing(c,ctx,query);
  if(method==='POST'&&!id){
   fields(body,['contact_name','student_name','student_id','origin_group','source','notes','owner_user_id','contact_info','next','initial_communication']);

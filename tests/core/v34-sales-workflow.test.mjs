@@ -84,6 +84,22 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal((await act(enrollLead,'verify-payment',{record_id:payment.id,evidence_ref:'销售自核'})).status,403);
    good(await act(enrollLead,'verify-payment',{record_id:payment.id,evidence_ref:'核实员查验实际到账'},F));d=await detail(enrollLead);const e=d.records.find(r=>r.id===enrollment.id);assert.equal(e.state,'successful');assert.equal(e.body.balance_cents,90000);assert.equal(d.workflow.terminal_state,'open');assert.equal((await act(enrollLead,'close-won',{reason:'只有定金'})).status,409);assert.ok(d.workflow.primary_activity_id);
   });
+  await t.test('finance-only staff cannot read sales metrics but can reject a pending payment',async()=>{
+   assert.equal((await req('/metrics',undefined,F)).status,403);
+   assert.equal(good(await req('/options',undefined,F)).can_verify,true);
+   assert.ok(good(await req('/metrics',undefined,M)).counts.leads>0);
+   assert.ok(Array.isArray(good(await req('/finance',undefined,M)).items));
+   assert.equal((await req('/'+enrollLead,undefined,F)).status,403);
+   good(await act(enrollLead,'submit-payment',{enrollment_id:enrollment.id,amount_cents:1000,receipt_ref:randomUUID(),payment_kind:'tuition',received_at:when(-1),evidence_ref:'待补到账资料'}));
+   const queue=good(await req('/finance',undefined,F));
+   assert.equal(queue.can_verify,true);
+   const pending=queue.items.find(r=>r.lead_id===enrollLead&&r.kind==='payments'&&r.state==='pending');
+   assert.ok(pending);
+   good(await act(enrollLead,'reject-payment',{record_id:pending.id,reason:'凭证需重新提交'},F));
+   const rejected=(await detail(enrollLead)).records.find(r=>r.id===pending.id);
+   assert.equal(rejected.state,'rejected');
+   assert.ok(!(good(await req('/finance',undefined,F))).items.some(r=>r.id===pending.id));
+  });
   await t.test('TC20: payment alone does not establish signed enrollment',async()=>{
    const lead=await create();good(await act(lead,'quote',{items:[{course_label:'英语',quantity:1,unit_cents:1000}]}));let d=await detail(lead),q=d.records.find(r=>r.kind==='quotes');good(await act(lead,'enroll',{quote_id:q.id,quote_version:q.version,agreement_ref:'协议待核实'}));d=await detail(lead);const e=d.records.find(r=>r.kind==='enrollments');good(await act(lead,'submit-payment',{enrollment_id:e.id,amount_cents:1000,receipt_ref:randomUUID(),payment_kind:'full',received_at:when(-1),evidence_ref:'付款资料'}));d=await detail(lead);const p=d.records.find(r=>r.kind==='payments');good(await act(lead,'verify-payment',{record_id:p.id,evidence_ref:'到账已独立核实'},F));assert.equal((await detail(lead)).records.find(r=>r.id===e.id).state,'awaiting_agreement');good(await act(lead,'confirm-agreement',{record_id:e.id,evidence_ref:'协议后续独立核实'},M));assert.equal((await detail(lead)).records.find(r=>r.id===e.id).state,'successful');
   });
