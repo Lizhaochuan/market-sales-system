@@ -1,0 +1,36 @@
+{
+  "kind": "historical_ledger",
+  "organization_ref": "FICTIONAL-ORG",
+  "source_ref": "FICTIONAL-ORDER-LEDGER",
+  "coverage": { "from": "2026-10-01", "through": "2026-10-04" },
+  "opening": [
+    { "order_id": "DEMO-ORDER-001", "receivable_cents": 300000, "net_allocated_cents": 100000 }
+  ],
+  "events": [
+    {
+      "event_id": "DEMO-ALLOCATION-001", "order_id": "DEMO-ORDER-001", "evidence_ref": "DEMO-RECEIPT-001",
+      "effective_at": "2026-10-02T10:00:00+08:00", "recorded_at": "2026-10-02T10:05:00+08:00",
+      "receivable_delta_cents": 0, "allocation_delta_cents": 50000
+    },
+    {
+      "event_id": "DEMO-REFUND-001", "order_id": "DEMO-ORDER-001", "evidence_ref": "DEMO-REFUND-VOUCHER",
+      "effective_at": "2026-10-02T23:50:00+08:00", "recorded_at": "2026-10-03T09:00:00+08:00",
+      "receivable_delta_cents": 0, "allocation_delta_cents": -20000
+    },
+    {
+      "event_id": "DEMO-DISCOUNT-001", "order_id": "DEMO-ORDER-001", "evidence_ref": "DEMO-ADJUSTMENT-VOUCHER",
+      "effective_at": "2026-10-04T14:00:00+08:00", "recorded_at": "2026-10-04T14:05:00+08:00",
+      "receivable_delta_cents": -30000, "allocation_delta_cents": 0
+    }
+  ],
+  "checkpoints": [
+    {
+      "order_id": "DEMO-ORDER-001", "date": "2026-10-02", "statement_ref": "DEMO-STATEMENT-02",
+      "receivable_cents": 300000, "net_allocated_cents": 150000, "balance_cents": 150000
+    },
+    {
+      "order_id": "DEMO-ORDER-001", "date": "2026-10-04", "statement_ref": "DEMO-STATEMENT-04",
+      "receivable_cents": 270000, "net_allocated_cents": 130000, "balance_cents": 140000
+    }
+  ]
+}

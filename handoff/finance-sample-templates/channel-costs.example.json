@@ -1,0 +1,54 @@
+{
+  "kind": "channel_costs",
+  "organization_ref": "FICTIONAL-ORG",
+  "source_ref": "FICTIONAL-FINANCE-EXPORT",
+  "costs": [
+    {
+      "expense_id": "DEMO-EXP-001",
+      "status": "finance_confirmed",
+      "confirmation_ref": "DEMO-APPROVAL-001",
+      "currency": "CNY",
+      "period": "2026-10",
+      "tax_basis": "inclusive",
+      "amount_cents": 120000,
+      "allocations": [
+        { "channel_id": "DEMO-ONLINE", "amount_cents": 90000 },
+        { "channel_id": "DEMO-EVENT", "amount_cents": 30000 }
+      ]
+    },
+    {
+      "expense_id": "DEMO-CREDIT-001",
+      "status": "finance_confirmed",
+      "confirmation_ref": "DEMO-APPROVAL-002",
+      "currency": "CNY",
+      "period": "2026-10",
+      "tax_basis": "inclusive",
+      "amount_cents": -10000,
+      "allocations": [
+        { "channel_id": "DEMO-ONLINE", "amount_cents": -10000 }
+      ]
+    },
+    {
+      "expense_id": "DEMO-EXP-002",
+      "status": "finance_confirmed",
+      "confirmation_ref": "DEMO-APPROVAL-003",
+      "currency": "CNY",
+      "period": "2026-10",
+      "tax_basis": "inclusive",
+      "amount_cents": 45000,
+      "allocations": [
+        { "channel_id": "DEMO-EVENT", "amount_cents": 45000 }
+      ]
+    }
+  ],
+  "control_totals": [
+    {
+      "period": "2026-10", "channel_id": "DEMO-ONLINE", "tax_basis": "inclusive",
+      "amount_cents": 80000, "statement_ref": "DEMO-MONTHLY-STATEMENT"
+    },
+    {
+      "period": "2026-10", "channel_id": "DEMO-EVENT", "tax_basis": "inclusive",
+      "amount_cents": 75000, "statement_ref": "DEMO-MONTHLY-STATEMENT"
+    }
+  ]
+}
