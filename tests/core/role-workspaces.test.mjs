@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import pg f
 test('Role workspaces: phone handoff, department privacy and persistent dated tasks',async t=>{
  process.env.MS_STAGE='isolated-test';const pool=new pg.Pool({connectionString:process.env.DATABASE_URL}),org=randomUUID(),A=randomUUID(),B=randomUUID(),M=randomUUID(),K=randomUUID(),K2=randomUUID(),KM=randomUUID(),G=randomUUID(),F=randomUUID();const secret='fictional-role-workspaces-test-key-2026';let app;
  try{
- for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
+ for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql']]){const exists=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!exists||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}
  await pool.query("INSERT INTO ms.organizations(id,name) VALUES($1,'虚构部门验收机构')",[org]);
  for(const [id,name]of[[A,'销售A'],[B,'销售B'],[M,'销售主管'],[K,'市场A'],[K2,'市场B'],[KM,'市场主管'],[G,'总管理者'],[F,'收款核实员']])await pool.query('INSERT INTO ms.staff_users(id,organization_id,display_name) VALUES($1,$2,$3)',[id,org,name]);
  for(const [role,users]of[['sales_staff',[A,B]],['sales_manager',[M]],['marketing_staff',[K,K2]],['marketing_manager',[KM]],['super_admin',[G]],['finance_verifier',[F]]]){const r=(await pool.query('INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,$2,$2) RETURNING id',[org,role])).rows[0];for(const u of users)await pool.query('INSERT INTO ms.user_role_grants(user_id,role_id,granted_by) VALUES($1,$2,$3)',[u,r.id,G]);}
@@ -325,6 +325,53 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   await act('activity',{record_id:target.id,transition:'completed',feedback:'改期后完成',next:next(4)});
   assert.equal((await state()).resolved_version,resolved.resolved_version);
   assert.equal((await state()).resolution_state,'rescheduled');
+ });
+ await t.test('followup supervision requires a recorded result for its exact task version',async()=>{
+  const seed=async(number)=>good(await w('',{
+   contact_name:'逾期跟进验收家长',contact_info:number,student_name:'逾期跟进学生',origin_group:'sales',source:'其他',next:next(-1),
+  }));
+  const planned=await seed('13900000055');
+  const replaced=await seed('13900000056');
+  const taskId=planned.workflow.primary_activity_id;
+  const replacedTask=replaced.workflow.primary_activity_id;
+  const {rows:[other]}=await pool.query(
+   "INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,kind,state,body) VALUES($1,$2,$3,'tasks','open',$4) RETURNING id",
+   [org,A,planned.lead_id,{...next(-2),assignee_user_id:A}],
+  );
+  const issue=(lead,task,user=M)=>w('/'+lead+'/supervise-followup',{
+   task_id:task,task_version:1,due_at:next(2).due_at,reason:'核对指定跟进',
+  },user);
+  assert.equal((await issue(planned.lead_id,taskId,A)).status,403);
+  assert.equal((await issue(planned.lead_id,taskId,KM)).status,403);
+  const issued=good(await issue(planned.lead_id,taskId)).item;
+  good(await issue(replaced.lead_id,replacedTask));
+  assert.equal((await issue(planned.lead_id,taskId)).code,'SUPERVISION_ALREADY_OPEN');
+  const report=async(user=A)=>good(await w('/metrics',undefined,user)).followup_supervision;
+  const status=async(task,user=A)=>(await report(user)).items.find(item=>item.task_id===task);
+  const act=async(lead,action,body)=>{
+   const detail=good(await w('/'+lead));
+   return good(await w('/'+lead+'/'+action,{expected_version:detail.workflow.version,...body}));
+  };
+  assert.equal((await status(taskId)).id,issued.id);
+  assert.equal(await status(taskId,B),undefined);
+  await act(planned.lead_id,'draft',{draft:{task_id:taskId,result:'communicated'}});
+  await act(planned.lead_id,'followup',{task_id:other.id,method:'phone',result:'communicated',next:next(1)});
+  assert.equal((await status(taskId)).resolved_version,null);
+
+  await act(replaced.lead_id,'appointment',{appointment:{type:'meeting',due_at:next(3).due_at}});
+  const synthetic=await status(replacedTask);
+  assert.equal(synthetic.activity_state,'completed');
+  assert.equal(synthetic.resolved_version,null);
+
+  await act(planned.lead_id,'followup',{task_id:taskId,method:'phone',result:'failed',failure_reason:'无人接听',next:next(2)});
+  const resolved=await status(taskId,M);
+  assert.equal(resolved.resolution_state,'failed');
+  assert.equal(resolved.resolved_version,2);
+  assert.ok(resolved.resolved_at);
+  const detail=good(await w('/'+planned.lead_id));
+  const recorded=detail.events.find(e=>e.after_business_json.completed_task_id===taskId);
+  assert.equal(recorded.after_business_json.completed_task_version,resolved.resolved_version);
+  assert.equal((await status(replacedTask)).resolved_version,null);
  });
  await t.test('lead drilldown excludes pending market handoffs and rechecks permissions on every read',async()=>{
   const drill='/metrics/drilldown?metric=leads';

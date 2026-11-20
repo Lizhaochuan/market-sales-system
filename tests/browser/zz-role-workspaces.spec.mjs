@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';import pg from 'pg';import {readFile} from 'node:fs/promises';import {createApp} from '../../src/app.mjs';
 let pool,app,url;const pass='0';
-test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
+test.beforeAll(async()=>{process.env.MS_STAGE='isolated-test';pool=new pg.Pool({connectionString:process.env.DATABASE_URL});for(const [v,f]of[[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[36,'041_historical_student_links.sql'],[37,'042_appointment_supervision.sql'],[38,'043_followup_supervision.sql']]){const e=(await pool.query("SELECT to_regclass('ms_workspace.schema_versions') t")).rows[0].t;if(!e||!(await pool.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[v])).rowCount)await pool.query(await readFile(new URL('../../db/workspace-migrations/'+f,import.meta.url),'utf8'));}await pool.query(await readFile(new URL('../fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));app=createApp(pool,{secret:'fictional-role-browser-key-at-least32',devLoginSecret:pass,workspaceEnabled:true,v34Enabled:true,roleWorkspaces:true});await new Promise(r=>app.listen(0,'127.0.0.1',r));url='http://127.0.0.1:'+app.address().port;});
 test.afterAll(async()=>{if(app)await new Promise(r=>app.close(r));await pool?.end();});
 async function login(page,who='sales-a'){await page.goto(url);await page.locator('#login-form [name="account_code"]').selectOption(who);await page.locator('#login-form [name="passphrase"]').fill(pass);await page.locator('#login-form').getByRole('button',{name:'进入工作台'}).click();await expect(page.locator('#sales-workflow')).toBeVisible();}
 async function lookup(page,phone){await page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true}).click();await page.locator('#v35-lookup [name="phone"]').fill(phone);await page.locator('#v35-lookup [name="phone"]').press('Enter');}
@@ -1148,4 +1148,41 @@ test('Boss appointment supervision issues an internal request and resolves it on
  await login(page,'supervisor');
  await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
  await expect(row).toContainText('已销项 · 已改期 · 预约版本 2');
+});
+
+
+test('Boss overdue followup supervision closes after the assigned advisor records an actual result',async({page})=>{
+ const root='/api/v1/isolated-workspace/workflow';
+ await login(page,'sales-a');
+ const result=await page.evaluate(({root,number})=>api(root,{
+  method:'POST',body:{
+   contact_name:'逾期督办家长',student_name:'逾期督办学生',contact_info:number,origin_group:'sales',source:'到店',
+   next:{action:'call',method:'phone',title:'拨打督办回归电话',due_at:new Date(Date.now()-86400000).toISOString()},
+  },
+ }),{root,number:phone()});
+ const taskId=result.workflow.primary_activity_id;
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ const supervision=page.locator('#v34-followup-supervision');
+ const issue=supervision.locator('#v34-followup-supervise-'+taskId);
+ await issue.locator('..').locator('summary').click();
+ await issue.getByLabel('督办说明').fill('记录这次电话跟进');
+ const shanghaiDeadline=new Date(Date.now()+86400000+8*3600000).toISOString().slice(0,16);
+ await issue.getByLabel('督办截止（上海时间）').fill(shanghaiDeadline);
+ await issue.getByRole('button',{name:'下发跟进督办'}).click();
+ const row=supervision.locator('article').filter({hasText:'记录这次电话跟进'});
+ await expect(row).toContainText('待处理');
+ await login(page,'sales-a');
+ await row.getByRole('button',{name:'处理指定跟进待办'}).click();
+ const follow=page.locator('#v34-followup');
+ await expect(follow).toBeVisible();
+ await follow.locator('[name="result"]').selectOption('failed');
+ await nextTomorrow(page,follow);
+ const sent=page.waitForRequest(request=>request.method()==='POST'&&request.url().endsWith(result.lead_id+'/followup'));
+ await follow.getByRole('button',{name:'保存结果并安排下一步'}).click();
+ expect((await sent).postDataJSON().task_id).toBe(taskId);
+ await expect(row).toHaveCount(0);
+ await login(page,'supervisor');
+ await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ await expect(row).toContainText('已销项 · 联系失败 · 跟进待办版本 2');
 });
