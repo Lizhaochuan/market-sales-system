@@ -931,7 +931,7 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
   return result;
  };
  await seed(ownerIds[0],'2024-04-01T00:00:00+08:00','窗口首位顾问测试');
- const lostLead=await seed(ownerIds[1],'2024-04-01T23:59:59+08:00','窗口第二位顾问测试','网络咨询');
+ const lostLead=await seed(ownerIds[1],'2024-04-01T08:00:00+08:00','窗口第二位顾问测试','网络咨询');
  await seed(ownerIds[0],'2024-04-02T00:00:00+08:00','窗口之外测试');
  await page.evaluate(({lead_id,workflow})=>api('/api/v1/isolated-workspace/workflow/'+lead_id+'/close-lost',{
   method:'POST',body:{expected_version:workflow.version,reason:'价格原因',feedback:'家长明确反馈',evidence_ref:'复验虚构依据'},
@@ -939,6 +939,10 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await pool.query(
   "INSERT INTO ms.audit_events(organization_id,service_actor,target_type,target_id,event_name,happened_at) SELECT organization_id,'playwright-fixture','lead',id,'V34_REOPENED',$2 FROM ms.leads WHERE id=$1",
   [lostLead.lead_id,'2024-04-01T10:00:00+08:00'],
+ );
+ await pool.query(
+  "INSERT INTO ms.audit_events(organization_id,service_actor,target_type,target_id,event_name,happened_at,after_business_json) SELECT organization_id,'playwright-fixture','lead',id,'V34_CLOSED_LOST',$2,$3 FROM ms.leads WHERE id=$1",
+  [lostLead.lead_id,'2024-04-01T09:00:00+08:00',{workflow_version:2,stage:'declined',terminal_state:'lost'}],
  );
  const count=panel.locator('.stat-card').filter({has:page.getByText('Lead 数',{exact:true})}).locator('strong');
 
@@ -1017,7 +1021,21 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await expect(eventDrilldown).toContainText('窗口第二位顾问测试家长');
  await expect(eventDrilldown).toContainText('2024-04-01 10:00 记录');
  await expect(eventDrilldown).not.toContainText('窗口首位顾问测试家长');
+ await mode.selectOption('snapshot');
+ const asOf=filters.getByLabel('历史时点（上海时间）');
+ await asOf.fill('2024-04-01T09:30');
+ await apply.click();
+ await expect(panel.getByRole('heading',{name:'历史时点状态'})).toBeVisible();
+ await expect(asOf).toHaveValue('2024-04-01T09:30');
+ const snapshotLost=panel.locator('.stat-card').filter({has:page.getByText('当时失单（条）',{exact:true})});
+ await expect(snapshotLost.locator('strong')).toHaveText('1');
+ await snapshotLost.getByRole('button',{name:'查看当时失单明细'}).click();
+ const snapshotDetail=panel.locator('#v34-metrics-snapshot_lost');
+ await expect(snapshotDetail).toContainText('窗口第二位顾问测试家长');
+ await expect(snapshotDetail).toContainText('2024-04-01 09:00 记录');
  await mode.selectOption('cohort');
+ await start.fill('2024-04-01');
+ await end.fill('2024-04-01');
  await apply.click();
  await expect(count).toHaveText('1');
  await filters.getByRole('button',{name:'清除筛选'}).click();

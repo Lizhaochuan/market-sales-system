@@ -77,10 +77,10 @@ flowchart TD
    - **证据化销项**：每类督办绑定对应完成条件（例如：“催办预约结果核销”须有该预约的 `completed/no_show/cancelled/rescheduled` 记录；“催办待补安排”须修复 `primary_activity_id`；“催办超期跟进”须有督办下发时间之后的真实沟通/活动处理记录），**不允许任意一条无关跟进自动消除全部督办**。
 
 #### 2.2 Phase 2 增量交付清单
-- **后端**：扩展 `GET /workflow/metrics`（支持 `start_at / end_at`、`Asia/Shanghai` 窗口、`view_mode=cohort|event`、`owner_id`、`source`、`as_of_at`）；新增只读 `GET /workflow/metrics/drilldown`（与汇总共用权限及筛选，逐次鉴权，不走写入请求回执）；新增独立隔离迁移（如 `041_boss_supervision_and_views.sql`）承载 `ms_workspace.management_actions`（督办单）与可选 `saved_views`。
+- **后端**：扩展 `GET /workflow/metrics`（支持 `start_at / end_at`、`Asia/Shanghai` 窗口、`view_mode=cohort|event|snapshot`、`owner_id`、`source`、`as_of_at`）；新增只读 `GET /workflow/metrics/drilldown`（与汇总共用权限及筛选，逐次鉴权，不走写入请求回执）；新增独立隔离迁移（如 `041_boss_supervision_and_views.sql`）承载 `ms_workspace.management_actions`（督办单）与可选 `saved_views`。
 - **前端**：升级 `renderMetrics` 为结构化 Boss 驾驶舱视图（顶部筛选栏 + 异常优先置顶卡 + 核心转化/资金双口径卡 + Cohort/Event 切换 + 顾问过程榜 + 渠道质量榜 + 战败归因图 + 点击数字证据化下钻抽屉 + 合规督办派发与追踪）。
 
-**当前增量范围**：明细支持 `metric=leads`（线索）、`metric=students`（未归档学生，按学生去重）、`metric=won_leads`（正式成交）及 `metric=lost_leads`（当前失单），沿用建档时间、当前顾问和原始来源筛选，通过 `page`、`page_size` 分页。汇总和明细分别读取当前状态，历史时点快照及其他指标的明细仍待接入。 原始来源对比按首次登记的标签归组，展示当前线索数与状态；未登记来源单列。渠道成本暂显示「待配置成本源」。 当期发生量按上海时间窗口统计建档及审计事件的系统记录时间，允许更早建档的线索产生当期事件。事件计数及明细共用同一批记录。明细仅展示关联线索、当前顾问与记录时间，沿用当前权限；历史时点状态查询仍待接入。
+**当前增量范围**：明细支持 `metric=leads`（线索）、`metric=students`（未归档学生，按学生去重）、`metric=won_leads`（正式成交）及 `metric=lost_leads`（当前失单），沿用建档时间、当前顾问和原始来源筛选，通过 `page`、`page_size` 分页。建档口径汇总和明细分别读取当前状态。 原始来源对比按首次登记的标签归组，展示当前线索数与状态；未登记来源单列。渠道成本暂显示「待配置成本源」。 当期发生量按上海时间窗口统计建档及审计事件的系统记录时间，允许更早建档的线索产生当期事件。事件计数及明细共用同一批记录。明细仅展示关联线索、当前顾问与记录时间，沿用当前权限；线索历史时点支持 `as_of_at`，依据截至该时间的有版本审计记录还原线索状态。无有效状态证据单列，汇总与明细共用口径。访问和顾问筛选沿用当前权限和负责人，历史学生关联、历史活动与资金快照仍待接入。
 
 **Phase 2 验收标准**：
 - 角色与机构隔离测试：销售顾问无法访问他人/团队汇总与下钻；市场主管仅见市场维度；财务核实员无法经下钻读取销售沟通详情；撤权后进行中的下钻请求 fail-closed 返回 `403`。

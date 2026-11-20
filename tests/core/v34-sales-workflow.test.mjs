@@ -385,7 +385,7 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
     {...window,end_at:start},
     {...window,start_at:'2024-02-30T00:00:00+08:00'},
     {view_mode:'event',start_at:start},
-    {as_of_at:start},
+    {view_mode:'cohort',as_of_at:start},
     {owner_id:'not-a-uuid'},
    ])assert.equal((await scoped(invalid,M)).status,422,JSON.stringify(invalid));
   });
@@ -461,6 +461,59 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal(good(await drill('communication_events',{source:'到店'},M)).total,1);
    assert.deepEqual(good(await drill('communication_events',{owner_id:B},A)).items,[]);
    assert.equal((await drill('communication_events',{},F)).status,403);
+  });
+  await t.test('historical lead status uses versioned evidence and marks gaps without guessing',async()=>{
+   const initial='2023-05-02T09:00:00+08:00',closedAt='2023-05-02T10:00:00+08:00',reopenedAt='2023-05-02T11:00:00+08:00';
+   const seed=async(user,createdAt)=>{
+    const result=good(await req('',{
+     contact_name:'时点回归家长',student_name:'时点回归学生',origin_group:'sales',source:'到店',next:next(),
+    },user));
+    await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[result.lead_id,createdAt]);
+    return result.lead_id;
+   };
+   const lead=await seed(A,initial),unknown=await seed(A,initial),foreignOwner=await seed(B,initial);
+   await seed(A,reopenedAt);
+   const record=(leadId,kind,at,data)=>pool.query(
+    "INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,happened_at,after_business_json) VALUES($1,$2,'lead',$3,$4,$5,$6)",
+    [org,A,leadId,kind,at,data],
+   );
+   await record(lead,'V34_INTAKE',initial,{workflow_version:1,stage:'needs_discovery',terminal_state:'open'});
+   await record(lead,'V34_CLOSED_LOST',closedAt,{workflow_version:2,stage:'declined',terminal_state:'lost',reason:'不应返回的历史备注'});
+   await record(lead,'V34_REOPENED',reopenedAt,{workflow_version:3,stage:'needs_discovery',terminal_state:'open'});
+   await record(unknown,'V34_INTAKE',initial,{primary_activity_id:randomUUID()});
+   await record(foreignOwner,'V34_INTAKE',initial,{workflow_version:1,stage:'needs_discovery',terminal_state:'open'});
+
+   const read=(at,filters={},user=A)=>req('/metrics?'+new URLSearchParams({as_of_at:at,...filters}),undefined,user);
+   const drill=(at,metric,filters={},user=A)=>req(
+    '/metrics/drilldown?'+new URLSearchParams({as_of_at:at,metric,...filters}),undefined,user,
+   );
+   const beforeClosing=good(await read(initial));
+   assert.equal(beforeClosing.snapshot_counts.snapshot_open,1);
+   const atClose=good(await read(closedAt));
+   assert.deepEqual(atClose.snapshot_counts,{
+    snapshot_leads:2,snapshot_open:0,snapshot_won:0,snapshot_lost:1,snapshot_unknown:1,
+   });
+   assert.equal((await detail(lead)).workflow.terminal_state,'open');
+   const lost=good(await drill(closedAt,'snapshot_lost'));
+   assert.equal(lost.total,atClose.snapshot_counts.snapshot_lost);
+   assert.deepEqual(lost.items.map(item=>item.id),[lead]);
+   assert.equal(lost.items[0].stage,'declined');
+   assert.equal(new Date(lost.items[0].recorded_at).toISOString(),'2023-05-02T02:00:00.000Z');
+   assert.ok(!JSON.stringify(lost).includes('不应返回的历史备注'));
+   const missing=good(await drill(closedAt,'snapshot_unknown'));
+   assert.equal(missing.total,atClose.snapshot_counts.snapshot_unknown);
+   assert.deepEqual(missing.items.map(item=>item.id),[unknown]);
+   assert.equal(missing.items[0].terminal_state,'unknown');
+   assert.equal(missing.items[0].recorded_at,null);
+   assert.equal(good(await read(reopenedAt)).snapshot_counts.snapshot_lost,0);
+   assert.deepEqual(good(await drill(reopenedAt,'snapshot_open')).items.map(item=>item.id),[lead]);
+   const manager=good(await read(closedAt,{owner_id:B,source:'到店'},M));
+   assert.equal(manager.snapshot_counts.snapshot_open,1);
+   assert.deepEqual(good(await drill(closedAt,'snapshot_open',{owner_id:B,source:'到店'},M)).items.map(item=>item.id),[foreignOwner]);
+   assert.equal(good(await drill(closedAt,'snapshot_leads',{owner_id:B})).total,0);
+   assert.equal((await read(closedAt,{},F)).status,403);
+   assert.equal((await read(closedAt,{start_at:initial,end_at:reopenedAt})).status,422);
+   assert.equal((await read('9999-01-01T00:00:00+08:00')).status,422);
   });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);

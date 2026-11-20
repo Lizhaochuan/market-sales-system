@@ -316,10 +316,10 @@ async function corrections(c,ctx,l,w,action,b){
 }
 function maskPhone(v){if(!v)return '';const s=String(v).trim();if(s.length>=8)return s.slice(0,s.length-8)+'****'+s.slice(-4);if(s.length>=5)return s.slice(0,2)+'***'+s.slice(-2);return '****';}
 function metricsScope(query={}){
- fields(query,['view_mode','start_at','end_at','owner_id','source']);
- const {view_mode,start_at,end_at,owner_id,source}=query;
- if(view_mode!==undefined&&!['cohort','event'].includes(view_mode)){
-  fail(422,'VALIDATION_ERROR','请选择建档范围或当期发生量');
+ fields(query,['view_mode','start_at','end_at','owner_id','source','as_of_at']);
+ const {view_mode,start_at,end_at,owner_id,source,as_of_at}=query;
+ if(view_mode!==undefined&&!['cohort','event','snapshot'].includes(view_mode)){
+  fail(422,'VALIDATION_ERROR','请选择有效的统计口径');
  }
  if(owner_id!==undefined&&!uuid(owner_id)){
   fail(422,'VALIDATION_ERROR','请选择有效的顾问');
@@ -328,17 +328,26 @@ function metricsScope(query={}){
   fail(422,'VALIDATION_ERROR','请选择有效的原始来源');
  }
  const dimensions={owner_id:owner_id??null,source:source?.trim()??null};
- const hasWindow=view_mode!==undefined||start_at!==undefined||end_at!==undefined;
- if(!hasWindow)return {view_mode:'current',start_at:null,end_at:null,...dimensions};
  function boundary(value){
+
   const match=typeof value==='string'&&/^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-]\d{2}:[0-5]\d)$/.exec(value);
-  if(!match)fail(422,'DATE_REQUIRED','请选择起止时间并指定时区');
+  if(!match)fail(422,'DATE_REQUIRED','请选择有效时间并指定时区');
   const calendarDate=new Date(match[1]+'T00:00:00Z');
   if(!Number.isFinite(calendarDate.getTime())||calendarDate.toISOString().slice(0,10)!==match[1]){
    fail(422,'DATE_REQUIRED','请选择有效的起止日期');
   }
   return date(value);
  }
+ if(view_mode==='snapshot'||as_of_at!==undefined){
+  if((view_mode!==undefined&&view_mode!=='snapshot')||start_at!==undefined||end_at!==undefined){
+   fail(422,'VALIDATION_ERROR','历史时点不能与建档或当期时间范围混用');
+  }
+  const instant=boundary(as_of_at);
+  if(Date.parse(instant)>Date.now())fail(422,'VALIDATION_ERROR','历史时点不能晚于当前时间');
+  return {view_mode:'snapshot',as_of_at:instant,...dimensions};
+ }
+ const hasWindow=view_mode!==undefined||start_at!==undefined||end_at!==undefined;
+ if(!hasWindow)return {view_mode:'current',start_at:null,end_at:null,...dimensions};
  const start=boundary(start_at),end=boundary(end_at);
  if(Date.parse(start)>=Date.parse(end))fail(422,'VALIDATION_ERROR','结束时间须晚于开始时间');
  return {view_mode:view_mode??'cohort',start_at:start,end_at:end,...dimensions};
@@ -366,6 +375,7 @@ async function metricsDrilldown(c,ctx,query={}){
  }
  const scope=metricsScope(filters);
  if(scope.view_mode==='event')return eventMetricsDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
+ if(scope.view_mode==='snapshot')return snapshotDrilldown(c,ctx,scope,metric,Number(page),Number(page_size));
  if(!['leads','students','won_leads','lost_leads'].includes(metric))fail(422,'VALIDATION_ERROR','该指标暂不支持查看明细');
  const {where,params}=salesLeadScope(ctx,scope);
  const limit=params.push(Number(page_size)),offset=params.push((Number(page)-1)*Number(page_size));
@@ -487,9 +497,69 @@ async function eventMetricsDrilldown(c,ctx,scope,metric,page,pageSize){
  FROM page_rows`,params)).rows[0];
  return {...flags,metric,filters:scope,page,page_size:pageSize,event_time_basis:'recorded_at',...result};
 }
+const snapshotMetricStates=new Map([
+ ['snapshot_leads',null],['snapshot_open','open'],['snapshot_won','won'],
+ ['snapshot_lost','lost'],['snapshot_unknown','unknown'],
+]);
+function historicalLeadStates(ctx,scope){
+ const {where,params}=salesLeadScope(ctx,scope);
+ const at=params.push(scope.as_of_at);
+ const sql=`
+  WITH snapshot AS (
+   SELECT l.id,l.created_at,l.contact_id,l.owner_user_id,
+    COALESCE(e.terminal_state,'unknown') AS terminal_state,e.stage,e.recorded_at
+   FROM ms.leads l
+   LEFT JOIN LATERAL (
+    SELECT a.after_business_json->>'terminal_state' AS terminal_state,
+           a.after_business_json->>'stage' AS stage,a.happened_at AS recorded_at
+    FROM ms.audit_events a
+    WHERE a.target_type='lead' AND a.target_id=l.id AND a.organization_id=l.organization_id
+      AND a.happened_at <= $${at}::timestamptz AND left(a.event_name,4)='V34_'
+      AND a.after_business_json->>'terminal_state' IN ('open','won','lost')
+      AND NULLIF(a.after_business_json->>'stage','') IS NOT NULL
+      AND jsonb_typeof(a.after_business_json->'workflow_version')='number'
+    ORDER BY (a.after_business_json->>'workflow_version')::numeric DESC,a.happened_at DESC,a.id DESC
+    LIMIT 1
+   ) e ON true
+   WHERE ${where} AND l.created_at <= $${at}::timestamptz
+  )`;
+ return {sql,params};
+}
+async function snapshotMetrics(c,ctx,scope){
+ const {sql,params}=historicalLeadStates(ctx,scope);
+ const snapshot_counts=(await c.query(`${sql}
+  SELECT count(*)::int AS snapshot_leads,
+         count(*) FILTER (WHERE terminal_state='open')::int AS snapshot_open,
+         count(*) FILTER (WHERE terminal_state='won')::int AS snapshot_won,
+         count(*) FILTER (WHERE terminal_state='lost')::int AS snapshot_lost,
+         count(*) FILTER (WHERE terminal_state='unknown')::int AS snapshot_unknown
+  FROM snapshot`,params)).rows[0];
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,snapshot_counts};
+}
+async function snapshotDrilldown(c,ctx,scope,metric,page,pageSize){
+ if(!snapshotMetricStates.has(metric))fail(422,'VALIDATION_ERROR','该历史时点指标暂不支持查看明细');
+ const {sql,params}=historicalLeadStates(ctx,scope);
+ const state=snapshotMetricStates.get(metric);
+ const stateWhere=state?`WHERE terminal_state=$${params.push(state)}`:'';
+ const limit=params.push(pageSize),offset=params.push((page-1)*pageSize);
+ const result=(await c.query(`${sql}, matching AS (
+  SELECT * FROM snapshot ${stateWhere}
+ ), page_rows AS (
+  SELECT m.id,m.created_at,m.terminal_state,m.stage,m.recorded_at,
+         co.display_name AS contact_name,u.display_name AS owner_name
+  FROM (SELECT * FROM matching ORDER BY created_at DESC,id LIMIT $${limit} OFFSET $${offset}) m
+  LEFT JOIN ms.contacts co ON co.id=m.contact_id AND co.organization_id=$1
+  LEFT JOIN ms.staff_users u ON u.id=m.owner_user_id AND u.organization_id=$1
+ )
+ SELECT (SELECT count(*)::int FROM matching) AS total,
+        COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY created_at DESC,id),'[]'::jsonb) AS items
+ FROM page_rows`,params)).rows[0];
+ return {...flags,metric,filters:scope,page,page_size:pageSize,...result};
+}
 async function metrics(c,ctx,query){
  const scope=metricsScope(query);
  if(scope.view_mode==='event')return eventMetrics(c,ctx,scope);
+ if(scope.view_mode==='snapshot')return snapshotMetrics(c,ctx,scope);
  const list=await listing(c,ctx,{},scope),ids=list.items.map(l=>l.id);
  const records=ids.length?(await c.query('SELECT * FROM ms_workspace.records WHERE lead_id=ANY($1::uuid[])',[ids])).rows:[];
  const events=ids.length?(await c.query("SELECT * FROM ms.audit_events WHERE organization_id=$1 AND target_type='lead' AND target_id=ANY($2::uuid[]) AND event_name LIKE 'V34_%' ORDER BY happened_at,id",[ctx.user.organization_id,ids])).rows:[];

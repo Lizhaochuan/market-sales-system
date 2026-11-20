@@ -173,16 +173,30 @@
   const mode=select(form,'统计口径','view_mode',[
    {id:'cohort',label:'按建档日期看当前进展'},
    {id:'event',label:'当期发生量'},
-  ],filters?.view_mode==='event'?'event':'cohort');
+   {id:'snapshot',label:'历史时点状态'},
+  ],filters?.view_mode==='current'||!filters?.view_mode?'cohort':filters.view_mode);
   const hint=node('p','form-hint');
-  const describe=()=>{hint.textContent=mode.value==='event'
-   ?'按上海日期统计系统在当期记录的事件，包含更早建档的线索。'
-   :'按上海时间的建档日期筛选，指标显示所选线索的当前进展。';};
+  form.append(hint);
+  const range=node('div','field-stack');
+  const start=input(range,'开始日期','created_from','date',filters?.start_at?dayKey(new Date(filters.start_at)):'');
+  const end=input(range,'结束日期','created_to','date',filters?.end_at?shDayShift(dayKey(new Date(filters.end_at)),-1):'');
+  const instant=node('div','field-stack');
+  const at=filters?.as_of_at?new Date(filters.as_of_at):null;
+  const instantValue=at?dayKey(at)+'T'+shTimeText(at):'';
+  const asOf=input(instant,'历史时点（上海时间）','as_of_at','datetime-local',instantValue);
+  form.append(range,instant);
+  function describe(){
+   const snapshot=mode.value==='snapshot';
+   conditional(range,!snapshot);
+   conditional(instant,snapshot);
+   hint.textContent=snapshot
+    ?'根据截至所选时点的审计记录还原线索状态。筛选按当前权限、当前顾问和原始来源。'
+    :mode.value==='event'
+     ?'按上海日期统计系统在当期记录的事件，包含更早建档的线索。'
+     :'按上海时间的建档日期筛选，指标显示所选线索的当前进展。';
+  }
   mode.addEventListener('change',describe);
   describe();
-  form.append(hint);
-  const start=input(form,'开始日期','created_from','date',filters?.start_at?dayKey(new Date(filters.start_at)):'');
-  const end=input(form,'结束日期','created_to','date',filters?.end_at?shDayShift(dayKey(new Date(filters.end_at)),-1):'');
   const owner=options.manager
    ?select(form,'顾问','owner_id',[{id:'',label:'全部顾问'},...staff],filters?.owner_id??'')
    :null;
@@ -198,15 +212,25 @@
 
   form.addEventListener('submit',event=>{
    event.preventDefault();
-   if((mode.value==='event'&&!start.value)||Boolean(start.value)!==Boolean(end.value)||start.value>end.value){
-    message.textContent='请同时选择开始和结束日期，结束日期不能早于开始日期。';
-    return;
-   }
    const query=new URLSearchParams();
-   if(start.value){
-    query.set('view_mode',mode.value);
-    query.set('start_at',start.value+'T00:00:00+08:00');
-    query.set('end_at',shDayShift(end.value,1)+'T00:00:00+08:00');
+   if(mode.value==='snapshot'){
+    const timestamp=asOf.value.length===16?asOf.value+':00+08:00':asOf.value+'+08:00';
+    if(!asOf.value||Date.parse(timestamp)>Date.now()){
+     message.textContent='请选择不晚于当前时间的历史时点。';
+     return;
+    }
+    query.set('view_mode','snapshot');
+    query.set('as_of_at',timestamp);
+   }else{
+    if((mode.value==='event'&&!start.value)||Boolean(start.value)!==Boolean(end.value)||start.value>end.value){
+     message.textContent='请同时选择开始和结束日期，结束日期不能早于开始日期。';
+     return;
+    }
+    if(start.value){
+     query.set('view_mode',mode.value);
+     query.set('start_at',start.value+'T00:00:00+08:00');
+     query.set('end_at',shDayShift(end.value,1)+'T00:00:00+08:00');
+    }
    }
    if(owner?.value)query.set('owner_id',owner.value);
    if(filters?.source!=null)query.set('source',filters.source);
@@ -261,6 +285,13 @@
    lost_events:'失单结案（次）',
    reopened_events:'失单后重开（次）',
   };
+ const snapshotMetricsLabels={
+  snapshot_leads:'已建档线索（条）',
+  snapshot_open:'当时跟进中（条）',
+  snapshot_won:'当时正式成交（条）',
+  snapshot_lost:'当时失单（条）',
+  snapshot_unknown:'历史状态证据不足（条）',
+ };
  const metricsDrilldownTitles={
   leads:'线索明细',
   students:'学生明细',
@@ -270,7 +301,9 @@
  function renderMetricsDrilldown(target,scope,metric){
   const section=node('section','panel');
   const students=metric==='students',period=Object.hasOwn(eventMetricsLabels,metric);
-  const title=period?eventMetricsLabels[metric].replace(/（.）$/,'')+'明细':metricsDrilldownTitles[metric];
+  const snapshot=Object.hasOwn(snapshotMetricsLabels,metric);
+  const metricLabel=eventMetricsLabels[metric]??snapshotMetricsLabels[metric];
+  const title=metricLabel?metricLabel.replace(/（.）$/,'')+'明细':metricsDrilldownTitles[metric];
   section.id='v34-metrics-'+metric;
   section.dataset.metricsDrilldown='';
   section.append(node('h3','',title));
@@ -296,10 +329,12 @@
       row.append(node('p','fineprint','在当前筛选范围内关联 '+item.lead_count+' 条线索'));
      }else{
       row.append(node('strong','',item.contact_name||'未填写家长姓名'));
-      const description=period
-       ?dayKey(new Date(item.recorded_at))+' '+shTimeText(item.recorded_at)+' 记录'
+      const recordTime=item.recorded_at?dayKey(new Date(item.recorded_at))+' '+shTimeText(item.recorded_at)+' 记录':null;
+      const description=period?recordTime:snapshot
+       ?(recordTime?terminalText(item.terminal_state)+' · '+stage(item.stage)+' · '+recordTime:'历史状态证据不足')
        :dayKey(new Date(item.created_at))+' 建档 · '+terminalText(item.terminal_state);
-      row.append(node('p','fineprint',(item.owner_name||'待分配')+' · '+description));
+      const owner=(snapshot?'当前顾问：':'')+(item.owner_name||'待分配');
+      row.append(node('p','fineprint',owner+' · '+description));
      }
      results.append(row);
     }
@@ -314,10 +349,15 @@
   }
   load(1);
  }
- function renderEventMetrics(target){
+ function renderRecordedMetrics(target){
   const grid=node('div','scope-grid');
-
-  target.append(node('h3','','当期发生量'));
+  const snapshot=report.filters.view_mode==='snapshot';
+  const labels=snapshot?snapshotMetricsLabels:eventMetricsLabels;
+  const counts=snapshot?report.snapshot_counts:report.event_counts;
+  target.append(node('h3','',snapshot?'历史时点状态':'当期发生量'));
+  if(snapshot){
+   target.append(node('p','form-hint','截至 '+dayKey(new Date(report.filters.as_of_at))+' '+shTimeText(report.filters.as_of_at)+'（上海时间）'));
+  }
   if(report.filters.source!=null){
    target.append(node('p','form-hint','当前来源筛选：'+(report.filters.source||'未记录来源')));
    btn(target,'清除来源筛选',()=>{
@@ -328,9 +368,9 @@
    });
   }
   const appliedScope=metricsQuery;
-  for(const [key,label]of Object.entries(eventMetricsLabels)){
+  for(const [key,label]of Object.entries(labels)){
    const tile=node('div','stat-card');
-   tile.append(node('p','',label),node('strong','',String(report.event_counts[key]??0)));
+   tile.append(node('p','',label),node('strong','',String(counts[key]??0)));
    btn(tile,'查看'+label.replace(/（.）$/,'')+'明细',()=>{
     target.querySelector('[data-metrics-drilldown]')?.remove();
     renderMetricsDrilldown(target,appliedScope,key);
@@ -339,7 +379,7 @@
   }
   target.append(grid);
  }
- function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(report.filters?.view_mode==='event'){renderEventMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
+ function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);if(['event','snapshot'].includes(report.filters?.view_mode)){renderRecordedMetrics(p);return;}const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
   const grid=node('div','scope-grid'),cohortQuery=metricsQuery;
   for(const [key,title]of Object.entries(labels)){
    const tile=node('div','stat-card');
