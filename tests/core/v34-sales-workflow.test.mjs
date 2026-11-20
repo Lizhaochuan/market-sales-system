@@ -384,10 +384,58 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
     {start_at:start},
     {...window,end_at:start},
     {...window,start_at:'2024-02-30T00:00:00+08:00'},
-    {...window,view_mode:'event'},
+    {view_mode:'event',start_at:start},
     {as_of_at:start},
     {owner_id:'not-a-uuid'},
    ])assert.equal((await scoped(invalid,M)).status,422,JSON.stringify(invalid));
+  });
+  await t.test('event metrics use recorded event time, not lead creation or events owned by other advisors',async()=>{
+   const start='2024-05-01T00:00:00+08:00',end='2024-05-02T00:00:00+08:00';
+   const seed=async(user,createdAt,source)=>{
+    const result=good(await req('',{
+     contact_name:'当期发生量家长',student_name:'当期发生量学生',origin_group:'sales',source,next:next(),
+    },user));
+    await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[result.lead_id,createdAt]);
+    return result.lead_id;
+   };
+   const oldLead=await seed(A,'2024-04-01T09:00:00+08:00','到店');
+   const newLead=await seed(A,start,'网络咨询');
+   const otherLead=await seed(B,'2024-04-02T09:00:00+08:00','网络咨询');
+   const record=(lead,name,at,details={})=>pool.query(
+    "INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,happened_at,after_business_json) VALUES($1,$2,'lead',$3,$4,$5,$6)",
+    [org,A,lead,name,at,details],
+   );
+   await record(oldLead,'V34_COMMUNICATION',start,{actual_at:'2024-04-30T08:00:00+08:00',notes:'不返回的沟通记录'});
+   await record(oldLead,'V34_COMMUNICATION',end);
+   await record(newLead,'V34_COMMUNICATION','2024-04-30T23:59:59+08:00');
+   await record(otherLead,'V34_COMMUNICATION',start);
+   await record(oldLead,'V34_ACTIVITY_COMPLETED',start,{type:'meeting'});
+   await record(oldLead,'V34_WALK_IN_MEETING_COMPLETED',start);
+   await record(oldLead,'V34_ACTIVITY_COMPLETED',start,{type:'trial'});
+   await record(oldLead,'V34_ENROLLMENT_SUCCESS',start);
+   await record(oldLead,'V34_CLOSED_WON',start);
+   await record(oldLead,'V34_CLOSED_LOST',start);
+   await record(oldLead,'V34_REOPENED',start);
+
+   const query={view_mode:'event',start_at:start,end_at:end};
+   const read=(filters,user)=>req('/metrics?'+new URLSearchParams({...query,...filters}),undefined,user);
+   const own=good(await read({},A));
+   assert.equal(own.event_time_basis,'recorded_at');
+   assert.equal(own.filters.view_mode,'event');
+   assert.deepEqual(own.event_counts,{
+    created_leads:1,communication_events:1,meeting_completion_events:2,trial_completion_events:1,
+    first_enrollment_success_events:1,won_events:1,lost_events:1,reopened_events:1,
+   });
+   assert.equal(own.counts,undefined);
+   assert.ok(!JSON.stringify(own).includes('不返回的沟通记录'));
+   const team=good(await read({},M));
+   assert.equal(team.event_counts.communication_events,2);
+   const source=good(await read({source:'到店'},M));
+   assert.equal(source.event_counts.created_leads,0);
+   assert.equal(source.event_counts.communication_events,1);
+   const blocked=good(await read({owner_id:B},A));
+   assert.ok(Object.values(blocked.event_counts).every(count=>count===0));
+   assert.equal((await read({},F)).status,403);
   });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);

@@ -318,8 +318,8 @@ function maskPhone(v){if(!v)return '';const s=String(v).trim();if(s.length>=8)re
 function metricsScope(query={}){
  fields(query,['view_mode','start_at','end_at','owner_id','source']);
  const {view_mode,start_at,end_at,owner_id,source}=query;
- if(view_mode!==undefined&&view_mode!=='cohort'){
-  fail(422,'VALIDATION_ERROR','当前仅支持按线索建档时间统计');
+ if(view_mode!==undefined&&!['cohort','event'].includes(view_mode)){
+  fail(422,'VALIDATION_ERROR','请选择建档范围或当期发生量');
  }
  if(owner_id!==undefined&&!uuid(owner_id)){
   fail(422,'VALIDATION_ERROR','请选择有效的顾问');
@@ -328,8 +328,8 @@ function metricsScope(query={}){
   fail(422,'VALIDATION_ERROR','请选择有效的原始来源');
  }
  const dimensions={owner_id:owner_id??null,source:source?.trim()??null};
- const cohort=view_mode==='cohort'||start_at!==undefined||end_at!==undefined;
- if(!cohort)return {view_mode:'current',start_at:null,end_at:null,...dimensions};
+ const hasWindow=view_mode!==undefined||start_at!==undefined||end_at!==undefined;
+ if(!hasWindow)return {view_mode:'current',start_at:null,end_at:null,...dimensions};
  function boundary(value){
   const match=typeof value==='string'&&/^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-]\d{2}:[0-5]\d)$/.exec(value);
   if(!match)fail(422,'DATE_REQUIRED','请选择起止时间并指定时区');
@@ -341,7 +341,7 @@ function metricsScope(query={}){
  }
  const start=boundary(start_at),end=boundary(end_at);
  if(Date.parse(start)>=Date.parse(end))fail(422,'VALIDATION_ERROR','结束时间须晚于开始时间');
- return {view_mode:'cohort',start_at:start,end_at:end,...dimensions};
+ return {view_mode:view_mode??'cohort',start_at:start,end_at:end,...dimensions};
 }
 function salesLeadScope(ctx,scope){
  const params=[ctx.user.organization_id,ctx.user.id,ctx.manager];
@@ -352,7 +352,7 @@ function salesLeadScope(ctx,scope){
   SELECT NULLIF(btrim(source_event.event_type),'') FROM ms.contact_events source_event
   WHERE source_event.id=l.source_event_id AND source_event.organization_id=l.organization_id
  ),'')=$${params.push(scope.source)}`);
- if(scope?.start_at){
+ if(scope?.view_mode==='cohort'){
   conditions.push(`l.created_at>=$${params.push(scope.start_at)}::timestamptz`);
   conditions.push(`l.created_at<$${params.push(scope.end_at)}::timestamptz`);
  }
@@ -366,6 +366,7 @@ async function metricsDrilldown(c,ctx,query={}){
   fail(422,'VALIDATION_ERROR','请选择有效页码，每页最多 50 条');
  }
  const scope=metricsScope(filters);
+ if(scope.view_mode==='event')fail(422,'VALIDATION_ERROR','当期事件明细暂未开放');
  const {where,params}=salesLeadScope(ctx,scope);
  const limit=params.push(Number(page_size)),offset=params.push((Number(page)-1)*Number(page_size));
  const students=metric==='students';
@@ -429,8 +430,36 @@ async function listing(c,ctx,query={},scope=null){
  const incoming=(await c.query("SELECT r.id,r.lead_id,r.body->>'reason' AS reason,w.version FROM ms_workspace.records r JOIN ms_workspace.lead_workflow w ON w.lead_id=r.lead_id WHERE r.organization_id=$1 AND r.kind='corrections' AND r.state='approved' AND r.body->>'type'='lead_transfer' AND r.body->>'target_owner'=$2",[ctx.user.organization_id,ctx.user.id])).rows;
  return {...flags,incoming,items:rows.map(({contact_info,...r})=>({...r,contact_info_masked:maskPhone(contact_info),terminal_state:r.terminal_state??(['closed','invalid'].includes(r.lead_state)?'legacy_closed':'open'),needs_arrangement:!r.version&&!['closed','invalid'].includes(r.lead_state),needs_assignment:!r.owner_user_id||r.owner_status!=='active',overdue:r.next_action?.due_at?Date.parse(r.next_action.due_at)<Date.now()&&r.terminal_state==='open':false})),staff:ctx.manager?(await c.query(`SELECT u.id,u.display_name FROM ms.staff_users u WHERE u.organization_id=$1 AND u.status='active' ${ctx.roleWorkspaces?"AND EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('sales_staff','sales_consultant','sales_manager','super_admin')) AND NOT EXISTS(SELECT 1 FROM ms.user_role_grants g JOIN ms.role_templates rt ON rt.id=g.role_id WHERE g.user_id=u.id AND g.revoked_at IS NULL AND g.valid_from<=now() AND rt.role_code IN('marketing','marketing_staff','marketing_manager','finance_verifier'))":''} ORDER BY u.display_name`,[ctx.user.organization_id])).rows:[]};
 }
+async function eventMetrics(c,ctx,scope){
+ const {where,params}=salesLeadScope(ctx,scope);
+ const start=params.push(scope.start_at),end=params.push(scope.end_at);
+ const eventCounts=(await c.query(`
+  WITH visible_leads AS (
+   SELECT l.id,l.created_at FROM ms.leads l WHERE ${where}
+  ), period_events AS (
+   SELECT a.event_name,a.after_business_json
+   FROM visible_leads l JOIN ms.audit_events a
+    ON a.target_id=l.id AND a.target_type='lead' AND a.organization_id=$1
+   WHERE a.happened_at >= $${start}::timestamptz AND a.happened_at < $${end}::timestamptz
+    AND a.event_name IN ('V34_COMMUNICATION','V34_ACTIVITY_COMPLETED','V34_WALK_IN_MEETING_COMPLETED',
+                         'V34_ENROLLMENT_SUCCESS','V34_CLOSED_WON','V34_CLOSED_LOST','V34_REOPENED')
+  )
+  SELECT
+   (SELECT count(*)::int FROM visible_leads WHERE created_at >= $${start}::timestamptz AND created_at < $${end}::timestamptz) AS created_leads,
+   count(*) FILTER (WHERE event_name='V34_COMMUNICATION')::int AS communication_events,
+   count(*) FILTER (WHERE event_name='V34_ACTIVITY_COMPLETED' AND after_business_json->>'type'='meeting'
+                         OR event_name='V34_WALK_IN_MEETING_COMPLETED')::int AS meeting_completion_events,
+   count(*) FILTER (WHERE event_name='V34_ACTIVITY_COMPLETED' AND after_business_json->>'type'='trial')::int AS trial_completion_events,
+   count(*) FILTER (WHERE event_name='V34_ENROLLMENT_SUCCESS')::int AS first_enrollment_success_events,
+   count(*) FILTER (WHERE event_name='V34_CLOSED_WON')::int AS won_events,
+   count(*) FILTER (WHERE event_name='V34_CLOSED_LOST')::int AS lost_events,
+   count(*) FILTER (WHERE event_name='V34_REOPENED')::int AS reopened_events
+  FROM period_events`,params)).rows[0];
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,event_time_basis:'recorded_at',event_counts:eventCounts};
+}
 async function metrics(c,ctx,query){
  const scope=metricsScope(query);
+ if(scope.view_mode==='event')return eventMetrics(c,ctx,scope);
  const list=await listing(c,ctx,{},scope),ids=list.items.map(l=>l.id);
  const records=ids.length?(await c.query('SELECT * FROM ms_workspace.records WHERE lead_id=ANY($1::uuid[])',[ids])).rows:[];
  const events=ids.length?(await c.query("SELECT * FROM ms.audit_events WHERE organization_id=$1 AND target_type='lead' AND target_id=ANY($2::uuid[]) AND event_name LIKE 'V34_%' ORDER BY happened_at,id",[ctx.user.organization_id,ids])).rows:[];

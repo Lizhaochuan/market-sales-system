@@ -936,10 +936,14 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await page.evaluate(({lead_id,workflow})=>api('/api/v1/isolated-workspace/workflow/'+lead_id+'/close-lost',{
   method:'POST',body:{expected_version:workflow.version,reason:'价格原因',feedback:'家长明确反馈',evidence_ref:'复验虚构依据'},
  }),lostLead);
+ await pool.query(
+  "INSERT INTO ms.audit_events(organization_id,service_actor,target_type,target_id,event_name,happened_at) SELECT organization_id,'playwright-fixture','lead',id,'V34_REOPENED',$2 FROM ms.leads WHERE id=$1",
+  [lostLead.lead_id,'2024-04-01T10:00:00+08:00'],
+ );
  const count=panel.locator('.stat-card').filter({has:page.getByText('Lead 数',{exact:true})}).locator('strong');
 
- const start=filters.getByLabel('建档开始日期');
- const end=filters.getByLabel('建档结束日期');
+ const start=filters.getByLabel('开始日期');
+ const end=filters.getByLabel('结束日期');
  const apply=filters.getByRole('button',{name:'应用筛选'});
  await start.fill('2024-04-01');
  await apply.click();
@@ -999,6 +1003,16 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  await page.getByRole('button',{name:'我的待办',exact:true}).click();
  await expect(page.locator('#v34-tasks')).toBeVisible();
  await page.getByRole('button',{name:'统计与提醒',exact:true}).click();
+ await expect(count).toHaveText('1');
+ const mode=filters.getByRole('combobox',{name:'统计口径'});
+ await mode.selectOption('event');
+ await apply.click();
+ await expect(panel.getByRole('heading',{name:'当期发生量'})).toBeVisible();
+ const reopened=panel.locator('.stat-card').filter({has:page.getByText('失单后重开（次）',{exact:true})});
+ await expect(reopened.locator('strong')).toHaveText('1');
+ await expect(panel.getByRole('button',{name:'查看线索明细'})).toHaveCount(0);
+ await mode.selectOption('cohort');
+ await apply.click();
  await expect(count).toHaveText('1');
  await filters.getByRole('button',{name:'清除筛选'}).click();
  await expect(start).toHaveValue('');
