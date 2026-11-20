@@ -100,6 +100,10 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.deepEqual(await search(phone,B),[]);
   const partial=await metrics();
   assert.equal(partial.counts.students,before.counts.students-1);
+  const partialStudents=good(await w('/metrics/drilldown?metric=students&page_size=50'));
+  assert.equal(partialStudents.total,partial.counts.students);
+  assert.ok(!partialStudents.items.some(student=>student.id===firstId));
+  assert.ok(partialStudents.items.some(student=>student.id===secondId&&student.lead_count===1));
   assert.equal(partial.counts.enrollment_intent_students,before.counts.enrollment_intent_students-1);
   assert.equal(partial.counts.unidentified_leads,before.counts.unidentified_leads);
 
@@ -116,6 +120,9 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   const empty=await metrics();
   assert.equal(empty.counts.leads,before.counts.leads);
   assert.equal(empty.counts.students,before.counts.students-2);
+  const remainingStudents=good(await w('/metrics/drilldown?metric=students&page_size=50'));
+  assert.equal(remainingStudents.total,empty.counts.students);
+  assert.ok(!remainingStudents.items.some(student=>[firstId,secondId].includes(student.id)));
   assert.equal(empty.counts.enrollment_intent_students,before.counts.enrollment_intent_students-2);
   assert.equal(empty.counts.unidentified_leads,before.counts.unidentified_leads+1);
   assert.deepEqual(empty.activity_counts,before.activity_counts);
@@ -205,8 +212,12 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.equal((await w(drill,undefined,KM)).status,403);
   assert.equal((await w(drill,undefined,F)).status,403);
 
+  const students='/metrics/drilldown?metric=students';
+  assert.equal(good(await w(students,undefined,G)).total,good(await w('/metrics',undefined,G)).counts.students);
+  assert.equal((await w(students,undefined,F)).status,403);
   await pool.query('UPDATE ms.user_role_grants SET revoked_at=now() WHERE user_id=$1',[G]);
   assert.equal((await w(drill,undefined,G)).status,403);
+  assert.equal((await w(students,undefined,G)).status,403);
  });
  }finally{if(app)await new Promise(r=>app.close(r));await pool.end();}
 });

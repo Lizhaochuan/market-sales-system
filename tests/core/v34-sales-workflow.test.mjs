@@ -226,6 +226,12 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
   await t.test('same student may have multiple lead/course orders without duplicate student counts',async()=>{
    const original=await create(),d=await detail(original),student=d.students[0].id;const before=good(await req('/metrics')).counts.students;
    const second=await create({student_name:'',student_id:student});assert.equal((await detail(second)).students[0].id,student);assert.equal(good(await req('/metrics')).counts.students,before);
+   const students=good(await req('/metrics/drilldown?metric=students&page_size=50'));
+   assert.equal(students.total,before);
+   assert.deepEqual(students.items.filter(item=>item.id===student),[{
+    id:student,display_name:d.students[0].display_name,lead_count:2,
+   }]);
+   assert.deepEqual(good(await req('/metrics/drilldown?metric=students&owner_id='+A,undefined,B)).items,[]);
    for(const label of ['数学','英语']){good(await act(second,'quote',{items:[{course_label:label,quantity:1,unit_cents:label==='数学'?10000:1000}]}));let detail2=await detail(second),q=detail2.records.find(r=>r.kind==='quotes'&&r.body.items[0].course_label===label);good(await act(second,'enroll',{quote_id:q.id,quote_version:q.version,agreement_ref:'独立课程协议'+label}));}
    assert.equal((await detail(second)).records.filter(r=>r.kind==='enrollments').length,2);
   });
@@ -319,7 +325,14 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.deepEqual(good(await drill({...window,owner_id:B},M)).items.map(item=>item.id),[other]);
    assert.deepEqual(good(await drill({...window,owner_id:B},A)).items,[]);
    assert.equal((await drill(window,F)).status,403);
-   for(const invalid of [{metric:'students'},{page:'0'},{page_size:'51'},{...window,view_mode:'event'}]){
+   const studentPage=good(await drill({...window,metric:'students',page_size:1},M));
+   const studentPage2=good(await drill({...window,metric:'students',page_size:1,page:2},M));
+   assert.equal(studentPage.total,team.counts.students);
+   assert.equal(studentPage2.total,team.counts.students);
+   assert.notEqual(studentPage.items[0].id,studentPage2.items[0].id);
+   assert.equal(good(await drill({...window,metric:'students',owner_id:B},M)).total,1);
+   assert.equal(good(await drill({...window,metric:'students',owner_id:B},A)).total,0);
+   for(const invalid of [{metric:'unsupported'},{page:'0'},{page_size:'51'},{...window,view_mode:'event'}]){
     assert.equal((await drill(invalid,M)).status,422,JSON.stringify(invalid));
    }
    for(const invalid of [

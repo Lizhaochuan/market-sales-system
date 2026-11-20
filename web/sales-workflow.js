@@ -204,51 +204,65 @@
    refresh(true);
   });
  }
- function renderLeadMetricsDrilldown(target,scope){
+ function renderMetricsDrilldown(target,scope,metric){
   const section=node('section','panel');
-  section.id='v34-metrics-leads';
-  section.append(node('h3','','线索明细'));
-  btn(section,'关闭线索明细',()=>section.remove());
+  const students=metric==='students',title=students?'学生明细':'线索明细';
+  section.id='v34-metrics-'+metric;
+  section.dataset.metricsDrilldown='';
+  section.append(node('h3','',title));
+  btn(section,'关闭'+title,()=>section.remove());
   const results=node('div');
   section.append(results);
   target.append(section);
   const query=new URLSearchParams(scope);
-  query.set('metric','leads');
+  query.set('metric',metric);
 
   async function load(page){
    const token=state.token;
    query.set('page',String(page));
-   results.replaceChildren(node('p','form-hint','正在读取线索明细…'));
+   results.replaceChildren(node('p','form-hint','正在读取'+title+'…'));
    try{
     const data=await api(root+'/metrics/drilldown?'+query);
     if(token!==state.token||!section.isConnected)return;
-    results.replaceChildren(node('p','form-hint','共 '+data.total+' 条线索'));
-    for(const lead of data.items){
+    results.replaceChildren(node('p','form-hint','共 '+data.total+(students?' 名学生':' 条线索')));
+    for(const item of data.items){
      const row=node('article','lead-row');
-     row.append(node('strong','',lead.contact_name||'未填写家长姓名'));
-     row.append(node('p','fineprint',
-      (lead.owner_name||'待分配')+' · '+dayKey(new Date(lead.created_at))+' 建档 · '+terminalText(lead.terminal_state),
-     ));
+     if(students){
+      row.append(node('strong','',item.display_name||'未填写学生姓名'));
+      row.append(node('p','fineprint','在当前筛选范围内关联 '+item.lead_count+' 条线索'));
+     }else{
+      row.append(node('strong','',item.contact_name||'未填写家长姓名'));
+      row.append(node('p','fineprint',
+       (item.owner_name||'待分配')+' · '+dayKey(new Date(item.created_at))+' 建档 · '+terminalText(item.terminal_state),
+      ));
+     }
      results.append(row);
     }
-    if(!data.items.length)results.append(node('p','','此页没有线索'));
+    if(!data.items.length)results.append(node('p','','此页没有'+(students?'学生':'线索')));
     if(data.page>1)btn(results,'上一页',()=>load(data.page-1));
     if(data.page*data.page_size<data.total)btn(results,'下一页',()=>load(data.page+1));
    }catch(e){
     if(token!==state.token||!section.isConnected)return;
     if(handleAuthFailure(e))return;
-    results.replaceChildren(node('p','warning','读取线索明细失败：'+e.message));
+    results.replaceChildren(node('p','warning','读取'+title+'失败：'+e.message));
    }
   }
   load(1);
  }
  function renderMetrics(){if(!report){panel.append(node('p','','读取统计中…'));return;}const p=node('div','panel');p.id='v34-metrics';if(options?.access?.admin)p.append(node('p','form-hint','市场线索 '+marketRows.length+' 条 · 待销售接收 '+marketRows.filter(r=>r.handoff_state==='market').length+' 条；销售统计见下方，可分别进入两部门工作台。'));p.append(node('h2','','销售闭环统计'));panel.append(p);renderMetricsFilters(p);const labels={leads:'Lead 数',students:'已识别学生人数（去重）',unidentified_leads:'待识别学生 Lead',contacted_students:'实际联系学生人数',failed_attempts:'联系失败次数',waiting_leads:'当前待回复 Lead',online_communicated_students:'线上完成沟通学生',offline_communicated_students:'线下实际沟通学生',invited_students:'发起面谈邀约学生',agreed_meeting_students:'同意面谈学生',confirmed_meeting_students:'确认面谈学生',attended_meeting_students:'实际到场学生',walk_in_meeting_students:'主动到访面谈学生',completed_meeting_students:'完成面谈学生',meeting_to_enrollment_students:'面谈后报名成功学生',trial_booked_students:'试听预约学生',trial_completed_students:'实际试听完成学生',trial_to_enrollment_students:'试听后报名成功学生',enrollment_intent_students:'有报名意向学生',enrollment_success_students:'当前有效报名成功学生',enrollment_success_orders:'当前有效报名成功订单',historical_enrollment_success_students:'历史首次报名成功学生（去重）',historical_enrollment_success_orders:'历史首次报名成功订单',settled_orders:'已结清订单',won_leads:'Closed Won',lost_leads:'Closed Lost',due_today:'今日应跟进活动',completed_today:'今日完成活动',overdue_activities:'逾期活动数',overdue_primary_leads:'首要安排逾期客户数',missing_next:'待补下一步 Lead',unassigned_leads:'负责人待分配 Lead',continuous_failed_leads:'连续联系失败 Lead',stale_open_leads:'14天未更新的 Open Lead',paused_leads:'暂缓待恢复 Lead',appointment_result_due:'预约到期未确认结果',pending_transfer:'待独立复核转交'};
-  const grid=node('div','scope-grid');for(const [k,title]of Object.entries(labels)){const d=node('div','stat-card');d.append(node('p','',title),node('strong','',String(report.counts[k]??0)));grid.append(d);}p.append(grid);
-  const cohortQuery=metricsQuery;
-  btn(p,'查看线索明细',()=>{
-   p.querySelector('#v34-metrics-leads')?.remove();
-   renderLeadMetricsDrilldown(p,cohortQuery);
-  });
+  const grid=node('div','scope-grid'),cohortQuery=metricsQuery;
+  for(const [key,title]of Object.entries(labels)){
+   const tile=node('div','stat-card');
+   tile.append(node('p','',title),node('strong','',String(report.counts[key]??0)));
+   if(key==='leads'||key==='students'){
+    btn(tile,key==='students'?'查看学生明细':'查看线索明细',()=>{
+     p.querySelector('[data-metrics-drilldown]')?.remove();
+     renderMetricsDrilldown(p,cohortQuery,key);
+    });
+   }
+   grid.append(tile);
+  }
+  p.append(grid);
   p.append(node('p','','已核实净收款：'+yuan(report.counts.received_cents||0)+' · 未结清：'+yuan(report.counts.unsettled_cents||0)));
   const booked=report.counts.trial_booked_students||0,completed=report.counts.trial_completed_students||0;p.append(node('p','','试听完成率：'+(booked?(completed/booked*100).toFixed(1)+'%':'暂无分母')+' · 试听后报名率：'+(completed?((report.counts.trial_to_enrollment_students||0)/completed*100).toFixed(1)+'%':'暂无分母')));
   if(options.manager){const c=form(panel,'v34-catalog','本地课程标准价目（主管）','保存本地价目',f=>{const b=data(f),old=options.catalog.find(p=>p.body.course_label.toLowerCase()===b.course_label.toLowerCase());return api(root+'/catalog',{method:'POST',body:{course_label:b.course_label,standard_unit_cents:cents(b.amount),reason:b.reason,expected_version:old?.version}});},{version:null});input(c.f,'课程名称','course_label','text','',true);input(c.f,'每课时标准价格（元）','amount','text','',true);input(c.f,'价格维护依据','reason','text','',true);c.f.append(c.submit);}

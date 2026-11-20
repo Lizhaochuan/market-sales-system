@@ -78,7 +78,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  if(method==='GET'&&id==='finance')return financialQueue(c,ctx);
  if(method==='GET'&&id==='metrics'){
   if(isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','收款核实员不可访问销售统计');
-  if(action==='drilldown')return leadMetricsDrilldown(c,ctx,query);
+  if(action==='drilldown')return metricsDrilldown(c,ctx,query);
   if(!action)return metrics(c,ctx,query);
   fail(404,'NOT_FOUND','没有找到统计入口');
  }
@@ -350,30 +350,40 @@ function salesLeadScope(ctx,scope){
  }
  return {where:conditions.join(' AND '),params};
 }
-async function leadMetricsDrilldown(c,ctx,query={}){
+const activeScopedStudent='s.organization_id=l.organization_id AND s.archived_at IS NULL';
+async function metricsDrilldown(c,ctx,query={}){
  const {metric,page='1',page_size='20',...filters}=query;
- if(metric!=='leads')fail(422,'VALIDATION_ERROR','当前仅支持线索数明细');
+ if(!['leads','students'].includes(metric))fail(422,'VALIDATION_ERROR','当前仅支持线索数和已识别学生明细');
  if(!/^[1-9]\d{0,5}$/.test(page)||!/^[1-9]\d?$/.test(page_size)||Number(page_size)>50){
   fail(422,'VALIDATION_ERROR','请选择有效页码，每页最多 50 条');
  }
  const scope=metricsScope(filters);
  const {where,params}=salesLeadScope(ctx,scope);
  const limit=params.push(Number(page_size)),offset=params.push((Number(page)-1)*Number(page_size));
+ const students=metric==='students';
+ const matching=students?`
+  SELECT s.id,s.display_name,count(DISTINCT l.id)::int AS lead_count
+  FROM ms.leads l
+  JOIN ms.lead_students ls ON ls.lead_id=l.id
+  JOIN ms.students s ON s.id=ls.student_id AND ${activeScopedStudent}
+  WHERE ${where}
+  GROUP BY s.id,s.display_name
+ `:`SELECT l.id,l.created_at,l.owner_user_id,l.contact_id,l.lead_state FROM ms.leads l WHERE ${where}`;
+ const order=students?'display_name,id':'created_at DESC,id';
+ const pageQuery=`SELECT * FROM matching ORDER BY ${order} LIMIT $${limit} OFFSET $${offset}`;
+ const projection=students?pageQuery:`
+  SELECT m.id,m.created_at,
+    co.display_name AS contact_name,u.display_name AS owner_name,
+    COALESCE(w.terminal_state,CASE WHEN m.lead_state IN ('closed','invalid') THEN 'legacy_closed' ELSE 'open' END) AS terminal_state
+  FROM (${pageQuery}) m
+  LEFT JOIN ms.contacts co ON co.id=m.contact_id AND co.organization_id=$1
+  LEFT JOIN ms.staff_users u ON u.id=m.owner_user_id AND u.organization_id=$1
+  LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=m.id AND w.organization_id=$1
+ `;
  const result=(await c.query(`
-  WITH matching AS (
-   SELECT l.id,l.created_at,l.owner_user_id,l.contact_id,l.lead_state
-   FROM ms.leads l WHERE ${where}
-  ), page_rows AS (
-   SELECT m.id,m.created_at,
-     co.display_name AS contact_name,u.display_name AS owner_name,
-     COALESCE(w.terminal_state,CASE WHEN m.lead_state IN ('closed','invalid') THEN 'legacy_closed' ELSE 'open' END) AS terminal_state
-   FROM (SELECT * FROM matching ORDER BY created_at DESC,id LIMIT $${limit} OFFSET $${offset}) m
-   LEFT JOIN ms.contacts co ON co.id=m.contact_id AND co.organization_id=$1
-   LEFT JOIN ms.staff_users u ON u.id=m.owner_user_id AND u.organization_id=$1
-   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=m.id AND w.organization_id=$1
-  )
+  WITH matching AS (${matching}), page_rows AS (${projection})
   SELECT (SELECT count(*)::int FROM matching) AS total,
-         COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY created_at DESC,id),'[]'::jsonb) AS items
+         COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY ${order}),'[]'::jsonb) AS items
   FROM page_rows`,params)).rows[0];
  return {...flags,metric,filters:scope,page:Number(page),page_size:Number(page_size),...result};
 }
@@ -390,14 +400,14 @@ async function listing(c,ctx,query={},scope=null){
    params.push('%'+digits+'%');
    dClause=` OR regexp_replace(COALESCE(w.contact_info,''),'[^0-9]','','g') ILIKE $${params.length}`;
   }
-  qWhere=` AND (c.display_name ILIKE ${qIdx} OR w.contact_info ILIKE ${qIdx} OR EXISTS(SELECT 1 FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.archived_at IS NULL AND s.display_name ILIKE ${qIdx})${dClause})`;
+  qWhere=` AND (c.display_name ILIKE ${qIdx} OR w.contact_info ILIKE ${qIdx} OR EXISTS(SELECT 1 FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND ${activeScopedStudent} AND s.display_name ILIKE ${qIdx})${dClause})`;
  }
  const rows=(await c.query(`SELECT l.id,l.lead_state,l.owner_user_id,l.created_at,c.display_name AS contact_name,u.display_name AS owner_name,u.status AS owner_status,e.event_type AS original_source,(SELECT a.after_business_json->>'source' FROM ms.audit_events a WHERE a.organization_id=l.organization_id AND a.target_type='lead' AND a.target_id=l.id AND a.event_name='LEAD_SOURCE_UPDATED' ORDER BY a.happened_at DESC,a.id DESC LIMIT 1) AS current_source,
   w.stage,w.version,w.updated_at,w.terminal_state,w.primary_activity_id,w.do_not_contact,w.contact_info,
   a.body AS next_action,a.state AS activity_state,a.kind AS activity_kind,
   (SELECT jsonb_build_object('result',ae.after_business_json->>'result','failure_reason',ae.after_business_json->>'failure_reason','method',ae.after_business_json->>'method','happened_at',ae.happened_at) FROM ms.audit_events ae WHERE ae.organization_id=l.organization_id AND ae.target_type='lead' AND ae.target_id=l.id AND ae.event_name='V34_COMMUNICATION' ORDER BY ae.happened_at DESC,ae.id DESC LIMIT 1) AS last_communication,
   (SELECT jsonb_build_object('type',ap.body->>'type','state',ap.state,'due_at',ap.body->>'due_at','actual_attendance',ap.body->>'actual_attendance') FROM ms_workspace.records ap WHERE ap.lead_id=l.id AND ap.organization_id=l.organization_id AND ap.kind='appointments' ORDER BY (ap.state IN('pending','confirmed','rescheduled','in_progress')) DESC,(ap.state<>'cancelled') DESC,ap.updated_at DESC,ap.created_at DESC,ap.id DESC LIMIT 1) AS latest_appointment,
-  (SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.display_name)) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND s.organization_id=l.organization_id AND s.archived_at IS NULL) AS students,
+  (SELECT jsonb_agg(jsonb_build_object('id',s.id,'name',s.display_name)) FROM ms.lead_students ls JOIN ms.students s ON s.id=ls.student_id WHERE ls.lead_id=l.id AND ${activeScopedStudent}) AS students,
   (SELECT x.after_business_json->>'origin_group' FROM ms.audit_events x WHERE x.organization_id=l.organization_id AND x.target_type='lead' AND x.target_id=l.id AND x.event_name='LEAD_DESK_CREATED' ORDER BY x.happened_at LIMIT 1) AS origin_group
   FROM ms.leads l LEFT JOIN ms.contacts c ON c.id=l.contact_id LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id LEFT JOIN ms.contact_events e ON e.id=l.source_event_id
   LEFT JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms_workspace.records a ON a.id=w.primary_activity_id
