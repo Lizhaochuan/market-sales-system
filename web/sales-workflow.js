@@ -291,6 +291,9 @@
   snapshot_won:'当时正式成交（条）',
   snapshot_lost:'当时失单（条）',
   snapshot_unknown:'历史状态证据不足（条）',
+  snapshot_pending_activities:'当时未完成活动（项）',
+  snapshot_overdue_activities:'当时逾期活动（项）',
+  snapshot_unknown_activities:'活动时间或版本证据不足（项）',
  };
  const metricsDrilldownTitles={
   leads:'线索明细',
@@ -302,6 +305,7 @@
   const section=node('section','panel');
   const students=metric==='students',period=Object.hasOwn(eventMetricsLabels,metric);
   const snapshot=Object.hasOwn(snapshotMetricsLabels,metric);
+  const activity=snapshot&&metric.endsWith('_activities');
   const metricLabel=eventMetricsLabels[metric]??snapshotMetricsLabels[metric];
   const title=metricLabel?metricLabel.replace(/（.）$/,'')+'明细':metricsDrilldownTitles[metric];
   section.id='v34-metrics-'+metric;
@@ -321,7 +325,7 @@
    try{
     const data=await api(root+'/metrics/drilldown?'+query);
     if(token!==state.token||!section.isConnected)return;
-    results.replaceChildren(node('p','form-hint','共 '+data.total+(students?' 名学生':period&&metric!=='created_leads'?' 条记录':' 条线索')));
+    results.replaceChildren(node('p','form-hint','共 '+data.total+(students?' 名学生':activity?' 项活动':period&&metric!=='created_leads'?' 条记录':' 条线索')));
     for(const item of data.items){
      const row=node('article','lead-row');
      if(students){
@@ -330,15 +334,20 @@
      }else{
       row.append(node('strong','',item.contact_name||'未填写家长姓名'));
       const recordTime=item.recorded_at?dayKey(new Date(item.recorded_at))+' '+shTimeText(item.recorded_at)+' 记录':null;
-      const description=period?recordTime:snapshot
-       ?(recordTime?terminalText(item.terminal_state)+' · '+stage(item.stage)+' · '+recordTime:'历史状态证据不足')
-       :dayKey(new Date(item.created_at))+' 建档 · '+terminalText(item.terminal_state);
+      let description;
+      if(period)description=recordTime;
+      else if(activity){
+       const due=item.due_at?dayKey(new Date(item.due_at))+' '+shTimeText(item.due_at):'到期时间证据不足';
+       description=(item.kind==='appointments'?'预约':'跟进待办')+' · '+(recordTime?due+' · '+recordTime:'历史版本证据不足');
+      }else if(snapshot){
+       description=recordTime?terminalText(item.terminal_state)+' · '+stage(item.stage)+' · '+recordTime:'历史状态证据不足';
+      }else description=dayKey(new Date(item.created_at))+' 建档 · '+terminalText(item.terminal_state);
       const owner=(snapshot?'当前顾问：':'')+(item.owner_name||'待分配');
       row.append(node('p','fineprint',owner+' · '+description));
      }
      results.append(row);
     }
-    if(!data.items.length)results.append(node('p','','此页没有'+(students?'学生':period?'记录':'线索')));
+    if(!data.items.length)results.append(node('p','','此页没有'+(students?'学生':activity?'活动':period?'记录':'线索')));
     if(data.page>1)btn(results,'上一页',()=>load(data.page-1));
     if(data.page*data.page_size<data.total)btn(results,'下一页',()=>load(data.page+1));
    }catch(e){
@@ -357,6 +366,7 @@
   target.append(node('h3','',snapshot?'历史时点状态':'当期发生量'));
   if(snapshot){
    target.append(node('p','form-hint','截至 '+dayKey(new Date(report.filters.as_of_at))+' '+shTimeText(report.filters.as_of_at)+'（上海时间）'));
+   target.append(node('p','form-hint','缺少到期时间证据的活动可能仍计入未完成，但不计入逾期。'));
   }
   if(report.filters.source!=null){
    target.append(node('p','form-hint','当前来源筛选：'+(report.filters.source||'未记录来源')));

@@ -492,6 +492,7 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    const atClose=good(await read(closedAt));
    assert.deepEqual(atClose.snapshot_counts,{
     snapshot_leads:2,snapshot_open:0,snapshot_won:0,snapshot_lost:1,snapshot_unknown:1,
+    snapshot_pending_activities:0,snapshot_overdue_activities:0,snapshot_unknown_activities:0,
    });
    assert.equal((await detail(lead)).workflow.terminal_state,'open');
    const lost=good(await drill(closedAt,'snapshot_lost'));
@@ -514,6 +515,60 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal((await read(closedAt,{},F)).status,403);
    assert.equal((await read(closedAt,{start_at:initial,end_at:reopenedAt})).status,422);
    assert.equal((await read('9999-01-01T00:00:00+08:00')).status,422);
+  });
+  await t.test('historical activity metrics use the version known at the cutoff and do not infer missing due dates',async()=>{
+   const initial='2023-06-01T08:00:00+08:00',cutoff='2023-06-01T10:00:00+08:00';
+   const retimed='2023-06-01T11:00:00+08:00',finished='2023-06-01T12:00:00+08:00';
+   const originalDue='2023-06-01T09:00:00+08:00',newDue='2023-06-02T08:00:00+08:00';
+   const lead=await create();
+   await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[lead,initial]);
+   const activity=async(kind,state,version)=>{
+    const result=await pool.query(
+     "INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,kind,state,body,version,created_at) VALUES($1,$2,$3,$4,$5,'{}',$6,$7) RETURNING id",
+     [org,A,lead,kind,state,version,initial],
+    );
+    return result.rows[0].id;
+   };
+   const history=(id,version,state,dueAt,recordedAt)=>pool.query(
+    'INSERT INTO ms_workspace.history(record_id,version,actor_user_id,state,body,recorded_at) VALUES($1,$2,$3,$4,$5,$6)',
+    [id,version,A,state,{due_at:dueAt,title:'不可返回的历史备注'},recordedAt],
+   );
+   const meeting=await activity('appointments','completed',3);
+   const noHistory=await activity('tasks','completed',1);
+   const badDue=await activity('tasks','open',1);
+   await history(meeting,1,'confirmed',originalDue,initial);
+   await history(meeting,2,'rescheduled',newDue,retimed);
+   await history(meeting,3,'completed',newDue,finished);
+   await history(badDue,1,'open','2023-06-01T25:00:00+08:00',initial);
+
+   const metrics=async(at,user=A)=>good(await req('/metrics?'+new URLSearchParams({as_of_at:at}),undefined,user));
+   const drill=async(at,metric,user=A)=>good(await req(
+    '/metrics/drilldown?'+new URLSearchParams({as_of_at:at,metric}),undefined,user,
+   ));
+   const before=await metrics(cutoff);
+   assert.equal(before.snapshot_counts.snapshot_pending_activities,2);
+   assert.equal(before.snapshot_counts.snapshot_overdue_activities,1);
+   assert.equal(before.snapshot_counts.snapshot_unknown_activities,2);
+   const overdue=await drill(cutoff,'snapshot_overdue_activities');
+   assert.equal(overdue.total,before.snapshot_counts.snapshot_overdue_activities);
+   assert.equal(overdue.items[0].id,meeting);
+   assert.equal(overdue.items[0].activity_state,'confirmed');
+   assert.equal(new Date(overdue.items[0].due_at).toISOString(),'2023-06-01T01:00:00.000Z');
+   assert.ok(!JSON.stringify(overdue).includes('不可返回的历史备注'));
+   const gaps=await drill(cutoff,'snapshot_unknown_activities');
+   assert.deepEqual(gaps.items.map(item=>item.id).sort(),[noHistory,badDue].sort());
+   assert.equal(gaps.items.find(item=>item.id===noHistory).recorded_at,null);
+   assert.equal(gaps.items.find(item=>item.id===badDue).due_at,null);
+   assert.equal((await drill(cutoff,'snapshot_overdue_activities',B)).total,0);
+
+   const afterRetime=await metrics(retimed);
+   assert.equal(afterRetime.snapshot_counts.snapshot_pending_activities,2);
+   assert.equal(afterRetime.snapshot_counts.snapshot_overdue_activities,0);
+   const pending=await drill(retimed,'snapshot_pending_activities');
+   assert.equal(new Date(pending.items.find(item=>item.id===meeting).due_at).toISOString(),'2023-06-02T00:00:00.000Z');
+   const afterFinish=await metrics(finished);
+   assert.equal(afterFinish.snapshot_counts.snapshot_pending_activities,1);
+   assert.equal(afterFinish.snapshot_counts.snapshot_unknown_activities,2);
   });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);

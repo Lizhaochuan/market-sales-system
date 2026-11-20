@@ -944,6 +944,14 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
   "INSERT INTO ms.audit_events(organization_id,service_actor,target_type,target_id,event_name,happened_at,after_business_json) SELECT organization_id,'playwright-fixture','lead',id,'V34_CLOSED_LOST',$2,$3 FROM ms.leads WHERE id=$1",
   [lostLead.lead_id,'2024-04-01T09:00:00+08:00',{workflow_version:2,stage:'declined',terminal_state:'lost'}],
  );
+ const oldActivity=(await pool.query(
+  "INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,kind,state,body,version,created_at) SELECT organization_id,owner_user_id,id,'appointments','completed','{}',2,$2 FROM ms.leads WHERE id=$1 RETURNING id,owner_user_id",
+  [lostLead.lead_id,'2024-04-01T08:15:00+08:00'],
+ )).rows[0];
+ await pool.query(
+  "INSERT INTO ms_workspace.history(record_id,version,actor_user_id,state,body,recorded_at) VALUES($1,1,$2,'confirmed',$3,$4),($1,2,$2,'completed',$3,$5)",
+  [oldActivity.id,oldActivity.owner_user_id,{due_at:'2024-04-01T08:45:00+08:00'},'2024-04-01T08:15:00+08:00','2024-04-01T09:00:00+08:00'],
+ );
  const count=panel.locator('.stat-card').filter({has:page.getByText('Lead 数',{exact:true})}).locator('strong');
 
  const start=filters.getByLabel('开始日期');
@@ -1033,6 +1041,15 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  const snapshotDetail=panel.locator('#v34-metrics-snapshot_lost');
  await expect(snapshotDetail).toContainText('窗口第二位顾问测试家长');
  await expect(snapshotDetail).toContainText('2024-04-01 09:00 记录');
+ const overdueActivity=panel.locator('.stat-card').filter({has:page.getByText('当时逾期活动（项）',{exact:true})});
+ await expect(overdueActivity.locator('strong')).toHaveText('0');
+ await asOf.fill('2024-04-01T08:55');
+ await apply.click();
+ await expect(overdueActivity.locator('strong')).toHaveText('1');
+ await overdueActivity.getByRole('button',{name:'查看当时逾期活动明细'}).click();
+ const overdueDetail=panel.locator('#v34-metrics-snapshot_overdue_activities');
+ await expect(overdueDetail).toContainText('共 1 项活动');
+ await expect(overdueDetail).toContainText('预约 · 2024-04-01 08:45');
  await mode.selectOption('cohort');
  await start.fill('2024-04-01');
  await end.fill('2024-04-01');

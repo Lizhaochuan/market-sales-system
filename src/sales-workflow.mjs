@@ -10,7 +10,8 @@ export const stages=pairs([['needs_discovery','待了解需求'],['needs_confirm
 export const actions=pairs([['call','再次电话联系'],['wechat','微信文字联系'],['voice','微信语音联系'],['video','视频沟通'],['check_reply','等待回复并到期检查'],['send_materials','发送课程资料'],['return_visit','回访家长'],['invite','邀约线下面谈'],['confirm_visit','确认家长到校时间'],['visit_reminder','到访前提醒'],['reschedule_visit','重新预约面谈'],['confirm_trial','确认试听日期'],['schedule_trial','安排试听'],['trial_reminder','试听前确认'],['trial_feedback','回访试听结果'],['repeat_trial','再次试听'],['confirm_course','确认课程方案'],['confirm_price','确认价格'],['confirm_agreement','确认报名协议'],['first_payment','跟进首笔付款'],['balance','跟进剩余学费'],['verify_enrollment','核实报名信息'],['manager_help','主管协助'],['coordination','内部协调'],['regular_visit','定期回访'],['custom','自定义动作']]);
 const reasons={phone:['无人接听','被拒接','无法接通','联系方式无效','其他'],wechat_voice:['无人接听','被拒接','无法接通','联系方式无效','其他'],wechat_text:['消息发送失败','无法联系对方','其他'],video:['无人接听','连接失败','对方取消','其他'],offline:['未到场','对方取消','其他']};
 const offline=m=>['campus','visit','event','offline_other'].includes(m);
-const active=r=>['open','in_progress','pending','confirmed','rescheduled'].includes(r.state);
+const activeActivityStates=['open','in_progress','pending','confirmed','rescheduled'];
+const active=r=>activeActivityStates.includes(r.state);
 const isFinance=ctx=>ctx.roles.includes('finance_verifier');
 const uuid=x=>typeof x==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(x);
 function fields(b,keys){if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!keys.includes(k)))fail(422,'VALIDATION_ERROR','包含不支持的字段');}
@@ -501,6 +502,11 @@ const snapshotMetricStates=new Map([
  ['snapshot_leads',null],['snapshot_open','open'],['snapshot_won','won'],
  ['snapshot_lost','lost'],['snapshot_unknown','unknown'],
 ]);
+const snapshotActivityMetrics=new Map([
+ ['snapshot_pending_activities','state=ANY(active_states)'],
+ ['snapshot_overdue_activities','state=ANY(active_states) AND due_at<cutoff'],
+ ['snapshot_unknown_activities','recorded_at IS NULL OR (state=ANY(active_states) AND due_at IS NULL)'],
+]);
 function historicalLeadStates(ctx,scope){
  const {where,params}=salesLeadScope(ctx,scope);
  const at=params.push(scope.as_of_at);
@@ -523,20 +529,63 @@ function historicalLeadStates(ctx,scope){
    ) e ON true
    WHERE ${where} AND l.created_at <= $${at}::timestamptz
   )`;
- return {sql,params};
+ return {sql,params,at};
+}
+function historicalActivityStates(ctx,scope){
+ const {sql,params,at}=historicalLeadStates(ctx,scope);
+ const activeStates=params.push(activeActivityStates);
+ return {params,sql:`${sql}, activity_snapshot AS (
+  SELECT r.id,r.lead_id,r.kind,r.created_at,h.state,h.recorded_at,
+   CASE WHEN h.body->>'due_at' ~ '^\\d{4}-\\d{2}-\\d{2}T'
+         AND h.body->>'due_at' ~ '(Z|[+-][0-9]{2}:[0-9]{2})$'
+         AND pg_input_is_valid(h.body->>'due_at','timestamp with time zone')
+        THEN (h.body->>'due_at')::timestamptz END AS due_at,
+   $${at}::timestamptz AS cutoff,$${activeStates}::text[] AS active_states
+  FROM snapshot l
+  JOIN ms_workspace.records r ON r.lead_id=l.id AND r.organization_id=$1
+  LEFT JOIN LATERAL (
+   SELECT state,body,recorded_at FROM ms_workspace.history
+   WHERE record_id=r.id AND recorded_at <= $${at}::timestamptz
+   ORDER BY version DESC LIMIT 1
+  ) h ON true
+  WHERE r.kind IN ('tasks','appointments') AND r.created_at <= $${at}::timestamptz
+ )`};
 }
 async function snapshotMetrics(c,ctx,scope){
- const {sql,params}=historicalLeadStates(ctx,scope);
+ const {sql,params}=historicalActivityStates(ctx,scope);
+ const activityCounts=[...snapshotActivityMetrics].map(([key,predicate])=>
+  `(SELECT count(*)::int FROM activity_snapshot WHERE ${predicate}) AS ${key}`,
+ ).join(', ');
  const snapshot_counts=(await c.query(`${sql}
   SELECT count(*)::int AS snapshot_leads,
          count(*) FILTER (WHERE terminal_state='open')::int AS snapshot_open,
          count(*) FILTER (WHERE terminal_state='won')::int AS snapshot_won,
          count(*) FILTER (WHERE terminal_state='lost')::int AS snapshot_lost,
-         count(*) FILTER (WHERE terminal_state='unknown')::int AS snapshot_unknown
+         count(*) FILTER (WHERE terminal_state='unknown')::int AS snapshot_unknown,
+         ${activityCounts}
   FROM snapshot`,params)).rows[0];
  return {...flags,timezone:'Asia/Shanghai',filters:scope,snapshot_counts};
 }
+async function snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize){
+ const {sql,params}=historicalActivityStates(ctx,scope);
+ const limit=params.push(pageSize),offset=params.push((page-1)*pageSize);
+ const result=(await c.query(`${sql}, matching AS (
+  SELECT * FROM activity_snapshot WHERE ${snapshotActivityMetrics.get(metric)}
+ ), page_rows AS (
+  SELECT m.id,m.lead_id,m.kind,m.created_at,m.state AS activity_state,m.due_at,m.recorded_at,
+         co.display_name AS contact_name,u.display_name AS owner_name
+  FROM (SELECT * FROM matching ORDER BY created_at DESC,id LIMIT $${limit} OFFSET $${offset}) m
+  JOIN snapshot l ON l.id=m.lead_id
+  LEFT JOIN ms.contacts co ON co.id=l.contact_id AND co.organization_id=$1
+  LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id AND u.organization_id=$1
+ )
+ SELECT (SELECT count(*)::int FROM matching) AS total,
+        COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY created_at DESC,id),'[]'::jsonb) AS items
+ FROM page_rows`,params)).rows[0];
+ return {...flags,metric,filters:scope,page,page_size:pageSize,...result};
+}
 async function snapshotDrilldown(c,ctx,scope,metric,page,pageSize){
+ if(snapshotActivityMetrics.has(metric))return snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize);
  if(!snapshotMetricStates.has(metric))fail(422,'VALIDATION_ERROR','该历史时点指标暂不支持查看明细');
  const {sql,params}=historicalLeadStates(ctx,scope);
  const state=snapshotMetricStates.get(metric);
