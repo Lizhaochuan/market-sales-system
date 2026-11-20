@@ -263,3 +263,9 @@ Mac 使用空白 PostgreSQL 16 独立测试库及虚拟校区、虚拟线索运�
 [GitHub Actions #44771565409](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44771565409) 对应 `739ca446e6d4afc6077f9b74860e1b11cf728230`，全部通过。后续源码复核发现归并校验对同一个 UUID 的大小写写法处理不一致。修正后拒绝自我归并，合法归并保留规范主线索编号，也不会形成多级归并。新增断言覆盖这三种情况。
 
 修正后在新建 Mac 独立 PostgreSQL 库全量复跑，退出码 `0`。LOGIN/RLS 12/12，Core API/UI/安全 779/779，真实 Chromium 49/49，设计合约 8/8。受限 SQL 冒烟和 JavaScript 语法检查通过。该修正当时只通过本地回归。Boss 保持 `REVIEW_REQUIRED`、`HOLD=true`、Draft / CI-only。真实校区映射和财务数据待补充。
+
+### Boss 隔离功能验收签收（2026-11-21）
+
+按用户授权签收 `MS-BOSS-001` 本轮功能，在任务板标记 `DONE`。受测代码为 `b9b24753d80278af8e1b1d08ebcadbb70068eb15`。[GitHub Actions #44777368124](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44777368124) 状态为 `completed / success`，与 Mac 独立库回归一致。LOGIN/RLS 12/12，Core API/UI/安全 779/779，Chromium 49/49，设计合约 8/8。受限 SQL 冒烟和 JavaScript 语法检查通过。CI 原始日志包含新增归并断言所在的集成用例。
+
+签收范围为虚拟数据和隔离测试。真实校区目录、历史归属和授权映射仍待补充。财务确认的渠道费用和历史应收／余额账本仍待补充。保持 `HOLD=true`、`EXT-001=UNVERIFIED`、Draft / CI-only。
