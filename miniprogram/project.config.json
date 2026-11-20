@@ -1,0 +1,7 @@
+{
+  "appid": "touristappid",
+  "projectname": "market-sales-isolated",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "./",
+  "setting": { "urlCheck": false, "es6": true, "minified": false }
+}

@@ -1,0 +1,15 @@
+<view class="shell">
+  <view class="card">
+    <text class="heading">员工工作台</text>
+    <text class="meta">隔离演示 · 使用本机虚构账号</text>
+    <form bindsubmit="submit">
+      <view class="field">员工账号
+        <picker range="{{accounts}}" value="{{account}}" bindchange="changeAccount"><view>{{accounts[account]}}</view></picker>
+      </view>
+      <view class="field">演示口令<input name="passphrase" password="{{true}}" maxlength="128" placeholder="请输入演示口令"/></view>
+      <button class="primary" form-type="submit" disabled="{{busy}}">进入工作台</button>
+    </form>
+    <view wx:if="{{message}}" class="notice">{{message}}</view>
+  </view>
+  <text class="meta">微信员工绑定、合法域名及订阅消息待配置。</text>
+</view>

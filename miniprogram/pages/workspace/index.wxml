@@ -1,0 +1,168 @@
+<template name="schedule">
+  <view class="field">下一步事项<input name="title" maxlength="120" placeholder="例如联系家长确认时间"/></view>
+  <view class="field">上海日期<input name="date" maxlength="10" placeholder="YYYY-MM-DD"/></view>
+  <view class="field">上海时间<input name="time" maxlength="5" placeholder="HH:mm"/></view>
+</template>
+<template name="tasks">
+  <view wx:for="{{items}}" wx:key="id" class="card">
+    <text class="title">{{item.title}}</text>
+    <text class="meta {{item.late ? 'bad' : ''}}">{{item.local}}{{item.late ? ' · 已逾期' : ''}}</text>
+    <button data-id="{{item.lead_id}}" data-record="{{item.id}}" data-mode="{{item.kind === 'appointments' ? 'activity' : 'followup'}}" bindtap="open">处理事项</button>
+  </view>
+  <text wx:if="{{!items.length}}" class="meta">没有待处理事项</text>
+</template>
+<view class="shell">
+  <view class="card">
+    <text class="heading">市场销售工作台</text><text class="meta">{{name}} · 隔离演示</text>
+    <view class="row">
+      <button wx:for="{{nav}}" wx:key="id" class="{{section === item.id ? 'selected' : ''}}" data-id="{{item.id}}" bindtap="select">{{item.label}}</button>
+    </view>
+  </view>
+  <view wx:if="{{message}}" class="notice">{{message}}</view>
+  <button wx:if="{{retryable}}" disabled="{{saving}}" bindtap="retry">重试原提交</button>
+  <button wx:if="{{conflict}}" bindtap="refresh">刷新最新记录</button>
+  <view wx:if="{{notice}}" class="notice">{{notice}}</view>
+  <view wx:if="{{busy}}" class="meta">正在读取工作台</view>
+  <block wx:elif="{{section === 'tasks' || section === 'calendar'}}">
+    <view class="card">
+      <text class="title">{{section === 'calendar' ? '移动日程' : '销售待办'}}</text>
+      <picker mode="date" value="{{date}}" bindchange="selectDate"><view>{{date}} · 上海时间</view></picker>
+    </view>
+    <template is="tasks" data="{{items:dayTasks}}"/>
+    <view class="card"><text class="title">其他日期已逾期</text></view>
+    <template is="tasks" data="{{items:overdue}}"/>
+  </block>
+  <block wx:elif="{{section === 'customers'}}">
+    <view class="card">
+      <text class="title">电话查重</text>
+      <form bindsubmit="lookup">
+        <input name="phone" type="text" maxlength="40" placeholder="家长电话"/>
+        <button form-type="submit" disabled="{{saving || retryable}}">查询</button>
+      </form>
+      <view wx:for="{{results}}" wx:key="lead_id" class="field">
+        <text class="meta">{{item.contact_name || item.owner_name || '已有线索'}}</text>
+        <button wx:if="{{item.status === 'sales_available'}}" data-id="{{item.lead_id}}" bindtap="open">打开客户</button>
+        <text wx:elif="{{item.status === 'assigned'}}" class="meta">已由其他顾问跟进</text>
+        <form wx:elif="{{item.status === 'market_available'}}" data-id="{{item.lead_id}}" bindsubmit="claim">
+          <template is="schedule"/>
+          <button form-type="submit" class="primary" disabled="{{saving || retryable}}">接收并安排下一步</button>
+        </form>
+      </view>
+      <form wx:if="{{noMatch}}" bindsubmit="create">
+        <text class="meta">暂无相同电话号码，可建立客户。</text>
+        <input name="name" maxlength="120" placeholder="家长姓名"/>
+        <input name="student" maxlength="120" placeholder="学生姓名（选填）"/>
+        <input name="source" value="主动咨询" maxlength="120" placeholder="最初获客来源"/>
+        <template is="schedule"/>
+        <button class="primary" form-type="submit" disabled="{{saving || retryable}}">保存客户及首个待办</button>
+      </form>
+    </view>
+    <view class="card">
+      <text class="title">客户列表</text>
+      <form bindsubmit="search"><input name="query" maxlength="100" placeholder="姓名、学生或电话"/><button form-type="submit">搜索</button></form>
+    </view>
+    <view wx:for="{{searchRows || rows}}" wx:key="id" class="card">
+      <text class="title">{{item.contact_name || '待识别客户'}}</text>
+      <text class="meta">{{item.stageLabel}} · {{item.owner_name || '待分配'}}</text>
+      <text class="meta">{{item.contact_info_masked}} · {{item.nextAt}}</text>
+      <button data-id="{{item.id}}" bindtap="open">查看客户</button>
+    </view>
+  </block>
+  <block wx:elif="{{section === 'handoff'}}">
+    <view class="card" wx:for="{{incoming}}" wx:key="id">
+      <text class="title">{{item.contact_name}}</text><text class="meta">{{item.reason}}</text>
+      <button class="primary" data-id="{{item.id}}" bindtap="accept" disabled="{{saving || retryable}}">确认接手并继承待办</button>
+    </view>
+    <text wx:if="{{!incoming.length}}" class="meta">暂无待接手客户</text>
+  </block>
+  <block wx:elif="{{section === 'market' || section === 'market-handoff'}}">
+    <view class="card" wx:for="{{section === 'market' ? market : marketHanded}}" wx:key="id">
+      <text class="title">{{item.contact_name}}</text><text class="meta">{{item.source}} · {{item.handoff_state === 'sales' ? '已交接' : '待接收'}}</text>
+    </view>
+  </block>
+  <view wx:elif="{{section === 'market-intake'}}" class="card">
+    <text class="title">市场录入</text>
+    <form bindsubmit="marketCreate">
+      <input name="phone" placeholder="家长电话"/><input name="name" placeholder="家长姓名"/>
+      <input name="student" placeholder="学生姓名（选填）"/><input name="source" value="市场活动" placeholder="来源"/>
+      <textarea name="notes" maxlength="1000" placeholder="市场内部备注（选填）"/>
+      <button class="primary" form-type="submit" disabled="{{saving || retryable}}">提交销售交接</button>
+    </form>
+  </view>
+  <view wx:elif="{{section === 'market-report'}}" class="card">
+    <text class="title">市场录入与交接</text>
+    <view wx:if="{{access.admin}}" class="row"><button data-id="market" bindtap="select">市场线索</button><button data-id="market-intake" bindtap="select">录入市场线索</button></view>
+    <view wx:for="{{marketStats.by_source}}" wx:key="source" class="field">
+      <text>{{item.source || '来源待补充'}}</text><text class="meta">录入 {{item.leads}} · 已接收 {{item.handed_off}}</text>
+    </view>
+  </view>
+  <block wx:elif="{{section === 'boss'}}">
+    <view class="card">
+      <text class="title">经营筛选</text>
+      <button wx:if="{{access.admin}}" data-id="market-report" bindtap="select">市场录入与交接报表</button>
+      <form bindsubmit="filters">
+        <picker range="{{modes}}" value="{{filterMode}}" bindchange="filterChange"><view>{{modes[filterMode]}}</view></picker>
+        <block wx:if="{{filterMode === 1 || filterMode === 2}}">
+          <input name="from" placeholder="开始日期 YYYY-MM-DD" maxlength="10"/><input name="to" placeholder="结束日期 YYYY-MM-DD" maxlength="10"/>
+        </block>
+        <block wx:if="{{filterMode === 3}}">
+          <input name="asDate" placeholder="历史日期 YYYY-MM-DD" maxlength="10"/><input name="asTime" placeholder="上海时刻 HH:mm" maxlength="5"/>
+        </block>
+        <picker range="{{staff}}" range-key="display_name" value="{{dimension.owner || 0}}" data-id="owner" bindchange="dimensionChange"><view>{{staff[dimension.owner || 0].display_name}}</view></picker>
+        <picker range="{{sources}}" range-key="name" value="{{dimension.source || 0}}" data-id="source" bindchange="dimensionChange"><view>{{sources[dimension.source || 0].name}}</view></picker>
+        <picker wx:if="{{options.campus.configured}}" range="{{campuses}}" range-key="name" value="{{dimension.campus || 0}}" data-id="campus" bindchange="dimensionChange"><view>{{campuses[dimension.campus || 0].name}}</view></picker>
+        <text wx:else class="meta">真实校区映射待补充</text>
+        <view class="row"><button class="primary" form-type="submit">应用筛选</button><button bindtap="clearFilters">清除筛选</button></view>
+      </form>
+    </view>
+    <view wx:if="{{rate || firstResponse}}" class="card">
+      <text wx:if="{{rate}}" class="title">有效率 {{rate}} · 核验覆盖率 {{coverage}}</text>
+      <text wx:if="{{firstResponse}}" class="meta">30 分钟首响 {{firstResponse}} · 24 小时接通率 {{connection}}</text>
+    </view>
+    <view wx:if="{{costMissing || financeCoverage}}" class="notice">
+      <text wx:if="{{costMissing}}">财务确认的渠道费用待补充。</text>
+      <text wx:if="{{financeCoverage}}" class="meta">历史账本覆盖状态 {{financeCoverage}}</text>
+    </view>
+    <view wx:if="{{drill}}" class="card">
+      <text class="title">{{drill.label}} · 共 {{drill.total}} 条</text>
+      <view wx:for="{{drill.items}}" wx:key="id" class="field">
+        <text>{{item.contact_name || item.display_name || '历史记录'}}</text><text class="meta">{{item.owner_name}} · {{item.at}}</text>
+        <button wx:if="{{item.lead}}" data-id="{{item.lead}}" data-mode="audit" bindtap="open">查看只读审计</button>
+      </view>
+      <view class="row">
+        <button disabled="{{drill.page === 1}}" bindtap="prevDrill">上一页</button><button disabled="{{drill.page * drill.page_size >= drill.total}}" bindtap="nextDrill">下一页</button><button bindtap="closeDrill">关闭明细</button>
+      </view>
+    </view>
+    <view wx:for="{{cards}}" wx:key="key" class="card">
+      <text class="title">{{item.label}}</text><text class="metric">{{item.value}}</text>
+      <button wx:if="{{item.drill}}" data-id="{{item.key}}" bindtap="openDrill">查看明细</button>
+    </view>
+    <view wx:if="{{report.by_source.length}}" class="card">
+      <text class="title">原始渠道对比</text>
+      <view wx:for="{{report.by_source}}" wx:key="source" class="field">{{item.source || '来源待确认'}}<text class="meta">线索 {{item.leads}} · 成交 {{item.won}} · 流失 {{item.lost}}</text></view>
+    </view>
+    <view wx:if="{{report.by_owner.length}}" class="card">
+      <text class="title">销售顾问对比</text>
+      <view wx:for="{{report.by_owner}}" wx:key="owner_id" class="field">{{item.name}}<text class="meta">线索 {{item.leads}} · 成交 {{item.won}} · 流失 {{item.lost}}</text></view>
+    </view>
+  </block>
+  <block wx:elif="{{section === 'review'}}">
+    <view class="card"><text class="title">待主管复核与督办</text></view>
+    <view class="card" wx:for="{{approvals}}" wx:key="id">
+      {{item.contact_name}} · {{item.title}}
+      <button wx:if="{{item.can_review}}" data-id="{{item.lead_id}}" data-mode="review" bindtap="open">查看审批</button>
+      <text wx:else class="meta">须由另一位主管独立复核</text>
+    </view>
+    <view class="card" wx:for="{{supervision}}" wx:key="id">
+      <text class="title">{{item.label}} · {{item.contact_name}}</text>
+      <text class="meta">{{item.reason}} · {{item.resolved ? '已销项' : '待处理'}} · {{item.resolved || item.due}}</text>
+      <text wx:if="{{item.proof}}" class="meta">销项证据 {{item.proof}}</text>
+      <button data-id="{{item.lead_id}}" data-mode="audit" bindtap="open">查看原记录</button>
+    </view>
+    <view class="card" wx:for="{{rows}}" wx:key="id">
+      {{item.contact_name}}
+      <button data-id="{{item.id}}" data-mode="supervision" bindtap="open">查看可发起的督办</button>
+    </view>
+  </block>
+  <view class="card"><button bindtap="refresh" disabled="{{busy || saving}}">刷新工作台</button><button bindtap="logout">退出登录</button></view>
+</view>

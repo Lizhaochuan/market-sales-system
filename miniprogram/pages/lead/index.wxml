@@ -1,0 +1,142 @@
+<template name="next">
+  <view class="field">下一步事项<input data-key="next_title" value="{{form.next_title}}" bindinput="edit" maxlength="120" placeholder="例如联系家长确认时间"/></view>
+  <picker mode="date" value="{{form.next_date}}" data-key="next_date" bindchange="edit"><view>{{form.next_date || '选择下一步日期（上海）'}}</view></picker>
+  <picker mode="time" value="{{form.next_time}}" data-key="next_time" bindchange="edit"><view>{{form.next_time || '选择下一步时间（上海）'}}</view></picker>
+</template>
+<template name="appointment-time">
+  <picker mode="date" value="{{form.appDate}}" data-key="appDate" bindchange="edit"><view>{{form.appDate || '选择日期（上海）'}}</view></picker>
+  <picker mode="time" value="{{form.appTime}}" data-key="appTime" bindchange="edit"><view>{{form.appTime || '选择时间（上海）'}}</view></picker>
+</template>
+<view class="shell">
+  <view wx:if="{{message}}" class="notice">{{message}}</view>
+  <button wx:if="{{retryable}}" disabled="{{saving}}" bindtap="retry">重试原提交</button>
+  <button wx:if="{{conflict}}" bindtap="refresh">核对最新版本</button>
+  <view wx:if="{{notice}}" class="notice">{{notice}}</view>
+  <view wx:if="{{busy}}" class="meta">正在读取客户资料</view>
+  <block wx:elif="{{lead}}">
+    <view class="card">
+      <text class="heading">{{readOnly ? '客户审计' : lead.name}}</text>
+      <text class="meta">{{lead.stage}} · {{lead.state}}{{lead.owner ? ' · '+lead.owner : ''}}</text>
+      <text class="meta">服务校区 {{lead.campus}} · 核验 {{lead.verdict}}</text>
+      <text class="meta" wx:for="{{members}}" wx:key="id">学生 {{item.name}}</text>
+      <view wx:if="{{lead.doNotContact}}" class="notice">客户已明确要求不再联系。</view>
+      <view wx:if="{{!readOnly}}" class="row">
+        <button wx:for="{{editableModes}}" wx:key="id" class="{{mode === item.id ? 'selected' : ''}}" data-mode="{{item.id}}" bindtap="setMode">{{item.label}}</button>
+        <button wx:if="{{manager}}" data-mode="review" bindtap="setMode">审批</button>
+        <button wx:if="{{manager}}" data-mode="supervision" bindtap="setMode">督办</button>
+      </view>
+    </view>
+    <view wx:if="{{canRepair && mode === 'summary'}}" class="card">
+      <text class="title">补齐首要安排</text>
+      <picker wx:if="{{manager && !lead.owner && recipients.length}}" range="{{recipients}}" range-key="display_name" data-key="recipient" bindchange="pick"><view>{{recipient.display_name || '选择负责人'}}</view></picker>
+      <template is="next" data="{{form:form}}"/>
+      <button class="primary" disabled="{{saving || retryable || conflict}}" bindtap="repair">保存首要安排</button>
+    </view>
+    <block wx:if="{{mode === 'summary' || mode === 'audit'}}">
+      <view wx:for="{{activities}}" wx:key="id" class="card">
+        <text class="title">{{item.title}}</text>
+        <text class="meta">{{item.local}} · {{item.label}}{{item.overdue ? ' · 已逾期' : ''}}</text>
+        <text wx:if="{{item.location || item.course}}" class="meta">{{item.location}} {{item.course}}</text>
+        <text wx:if="{{item.result}}" class="meta">{{item.result}}</text>
+        <button wx:if="{{canEdit && item.active}}" data-id="{{item.id}}" bindtap="selectActivity">处理此事项</button>
+      </view>
+      <view wx:if="{{draft}}" class="card"><button bindtap="restore">恢复个人跟进草稿</button></view>
+      <view wx:for="{{collaborations}}" wx:key="id" class="card">
+        <text class="title">重点协同</text><text class="meta">{{item.reason}}</text>
+        <form bindsubmit="collaborate" data-id="{{item.id}}">
+          <textarea name="evidence" maxlength="1000" placeholder="填写实际完成依据"/>
+          <button form-type="submit" disabled="{{saving || retryable || conflict}}">提交销项依据</button>
+        </form>
+      </view>
+      <view class="card">
+        <text class="title">跟进时间轴</text>
+        <view class="field" wx:for="{{timeline}}" wx:key="index">
+          <text>{{item.label}}</text><text class="meta">{{item.at}} · {{item.actor}}</text><text wx:if="{{item.text}}" class="meta">{{item.text}}</text>
+        </view>
+        <text wx:if="{{!timeline.length}}" class="meta">没有历史记录</text>
+      </view>
+      <view wx:if="{{history.length}}" class="card">
+        <text class="title">活动与业务记录版本</text>
+        <view wx:for="{{history}}" wx:key="id" class="field"><text>{{item.kind}} · 版本 {{item.version}}</text><text class="meta">{{item.at}} · {{item.state}}</text></view>
+      </view>
+    </block>
+    <view wx:if="{{canEdit && mode === 'followup'}}" class="card">
+      <text class="title">记跟进</text><text wx:if="{{selected.kind === 'tasks'}}" class="meta">{{selected.title}}</text>
+      <form bindsubmit="saveFollowup">
+        <picker range="{{methodLabels}}" value="{{form.methodIndex}}" data-key="method" bindchange="pick"><view>{{methodLabels[form.methodIndex]}}</view></picker>
+        <picker range="{{resultLabels}}" value="{{form.resultIndex}}" data-key="result" bindchange="pick"><view>{{resultLabels[form.resultIndex]}}</view></picker>
+        <picker wx:if="{{form.result === 'failed'}}" range="{{failureReasons}}" data-key="failure_reason" bindchange="pick"><view>{{form.failure_reason || '请选择失败原因'}}</view></picker>
+        <view wx:if="{{members.length > 1}}" class="field">
+          实际沟通的学生
+          <checkbox-group data-key="studentIds" bindchange="edit">
+            <label wx:for="{{members}}" wx:key="id"><checkbox value="{{item.id}}"/>{{item.name}}</label>
+          </checkbox-group>
+        </view>
+        <textarea data-key="notes" value="{{form.notes}}" bindinput="edit" maxlength="1000" placeholder="记录沟通结果"/>
+        <template is="next" data="{{form:form}}"/>
+        <view class="row">
+          <button class="primary" form-type="submit" disabled="{{saving || retryable || conflict}}">保存跟进及下一步</button>
+          <button wx:if="{{isOwner}}" disabled="{{saving || retryable || conflict}}" bindtap="saveDraft">保存个人草稿</button>
+        </view>
+      </form>
+    </view>
+    <view wx:if="{{canEdit && mode === 'appointment'}}" class="card">
+      <text class="title">新增预约</text>
+      <view class="row">
+        <button class="{{form.appType === 'meeting' ? 'selected' : ''}}" data-id="meeting" bindtap="setType">面谈</button>
+        <button class="{{form.appType === 'trial' ? 'selected' : ''}}" data-id="trial" bindtap="setType">试听</button>
+      </view>
+      <picker wx:if="{{members.length > 1}}" range="{{members}}" range-key="name" data-key="appStudent" bindchange="pick"><view>{{form.appStudentName || '请选择预约学生'}}</view></picker>
+      <input wx:if="{{!members.length}}" data-key="appStudentName" value="{{form.appStudentName}}" bindinput="edit" maxlength="120" placeholder="补充预约学生姓名"/>
+      <view wx:if="{{form.appType === 'trial'}}">
+        <input data-key="place" value="{{form.place}}" bindinput="edit" maxlength="200" placeholder="试听教室"/>
+        <input data-key="course" value="{{form.course}}" bindinput="edit" maxlength="120" placeholder="试听课程"/>
+      </view>
+      <template is="appointment-time" data="{{form:form}}"/>
+      <view class="field"><switch data-key="confirmed" checked="{{form.confirmed}}" bindchange="edit"/>家长已确认预约时间</view>
+      <button class="primary" disabled="{{saving || retryable || conflict}}" bindtap="saveAppointment">保存预约</button>
+    </view>
+    <view wx:if="{{canEdit && mode === 'activity'}}" class="card">
+      <text class="title">处理预约 · {{selected.title}}</text><text class="meta">{{selected.local}} · {{selected.label}}</text>
+      <view class="row">
+        <button wx:for="{{transitions}}" wx:key="id" class="{{transition === item.id ? 'selected' : ''}}" data-id="{{item.id}}" bindtap="setTransition">{{item.label}}</button>
+      </view>
+      <template wx:if="{{transition === 'reschedule'}}" is="appointment-time" data="{{form:form}}"/>
+      <view wx:if="{{transition === 'completed'}}" class="field"><switch data-key="actual" checked="{{form.actual}}" bindchange="edit"/>已确认到场及实际完成</view>
+      <textarea wx:if="{{transition && transition !== 'confirm' && transition !== 'start'}}" data-key="reason" value="{{form.reason}}" bindinput="edit" maxlength="1000" placeholder="结果或改期依据"/>
+      <template wx:if="{{transition === 'completed' || transition === 'no_show' || transition === 'cancelled'}}" is="next" data="{{form:form}}"/>
+      <button class="primary" disabled="{{!transition || !selected.active || saving || retryable || conflict}}" bindtap="saveActivity">保存本次处理</button>
+    </view>
+    <block wx:if="{{manager && mode === 'review'}}">
+      <view class="card" wx:for="{{approvals}}" wx:key="id">
+        <text class="title">{{item.label}}</text><text wx:if="{{item.evidence}}" class="meta">{{item.evidence}}</text>
+        <form data-id="{{item.id}}" bindsubmit="review">
+          <view class="row">
+            <button class="{{reviewId === item.id && decision === 'approve' ? 'selected' : ''}}" data-id="approve" data-record="{{item.id}}" bindtap="setDecision">通过</button>
+            <button wx:if="{{item.reject}}" class="{{reviewId === item.id && decision === 'reject' ? 'selected' : ''}}" data-id="reject" data-record="{{item.id}}" bindtap="setDecision">驳回</button>
+          </view>
+          <textarea name="reason" maxlength="500" placeholder="审批依据"/>
+          <block wx:if="{{item.action === 'approve-correction'}}">
+            <view class="field"><switch name="cancel"/>审批时同时取消报名</view>
+            <input name="next_title" placeholder="如需重新开启，填写下一步事项"/>
+            <input name="next_date" maxlength="10" placeholder="下一步日期 YYYY-MM-DD"/>
+            <input name="next_time" maxlength="5" placeholder="上海时间 HH:mm"/>
+          </block>
+          <button class="primary" form-type="submit" disabled="{{reviewId !== item.id || saving || retryable || conflict}}">提交独立审批</button>
+        </form>
+      </view>
+      <text wx:if="{{!approvals.length}}" class="meta">当前没有可由你复核的申请</text>
+    </block>
+    <view wx:if="{{manager && mode === 'supervision'}}" class="card">
+      <text class="title">发起督办</text>
+      <form bindsubmit="supervise">
+        <picker range="{{targets}}" range-key="label" data-key="target" bindchange="pick"><view>{{target.label || '选择督办类型'}}</view></picker>
+        <picker wx:if="{{target.id === 'transfer'}}" range="{{recipients}}" range-key="display_name" data-key="recipient" bindchange="pick"><view>{{recipient.display_name || '选择接收顾问'}}</view></picker>
+        <textarea name="reason" maxlength="1000" placeholder="督办说明"/>
+        <input name="date" maxlength="10" placeholder="截止日期 YYYY-MM-DD"/>
+        <input name="time" maxlength="5" placeholder="上海时间 HH:mm"/>
+        <button class="primary" form-type="submit" disabled="{{!target || saving || retryable || conflict}}">下发督办</button>
+      </form>
+    </view>
+  </block>
+</view>

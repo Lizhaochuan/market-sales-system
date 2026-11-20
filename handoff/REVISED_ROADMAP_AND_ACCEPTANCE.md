@@ -107,7 +107,7 @@ flowchart TD
 
 ### Phase 3 — 独立原生微信小程序（销售顾问端 `MS-01`–`MS-06` + Boss 管理端 `MB-01`–`MB-06`）
 
-**设计前提**：已核实仓库内 **0 行小程序代码**。新建独立 `miniprogram/` 原生工程（WXML / WXSS / ES6 JS），**直接复用现有 `src/sales-workflow.mjs`、`src/role-workspaces.mjs` 及 Phase 2 扩展后的 Boss 接口**，不重建数据库与销售状态机。
+**实现范围**：Phase 3 独立分支新增 `miniprogram/` 原生工程（WXML / WXSS / ES6 JS），**直接复用现有 `src/sales-workflow.mjs`、`src/role-workspaces.mjs` 及 Phase 2 扩展后的 Boss 接口**，不重建数据库与销售状态机。
 
 | 端与页面 | 核心范围 | 强制安全与边界约束 |
 |---|---|---|

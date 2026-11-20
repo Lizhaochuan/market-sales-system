@@ -1,0 +1,20 @@
+page { background: #f4f7f5; color: #162824; font-size: 30rpx; }
+.shell { padding: 28rpx; }
+.card { background: #fff; border: 1rpx solid #d8e5df; border-radius: 20rpx; padding: 24rpx; margin-bottom: 18rpx; overflow-wrap: anywhere; }
+.heading { display: block; font-size: 40rpx; font-weight: 700; margin-bottom: 8rpx; }
+.title { display: block; font-size: 32rpx; font-weight: 650; margin-bottom: 8rpx; }
+.meta { display: block; color: #455d55; font-size: 26rpx; line-height: 1.55; }
+.row { display: flex; flex-wrap: wrap; gap: 12rpx; }
+.row button { min-width: 0; }
+.field { display: block; margin: 18rpx 0; }
+input, textarea, picker { width: 100%; box-sizing: border-box; background: #f2f7f4; border-radius: 12rpx; padding: 16rpx; margin-top: 8rpx; }
+input { height: 78rpx; }
+textarea { height: 148rpx; }
+button { margin: 10rpx 0; background: #dcece5; color: #163e34; font-size: 27rpx; }
+button[disabled] { opacity: .55; }
+button.primary, button.selected { background: #125e4c; color: #fff; }
+.row button { flex: 1 1 135rpx; }
+.notice { padding: 18rpx; margin-bottom: 14rpx; border-radius: 12rpx; background: #fbebd9; color: #67381b; }
+.bad { color: #8d330f; }
+.metric { font-size: 42rpx; color: #125e4c; }
+checkbox-group label { display: block; margin: 10rpx 0; }

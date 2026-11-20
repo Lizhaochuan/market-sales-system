@@ -269,3 +269,11 @@ Mac 使用空白 PostgreSQL 16 独立测试库及虚拟校区、虚拟线索运�
 按用户授权签收 `MS-BOSS-001` 本轮功能，在任务板标记 `DONE`。受测代码为 `b9b24753d80278af8e1b1d08ebcadbb70068eb15`。[GitHub Actions #44777368124](https://github.com/Lizhaochuan/market-sales-system/actions/runs/44777368124) 状态为 `completed / success`，与 Mac 独立库回归一致。LOGIN/RLS 12/12，Core API/UI/安全 779/779，Chromium 49/49，设计合约 8/8。受限 SQL 冒烟和 JavaScript 语法检查通过。CI 原始日志包含新增归并断言所在的集成用例。
 
 签收范围为虚拟数据和隔离测试。真实校区目录、历史归属和授权映射仍待补充。财务确认的渠道费用和历史应收／余额账本仍待补充。保持 `HOLD=true`、`EXT-001=UNVERIFIED`、Draft / CI-only。
+
+## 七、Phase 3 原生微信小程序隔离验证（2026-11-21）
+
+Mac 空白 PostgreSQL 独立库全量回归退出码为 `0`。LOGIN/RLS 12/12，Core API/UI/安全 781/781，既有 Chromium 49/49，设计合约 8/8。SQL 冒烟和 JavaScript 语法检查通过。781 项含两项新增小程序测试，直接运行原生页面 JavaScript 并连接同一隔离 HTTP 和 PostgreSQL 后端。验证 PC 写入可见、跟进与下一步时间互通、服务器保存成功后断网重放、版本冲突、个人草稿、Boss 汇总下钻、跨员工拦截与实际撤权后的会话清理。
+
+微信开发者工具安装包原生 `wcc` 编译三页 WXML，`wcsc` 编译应用 WXSS，均退出 `0`。本机 IDE 服务端口关闭，CLI 打开项目被 IDE 拒绝。模拟器交互、375/390/414 像素真机布局和真机权限清理等待原生设备验证。上述 Chromium 数字仅为 PC 网页回归。
+
+微信真实 AppID、员工绑定、合法 HTTPS 域名、订阅消息配置待补充。真实校区映射及财务数据待补充。保持 `HOLD=true`、`EXT-001=UNVERIFIED`、Draft / CI-only。
