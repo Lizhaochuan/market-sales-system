@@ -18,6 +18,15 @@ function text(x,max=1000){if(typeof x!=='string'||!x.trim()||x.trim().length>max
 function date(x){if(typeof x!=='string'||!/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(x)||!Number.isFinite(Date.parse(x)))fail(422,'DATE_REQUIRED','请选择明确的日期和时间');return new Date(x).toISOString();}
 function money(x,min=0){if(!Number.isSafeInteger(x)||x<min||x>9_000_000_000_000)fail(422,'VALIDATION_ERROR','金额或课时数超出范围');return x;}
 async function audit(c,ctx,l,name,b){await c.query(`INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,after_business_json,reason_zh) VALUES($1,$2,'lead',$3,$4,$5,$6)`,[ctx.user.organization_id,ctx.user.id,l.id,'V34_'+name,b,'独立市场销售端业务记录']);}
+function auditWorkflow(c,ctx,l,name,workflow,data={}){
+ return audit(c,ctx,l,name,{
+  ...data,
+  stage:workflow.stage,
+  terminal_state:workflow.terminal_state,
+  primary_activity_id:workflow.primary_activity_id,
+  workflow_version:workflow.version,
+ });
+}
 async function save(c,ctx,l,kind,state,body,{student=null,opp=null,dedupe=null}={}){
  const r=(await c.query(`INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,kind,state,body,student_id,opportunity_id,dedupe_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[l.organization_id,l.owner_user_id,l.id,kind,state,{...body,v34:true},student,opp,dedupe])).rows[0];await history(c,ctx,r);return r;
 }
@@ -46,7 +55,7 @@ async function next(c,ctx,l,w,b,{required=false,except=null}={}){
  if(!r||!active(r)||r.id===except)fail(422,'NEXT_REQUIRED','未结案必须安排下一步：事项、方式、日期时间和负责人');
  w.primary_activity_id=r.id;return r;
 }
-async function bump(c,ctx,l,w,name,body={}){const n=(await c.query('UPDATE ms_workspace.lead_workflow SET version=version+1,stage=$2,terminal_state=$3,primary_activity_id=$4,do_not_contact=$5,pause_reason=$6,updated_at=now() WHERE lead_id=$1 RETURNING *',[l.id,w.stage,w.terminal_state,w.primary_activity_id,w.do_not_contact,w.pause_reason])).rows[0];await audit(c,ctx,l,name,{...body,stage:n.stage,terminal_state:n.terminal_state,primary_activity_id:n.primary_activity_id,workflow_version:n.version});return {...flags,workflow:n};}
+async function bump(c,ctx,l,w,name,body={}){const n=(await c.query('UPDATE ms_workspace.lead_workflow SET version=version+1,stage=$2,terminal_state=$3,primary_activity_id=$4,do_not_contact=$5,pause_reason=$6,updated_at=now() WHERE lead_id=$1 RETURNING *',[l.id,w.stage,w.terminal_state,w.primary_activity_id,w.do_not_contact,w.pause_reason])).rows[0];await auditWorkflow(c,ctx,l,name,n,body);return {...flags,workflow:n};}
 async function closeActivities(c,ctx,l,why){for(const r of (await c.query("SELECT * FROM ms_workspace.records WHERE lead_id=$1 AND kind='corrections' AND state IN('pending','approved') AND body->>'type'='lead_transfer' FOR UPDATE",[l.id])).rows)await update(c,ctx,r,'cancelled',{...r.body,close_reason:why});for(const r of (await c.query("SELECT * FROM ms_workspace.records WHERE lead_id=$1 AND kind IN('tasks','appointments') AND state IN('open','in_progress','pending','confirmed','rescheduled') ORDER BY id FOR UPDATE",[l.id])).rows)await update(c,ctx,r,'cancelled',{...r.body,close_reason:why});}
 const advanceTrialStage=(cur,target)=>['enrollment_intent','enrolling'].includes(cur)?cur:cur==='trial_completed'&&target==='trial_booked'?cur:target;
 async function validateStage(c,l,stage){
@@ -63,7 +72,7 @@ async function enrollmentState(c,ctx,l,r){const o=(await c.query('SELECT * FROM 
 async function financialQueue(c,ctx){if(!isFinance(ctx)&&!ctx.manager)fail(403,'FORBIDDEN','仅授权核实员或主管可查看核实队列');const r=await c.query(`SELECT r.*,w.version AS workflow_version,s.display_name AS student_name FROM ms_workspace.records r JOIN ms.leads l ON l.id=r.lead_id JOIN ms_workspace.lead_workflow w ON w.lead_id=l.id LEFT JOIN ms.students s ON s.id=r.student_id WHERE l.organization_id=$1 AND r.kind IN('payments','refunds') AND r.state IN('pending','approved') ORDER BY r.created_at`,[ctx.user.organization_id]);return {...flags,items:r.rows,can_verify:isFinance(ctx)};}
 export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  const [,id,action]=parts,org=ctx.user.organization_id,actor=ctx.user.id;
- if(ctx.roleWorkspaces&&id!=='options'){const r=await departmentRoute(c,ctx,{method,parts,body},{activity,audit,initialCommunication});if(r.handled)return {...flags,...r.value};}
+ if(ctx.roleWorkspaces&&id!=='options'){const r=await departmentRoute(c,ctx,{method,parts,body},{activity,audit,auditWorkflow,initialCommunication});if(r.handled)return {...flags,...r.value};}
  if(method==='GET'&&id==='options')return {...flags,...(ctx.roleWorkspaces?{access:workspaceAccess(ctx)}:{}),methods,stages,actions,classrooms:[],failure_reasons:reasons,can_verify:isFinance(ctx),manager:ctx.manager,catalog:ctx.roleWorkspaces&&!workspaceAccess(ctx).sales?[]:(await c.query("SELECT id,version,body FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND state='active' ORDER BY body->>'course_label'",[org])).rows};
  if(method==='POST'&&id==='catalog'){fields(body,['course_label','standard_unit_cents','reason','expected_version']);if(!ctx.manager)fail(403,'FORBIDDEN','本地标准价目由主管维护');await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[org+':catalog']);const name=text(body.course_label,120),unit=money(body.standard_unit_cents),old=(await c.query("SELECT * FROM ms_workspace.records WHERE organization_id=$1 AND kind='course-catalog' AND lower(body->>'course_label')=lower($2) FOR UPDATE",[org,name])).rows[0];if(old&&old.version!==body.expected_version)fail(409,'VERSION_CONFLICT','本地价格已更新');const b={course_label:name,standard_unit_cents:unit,price_source:'LOCAL_APPROVED_PRICE',approved_by:actor,reason:text(body.reason),v34:true};const r=old?await update(c,ctx,old,'active',b):await save(c,ctx,{id:null,organization_id:org,owner_user_id:actor},'course-catalog','active',b);return {...flags,item:r};}
  if(method==='GET'&&id==='finance')return financialQueue(c,ctx);
@@ -85,7 +94,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
   const initialStage=initial_communication?await initialCommunication(c,ctx,l,initial_communication,r):'needs_discovery';
   const w=(await c.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,contact_info,stage) VALUES($1,$2,$3,$4,$5) RETURNING *',[l.id,org,r.id,contact_info?text(contact_info,200):null,r.kind==='appointments'&&r.body.type==='trial'&&r.state==='confirmed'?advanceTrialStage(initialStage,'trial_booked'):initialStage])).rows[0];
   if(ctx.roleWorkspaces)await c.query("INSERT INTO ms_workspace.lead_directory(lead_id,organization_id,phone,department) VALUES($1,$2,$3,'sales')",[l.id,org,normalizedPhone]);
-  await audit(c,ctx,l,'INTAKE',{primary_activity_id:r.id});return {...flags,lead_id:l.id,workflow:w};
+  await auditWorkflow(c,ctx,l,'INTAKE',w);return {...flags,lead_id:l.id,workflow:w};
  }
  if(!uuid(id))fail(404,'NOT_FOUND','没有找到工作台入口');
  // Lead lock serializes all transitions, payments and task replacement.
@@ -104,7 +113,7 @@ export async function salesWorkflow(c,ctx,{method,parts,body,query}){
  }
  if(!w){if(['closed','invalid'].includes(l.lead_state))fail(409,'LEGACY_TERMINAL_REVIEW','旧终态须由主管先核实，不自动重新开启');if(action!=='arrange')fail(409,'ARRANGEMENT_REQUIRED','旧客户缺少后续安排，请先补充下一步');
   if(!l.owner_user_id||!(await c.query("SELECT 1 FROM ms.staff_users WHERE id=$1 AND status='active'",[l.owner_user_id])).rowCount){if(!ctx.manager||!body.owner_user_id)fail(422,'ASSIGNEE_REQUIRED','待分配客户需要主管指定有效负责人');await sameOrgStaff(c,ctx,body.owner_user_id);if(ctx.roleWorkspaces)await salesAssignee(c,ctx,body.owner_user_id);const previous=l.owner_user_id;l.owner_user_id=body.owner_user_id;await c.query('UPDATE ms.leads SET owner_user_id=$2 WHERE id=$1',[id,l.owner_user_id]);await audit(c,ctx,l,'LEGACY_ASSIGNMENT_REPAIRED',{previous_owner:previous,new_owner:l.owner_user_id});}
-  const r=await activity(c,ctx,l,body.next);w=(await c.query("INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,stage,terminal_state) VALUES($1,$2,$3,'unclassified','open') RETURNING *",[id,org,r.id])).rows[0];await audit(c,ctx,l,'ARRANGEMENT_REPAIRED',{activity_id:r.id});return {...flags,workflow:w};}
+  const r=await activity(c,ctx,l,body.next);w=(await c.query("INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id,stage,terminal_state) VALUES($1,$2,$3,'unclassified','open') RETURNING *",[id,org,r.id])).rows[0];await auditWorkflow(c,ctx,l,'ARRANGEMENT_REPAIRED',w,{activity_id:r.id});return {...flags,workflow:w};}
  if(body?.expected_version!==w.version)fail(409,'VERSION_CONFLICT','客户或任务已更新，请刷新后再保存');
  if(w.terminal_state!=='open'&&!['reopen','request-correction','approve-correction','reject-correction','submit-refund','verify-refund'].includes(action))fail(409,'LEAD_CLOSED','已结案记录只能走有审计的纠正或重新开启流程');
  if(action==='contact'){fields(body,['expected_version','contact_info']);const value=ctx.roleWorkspaces?phoneNumber(body.contact_info):text(body.contact_info,200);if(ctx.roleWorkspaces){await lockPhone(c,org,value);if((await c.query('SELECT 1 FROM ms_workspace.lead_directory WHERE organization_id=$1 AND phone=$2 AND lead_id<>$3',[org,value,id])).rowCount)fail(409,'PHONE_MATCH_FOUND','该电话已有其他线索，请主管核实');await c.query("INSERT INTO ms_workspace.lead_directory(lead_id,organization_id,phone,department) VALUES($1,$2,$3,'sales') ON CONFLICT(lead_id) DO UPDATE SET phone=EXCLUDED.phone",[id,org,value]);}await c.query('UPDATE ms_workspace.lead_workflow SET contact_info=$2 WHERE lead_id=$1',[id,value]);await audit(c,ctx,l,'CONTACT_UPDATED',{previous:w.contact_info,current:value});return bump(c,ctx,l,w,'CONTACT_SAVED');}

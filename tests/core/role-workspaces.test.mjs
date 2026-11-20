@@ -165,7 +165,11 @@ test('Role workspaces: phone handoff, department privacy and persistent dated ta
   assert.deepEqual(await lookup(B),[{status:'assigned',owner_name:'销售A'}]);
   const detail=good(await w('/'+id));
   assert.ok(detail.records.some(r=>r.id===detail.workflow.primary_activity_id&&r.kind==='tasks'));
-  assert.ok(detail.events.some(entry=>entry.event_name==='V34_MARKET_HANDOFF_ACCEPTED'));
+  const handoff=detail.events.find(entry=>entry.event_name==='V34_MARKET_HANDOFF_ACCEPTED');
+  assert.deepEqual(handoff.after_business_json,{
+   market_owner_id:K2,sales_owner_id:A,stage:'needs_discovery',terminal_state:'open',
+   primary_activity_id:detail.workflow.primary_activity_id,workflow_version:detail.workflow.version,
+  });
   assert.ok(!detail.events.some(entry=>entry.event_name==='V34_MARKET_CAPTURED'));
   const audit=(await pool.query(
    "SELECT event_name FROM ms.audit_events WHERE organization_id=$1 AND target_type='lead' AND target_id=$2 AND event_name IN ('V34_MARKET_CAPTURED','V34_MARKET_HANDOFF_ACCEPTED') ORDER BY event_name",

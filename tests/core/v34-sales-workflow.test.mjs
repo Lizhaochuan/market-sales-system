@@ -20,7 +20,11 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
   good(await req('/catalog',{course_label:'数学',standard_unit_cents:10000,reason:'虚构标准价目'},M));good(await req('/catalog',{course_label:'英语',standard_unit_cents:1000,reason:'虚构标准价目'},M));
   let id=await create();
   await t.test('TC01/02/03: failed call requires exact successor; draft is not completion; source preserved',async()=>{
-   const before=await detail(id);const no=await act(id,'followup',{method:'phone',result:'failed',failure_reason:'无人接听'});assert.equal(no.status,422);
+   const before=await detail(id);
+   assert.deepEqual(before.events.find(e=>e.event_name==='V34_INTAKE').after_business_json,{
+    stage:'needs_discovery',terminal_state:'open',primary_activity_id:before.workflow.primary_activity_id,workflow_version:before.workflow.version,
+   });
+   const no=await act(id,'followup',{method:'phone',result:'failed',failure_reason:'无人接听'});assert.equal(no.status,422);
    assert.equal((await detail(id)).records.find(r=>r.id===before.workflow.primary_activity_id).state,'open');
    good(await act(id,'draft',{draft:{method:'phone',result:'failed'}}));assert.equal((await detail(id,M)).records.filter(r=>r.kind==='workflow-drafts').length,0);
    good(await act(id,'followup',{method:'phone',result:'failed',failure_reason:'无人接听',next:next({method:'wechat_text',action:'wechat',title:'微信确认到校时间'})}));
@@ -204,7 +208,12 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
   await t.test('TC26/28: legacy facts stay raw and missing arrangements become an exception list',async()=>{
    const old=(await pool.query("INSERT INTO ms.leads(organization_id,owner_user_id,lead_state) VALUES($1,$2,'working') RETURNING id",[org,A])).rows[0].id;await pool.query("INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,after_business_json,reason_zh) VALUES($1,$2,'lead',$3,'LEAD_DESK_FOLLOWUP','{\"result\":\"准备报名\"}','旧版记录')",[org,A,old]);const list=good(await req(''));assert.equal(list.items.find(l=>l.id===old).needs_arrangement,true);assert.equal((await detail(old)).workflow,null);assert.equal((await detail(old)).events[0].after_business_json.result,'准备报名');good(await actOld(old));
    async function actOld(id){return req('/'+id+'/arrange',{next:next()});}
-   assert.equal((await detail(old)).workflow.stage,'unclassified');
+   const repaired=await detail(old);
+   assert.equal(repaired.workflow.stage,'unclassified');
+   assert.deepEqual(repaired.events.find(e=>e.event_name==='V34_ARRANGEMENT_REPAIRED').after_business_json,{
+    activity_id:repaired.workflow.primary_activity_id,stage:'unclassified',terminal_state:'open',
+    primary_activity_id:repaired.workflow.primary_activity_id,workflow_version:repaired.workflow.version,
+   });
   });
   await t.test('local standard price cannot be forged; special discount requires independent version-bound approval',async()=>{
    const lead=await create();assert.equal((await req('/catalog',{course_label:'绕过价目',standard_unit_cents:1,reason:'销售自定'})).status,403);
