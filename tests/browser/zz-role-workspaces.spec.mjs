@@ -952,6 +952,19 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
   "INSERT INTO ms_workspace.history(record_id,version,actor_user_id,state,body,recorded_at) VALUES($1,1,$2,'confirmed',$3,$4),($1,2,$2,'completed',$3,$5)",
   [oldActivity.id,oldActivity.owner_user_id,{due_at:'2024-04-01T08:45:00+08:00'},'2024-04-01T08:15:00+08:00','2024-04-01T09:00:00+08:00'],
  );
+ const verifiedAt='2024-04-01T09:10:00+08:00';
+ const receipt=(await pool.query(
+  "INSERT INTO ms.payment_receipt_projections(authority_system,external_tenant,external_payment_id,amount_cents,verification_state,verified_at) SELECT 'standalone_sales',organization_id::text,id::text,10000,'confirmed',$2 FROM ms.leads WHERE id=$1 RETURNING id",
+  [lostLead.lead_id,verifiedAt],
+ )).rows[0].id;
+ const payment=(await pool.query(
+  "INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,kind,state,body,version,created_at) SELECT organization_id,owner_user_id,id,'payments','verified',$2,1,$3 FROM ms.leads WHERE id=$1 RETURNING id,owner_user_id",
+  [lostLead.lead_id,{receipt_id:receipt,amount_cents:10000},'2024-04-01T08:15:00+08:00'],
+ )).rows[0];
+ await pool.query(
+  "INSERT INTO ms_workspace.history(record_id,version,actor_user_id,state,body,recorded_at) VALUES($1,1,$2,'verified',$3,$4)",
+  [payment.id,payment.owner_user_id,{receipt_id:receipt,amount_cents:10000},verifiedAt],
+ );
  const count=panel.locator('.stat-card').filter({has:page.getByText('Lead 数',{exact:true})}).locator('strong');
 
  const start=filters.getByLabel('开始日期');
@@ -1041,11 +1054,21 @@ test('Boss lead, student and closure drilldown follow Shanghai creation date and
  const snapshotDetail=panel.locator('#v34-metrics-snapshot_lost');
  await expect(snapshotDetail).toContainText('窗口第二位顾问测试家长');
  await expect(snapshotDetail).toContainText('2024-04-01 09:00 记录');
+ const cash=panel.locator('#v34-snapshot-cash');
+ await expect(cash).toContainText('已核实收款 ¥100.00 · 1 笔');
+ await expect(cash).toContainText('已核实退款 ¥0.00 · 0 笔');
+ await expect(cash).toContainText('净额 ¥100.00');
+ await cash.getByRole('button',{name:'查看历史已核实收款明细'}).click();
+ const cashDetail=panel.locator('#v34-metrics-snapshot_verified_receipts');
+ await expect(cashDetail).toContainText('共 1 笔款项');
+ await expect(cashDetail).toContainText('窗口第二位顾问测试家长');
+ await expect(cashDetail).toContainText('¥100.00 · 2024-04-01 09:10 核实');
  const overdueActivity=panel.locator('.stat-card').filter({has:page.getByText('当时逾期活动（项）',{exact:true})});
  await expect(overdueActivity.locator('strong')).toHaveText('0');
  await asOf.fill('2024-04-01T08:55');
  await apply.click();
  await expect(overdueActivity.locator('strong')).toHaveText('1');
+ await expect(cash).toContainText('已核实收款 ¥0.00 · 0 笔');
  await overdueActivity.getByRole('button',{name:'查看当时逾期活动明细'}).click();
  const overdueDetail=panel.locator('#v34-metrics-snapshot_overdue_activities');
  await expect(overdueDetail).toContainText('共 1 项活动');

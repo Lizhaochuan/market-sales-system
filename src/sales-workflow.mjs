@@ -551,6 +551,77 @@ function historicalActivityStates(ctx,scope){
   WHERE r.kind IN ('tasks','appointments') AND r.created_at <= $${at}::timestamptz
  )`};
 }
+const snapshotCashMetrics=new Map([
+ ['snapshot_verified_receipts','receipt'],['snapshot_verified_refunds','refund'],
+]);
+function historicalCashFacts(ctx,scope){
+ const {where,params}=salesLeadScope(ctx,scope);
+ const at=params.push(scope.as_of_at);
+ const sql=`
+  WITH visible_leads AS (
+   SELECT l.id,l.contact_id,l.owner_user_id FROM ms.leads l
+   WHERE ${where} AND l.created_at <= $${at}::timestamptz
+  ), verified_records AS (
+   SELECT r.id,r.lead_id,r.kind,h.body
+   FROM visible_leads l JOIN ms_workspace.records r ON r.lead_id=l.id AND r.organization_id=$1
+   JOIN LATERAL (
+    SELECT body FROM ms_workspace.history h
+    WHERE h.record_id=r.id AND h.state='verified' AND h.recorded_at <= $${at}::timestamptz
+    ORDER BY h.version LIMIT 1
+   ) h ON true
+   WHERE r.kind IN ('payments','refunds') AND r.created_at <= $${at}::timestamptz
+  ), receipts AS (
+   SELECT r.id,r.lead_id,p.id AS projection_id,p.amount_cents,p.verified_at
+   FROM verified_records r
+   JOIN ms.payment_receipt_projections p
+    ON p.id::text=r.body->>'receipt_id' AND p.authority_system='standalone_sales'
+    AND p.external_tenant=$1::uuid::text AND p.verified_at <= $${at}::timestamptz
+    AND to_jsonb(p.amount_cents)=r.body->'amount_cents'
+   WHERE r.kind='payments'
+  ), cash_facts AS (
+   SELECT id,lead_id,amount_cents,verified_at,'receipt' AS kind FROM receipts
+   UNION ALL
+   SELECT r.id,r.lead_id,f.amount_cents,f.verified_at,'refund' AS kind
+   FROM verified_records r
+   JOIN receipts p ON p.id::text=r.body->>'payment_id' AND p.lead_id=r.lead_id
+   JOIN ms.refund_projections f
+    ON f.id::text=r.body->>'refund_id' AND f.original_receipt_id=p.projection_id
+    AND f.authority_system='standalone_sales' AND f.external_tenant=$1::uuid::text
+    AND f.verified_at BETWEEN p.verified_at AND $${at}::timestamptz
+    AND to_jsonb(f.amount_cents)=r.body->'amount_cents'
+   WHERE r.kind='refunds'
+  )`;
+ return {sql,params};
+}
+async function snapshotCash(c,ctx,scope){
+ const {sql,params}=historicalCashFacts(ctx,scope);
+ return (await c.query(`${sql}
+  SELECT count(*) FILTER (WHERE kind='receipt')::int AS receipts,
+         count(*) FILTER (WHERE kind='refund')::int AS refunds,
+         COALESCE(sum(amount_cents) FILTER (WHERE kind='receipt'),0)::text AS gross_cents,
+         COALESCE(sum(amount_cents) FILTER (WHERE kind='refund'),0)::text AS refunded_cents,
+         COALESCE(sum(CASE WHEN kind='receipt' THEN amount_cents ELSE -amount_cents END),0)::text AS net_cents
+  FROM cash_facts`,params)).rows[0];
+}
+async function snapshotCashDrilldown(c,ctx,scope,metric,page,pageSize){
+ const {sql,params}=historicalCashFacts(ctx,scope);
+ const kind=params.push(snapshotCashMetrics.get(metric));
+ const limit=params.push(pageSize),offset=params.push((page-1)*pageSize);
+ const result=(await c.query(`${sql}, matching AS (
+  SELECT * FROM cash_facts WHERE kind=$${kind}
+ ), page_rows AS (
+  SELECT m.id,m.lead_id,m.amount_cents::text AS amount_cents,m.verified_at,
+         co.display_name AS contact_name,u.display_name AS owner_name
+  FROM (SELECT * FROM matching ORDER BY verified_at DESC,id LIMIT $${limit} OFFSET $${offset}) m
+  JOIN visible_leads l ON l.id=m.lead_id
+  LEFT JOIN ms.contacts co ON co.id=l.contact_id AND co.organization_id=$1
+  LEFT JOIN ms.staff_users u ON u.id=l.owner_user_id AND u.organization_id=$1
+ )
+ SELECT (SELECT count(*)::int FROM matching) AS total,
+        COALESCE(jsonb_agg(to_jsonb(page_rows) ORDER BY verified_at DESC,id),'[]'::jsonb) AS items
+ FROM page_rows`,params)).rows[0];
+ return {...flags,metric,filters:scope,page,page_size:pageSize,...result};
+}
 async function snapshotMetrics(c,ctx,scope){
  const {sql,params}=historicalActivityStates(ctx,scope);
  const activityCounts=[...snapshotActivityMetrics].map(([key,predicate])=>
@@ -564,7 +635,8 @@ async function snapshotMetrics(c,ctx,scope){
          count(*) FILTER (WHERE terminal_state='unknown')::int AS snapshot_unknown,
          ${activityCounts}
   FROM snapshot`,params)).rows[0];
- return {...flags,timezone:'Asia/Shanghai',filters:scope,snapshot_counts};
+ const snapshot_cash=await snapshotCash(c,ctx,scope);
+ return {...flags,timezone:'Asia/Shanghai',filters:scope,snapshot_counts,snapshot_cash};
 }
 async function snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize){
  const {sql,params}=historicalActivityStates(ctx,scope);
@@ -585,6 +657,7 @@ async function snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize){
  return {...flags,metric,filters:scope,page,page_size:pageSize,...result};
 }
 async function snapshotDrilldown(c,ctx,scope,metric,page,pageSize){
+ if(snapshotCashMetrics.has(metric))return snapshotCashDrilldown(c,ctx,scope,metric,page,pageSize);
  if(snapshotActivityMetrics.has(metric))return snapshotActivityDrilldown(c,ctx,scope,metric,page,pageSize);
  if(!snapshotMetricStates.has(metric))fail(422,'VALIDATION_ERROR','该历史时点指标暂不支持查看明细');
  const {sql,params}=historicalLeadStates(ctx,scope);

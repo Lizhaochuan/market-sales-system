@@ -570,6 +570,69 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    assert.equal(afterFinish.snapshot_counts.snapshot_pending_activities,1);
    assert.equal(afterFinish.snapshot_counts.snapshot_unknown_activities,2);
   });
+  await t.test('historical verified cash uses the cutoff and returns matching, scoped detail',async()=>{
+   const initial='2023-07-01T08:00:00+08:00', received='2023-07-01T09:00:00+08:00';
+   const verified='2023-07-01T10:00:00+08:00', refunded='2023-07-01T11:00:00+08:00';
+   const lead=await create({contact_name:'历史收退款验收家长'});
+   await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[lead,initial]);
+   const receipt=(await pool.query(
+    "INSERT INTO ms.payment_receipt_projections(authority_system,external_tenant,external_payment_id,amount_cents,verification_state,verified_at,actual_received_at) VALUES('standalone_sales',$1,$2,10000,'confirmed',$3,$4) RETURNING id",
+    [org,randomUUID(),verified,received],
+   )).rows[0].id;
+   const refund=(await pool.query(
+    "INSERT INTO ms.refund_projections(authority_system,external_tenant,external_refund_id,original_receipt_id,amount_cents,verification_state,verified_at) VALUES('standalone_sales',$1,$2,$3,3000,'confirmed',$4) RETURNING id",
+    [org,randomUUID(),receipt,refunded],
+   )).rows[0].id;
+   const record=async(kind,version)=>(await pool.query(
+    "INSERT INTO ms_workspace.records(organization_id,owner_user_id,lead_id,kind,state,body,version,created_at) VALUES($1,$2,$3,$4,'verified','{}',$5,$6) RETURNING id",
+    [org,A,lead,kind,version,initial],
+   )).rows[0].id;
+   const history=(id,version,state,at,body)=>pool.query(
+    'INSERT INTO ms_workspace.history(record_id,version,actor_user_id,state,body,recorded_at) VALUES($1,$2,$3,$4,$5,$6)',
+    [id,version,A,state,body,at],
+   );
+   const payment=await record('payments',3), refundRecord=await record('refunds',1);
+   const paymentBody={amount_cents:10000,receipt_id:receipt,verification_ref:'不应返回的核实凭证'};
+   await history(payment,1,'pending',received,{amount_cents:10000});
+   await history(payment,2,'verified',verified,paymentBody);
+   await history(payment,3,'verified',refunded,{...paymentBody,allocated:true});
+   await history(refundRecord,1,'verified',refunded,{amount_cents:3000,refund_id:refund,payment_id:payment});
+   const inconsistent=await record('payments',1);
+   await history(inconsistent,1,'verified',verified,{amount_cents:9999,receipt_id:receipt});
+
+   const metrics=async(at,user=A)=>good(await req('/metrics?'+new URLSearchParams({as_of_at:at}),undefined,user));
+   const drill=(metric,params={},user=A)=>req('/metrics/drilldown?'+new URLSearchParams({
+    as_of_at:refunded,metric,...params,
+   }),undefined,user);
+   const empty={receipts:0,refunds:0,gross_cents:'0',refunded_cents:'0',net_cents:'0'};
+   assert.deepEqual((await metrics(received)).snapshot_cash,empty);
+   assert.deepEqual((await metrics(verified)).snapshot_cash,{
+    receipts:1,refunds:0,gross_cents:'10000',refunded_cents:'0',net_cents:'10000',
+   });
+   const final=(await metrics(refunded)).snapshot_cash;
+   assert.deepEqual(final,{
+    receipts:1,refunds:1,gross_cents:'10000',refunded_cents:'3000',net_cents:'7000',
+   });
+   const payments=good(await drill('snapshot_verified_receipts',{page_size:1}));
+   assert.equal(payments.total,final.receipts);
+   assert.equal(payments.items.length,1);
+   assert.deepEqual({...payments.items[0],verified_at:new Date(payments.items[0].verified_at).toISOString()},{
+    id:payment,lead_id:lead,amount_cents:'10000',verified_at:'2023-07-01T02:00:00.000Z',
+    contact_name:'历史收退款验收家长',owner_name:'顾问A',
+   });
+   const nextPage=good(await drill('snapshot_verified_receipts',{page:2,page_size:1}));
+   assert.equal(nextPage.total,final.receipts);
+   assert.deepEqual(nextPage.items,[]);
+   const refunds=good(await drill('snapshot_verified_refunds'));
+   assert.equal(refunds.total,final.refunds);
+   assert.equal(refunds.items[0].id,refundRecord);
+   assert.equal(refunds.items[0].amount_cents,final.refunded_cents);
+   assert.deepEqual((await metrics(refunded,B)).snapshot_cash,empty);
+   assert.equal(good(await drill('snapshot_verified_refunds',{},B)).total,0);
+   assert.equal((await drill('snapshot_verified_receipts',{},F)).status,403);
+   assert.equal(good(await drill('snapshot_verified_receipts',{owner_id:A,source:'主动咨询'},M)).total,1);
+   assert.equal(good(await drill('snapshot_verified_receipts',{owner_id:A,source:'到店'},M)).total,0);
+  });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);
    await assert.rejects(pool.query('UPDATE ms_workspace.history SET state=\'bad\' WHERE record_id=$1',[trial.id]),/append only/);
