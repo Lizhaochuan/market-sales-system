@@ -276,6 +276,39 @@ test('V3.4 standalone sales acceptance TC01—TC28, real PostgreSQL and HTTP',as
    good(await act(lead,'followup',{method:'campus',result:'communicated',meeting_actual:{confirmed_completed:true,at:new Date(Date.now()-30000).toISOString()},notes:'到校面谈无需填写地点',next:next()}));
    d=await detail(lead);assert.equal(d.records.find(r=>r.kind==='appointments'&&r.body.was_scheduled===false).body.place,null);
   });
+  await t.test('metrics filters a lead creation cohort by an inclusive start, exclusive end and authorized owner',async()=>{
+   const start='2024-04-01T00:00:00+08:00', end='2024-04-02T00:00:00+08:00';
+   const seed=async(user,createdAt)=>{
+    const response=good(await req('',{
+     contact_name:'统计窗口家长',student_name:'统计窗口学生',origin_group:'sales',source:'主动咨询',next:next(),
+    },user));
+    await pool.query('UPDATE ms.leads SET created_at=$2 WHERE id=$1',[response.lead_id,createdAt]);
+    return response.lead_id;
+   };
+   const before=await seed(A,'2024-03-31T23:59:59+08:00');
+   const first=await seed(A,start);
+   const other=await seed(B,'2024-04-01T12:00:00+08:00');
+   const after=await seed(A,end);
+   const scoped=(query,user)=>req('/metrics?'+new URLSearchParams(query),undefined,user);
+   const window={view_mode:'cohort',start_at:start,end_at:end};
+   const team=good(await scoped(window,M));
+   assert.equal(team.counts.leads,2);
+   assert.deepEqual(team.filters,{view_mode:'cohort',start_at:'2024-03-31T16:00:00.000Z',end_at:'2024-04-01T16:00:00.000Z',owner_id:null});
+   assert.deepEqual(team.reminders.map(row=>row.lead_id).sort(),[first,other].sort());
+   assert.ok(team.reminders.every(row=>![before,after].includes(row.lead_id)));
+   assert.deepEqual(good(await scoped({...window,owner_id:B},M)).reminders.map(row=>row.lead_id),[other]);
+   assert.deepEqual(good(await scoped(window,A)).reminders.map(row=>row.lead_id),[first]);
+   assert.equal(good(await scoped({...window,owner_id:B},A)).counts.leads,0);
+   assert.equal((await scoped(window,F)).status,403);
+   for(const invalid of [
+    {start_at:start},
+    {...window,end_at:start},
+    {...window,start_at:'2024-02-30T00:00:00+08:00'},
+    {...window,view_mode:'event'},
+    {as_of_at:start},
+    {owner_id:'not-a-uuid'},
+   ])assert.equal((await scoped(invalid,M)).status,422,JSON.stringify(invalid));
+  });
   await t.test('all managed Open Leads satisfy the database chain invariant; histories are append-only',async()=>{
    for(const r of (await pool.query('SELECT lead_id FROM ms_workspace.lead_workflow WHERE organization_id=$1',[org])).rows)await pool.query('SELECT ms_workspace.assert_active_chain($1)',[r.lead_id]);
    await assert.rejects(pool.query('UPDATE ms_workspace.history SET state=\'bad\' WHERE record_id=$1',[trial.id]),/append only/);
