@@ -6,10 +6,10 @@
  panel.addEventListener('input',e=>{const f=e.target?.closest?.('form');if(f&&f.id!=='v35-lookup'&&!f.closest('#v35-lookup')){f.dataset.userDirty='1';const db=$('v35-discard-draft');if(db&&selected)db.hidden=false;}});
  panel.addEventListener('change',e=>{const f=e.target?.closest?.('form');if(f&&f.id!=='v35-lookup'&&!f.closest('#v35-lookup')){f.dataset.userDirty='1';const db=$('v35-discard-draft');if(db&&selected)db.hidden=false;}});
  let detailHost=panel,enabled=false,view='leads',group='sales',rows=[],staff=[],options=null,selected=null,detail=null,report=null,queue=[],epoch=0,seq=0,searchSeq=0,busy=false,session=null,incoming=[],legacy=new URLSearchParams(location.search).get('workspace')==='legacy';
- let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],marketStats=null,lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine',taskFilter='all',taskView='day',weekAnchorDay=taskDay,myLeadSearch='',myLeadSearchItems=null,myLeadState='all',myLeadSort='default',myLeadView='table',savedViews=[],savedViewSeq=0,listScrollTop=0,winScrollTop=0;
+ let editingQuoteId=null,activityTarget=null,pendingLostFeedback='',card=null,claim=null,marketRows=[],marketStats=null,marketMetricsQuery='',lookupPhone='',lookupResult=null,taskDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()),taskScope='mine',taskFilter='all',taskView='day',weekAnchorDay=taskDay,myLeadSearch='',myLeadSearchItems=null,myLeadState='all',myLeadSort='default',myLeadView='table',savedViews=[],savedViewSeq=0,listScrollTop=0,winScrollTop=0;
  let metricsQuery="";
  const leadDrafts=new Map();
- function wipeState(){epoch++;seq++;searchSeq++;busy=false;rows=[];staff=[];incoming=[];marketRows=[];marketStats=null;options=null;selected=null;detail=null;card=null;activityTarget=null;editingQuoteId=null;pendingLostFeedback='';claim=null;lookupPhone='';lookupResult=null;queue=[];report=null;metricsQuery="";taskView='day';weekAnchorDay=dayKey(Date.now());myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';savedViews=[];listScrollTop=0;winScrollTop=0;detailHost=panel;leadDrafts.clear();box.hidden=true;}
+ function wipeState(){epoch++;seq++;searchSeq++;busy=false;rows=[];staff=[];incoming=[];marketRows=[];marketStats=null;marketMetricsQuery='';options=null;selected=null;detail=null;card=null;activityTarget=null;editingQuoteId=null;pendingLostFeedback='';claim=null;lookupPhone='';lookupResult=null;queue=[];report=null;metricsQuery="";taskView='day';weekAnchorDay=dayKey(Date.now());myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';savedViews=[];listScrollTop=0;winScrollTop=0;detailHost=panel;leadDrafts.clear();box.hidden=true;}
  function handleAuthFailure(e){if([401,403,404].includes(e?.status)){wipeState();panel.replaceChildren(node('p','',e.status===403?'角色已撤销，工作台已关闭':e.status===404?'客户不存在或无权访问':'登录已过期，工作台已关闭'));return true;}return false;}
  const dayKey=d=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(d));
  const shTimeText=d=>d?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(d)):'';
@@ -38,11 +38,11 @@
  btn(box,'历史与管理',()=>{saveCurrentLeadDraft();legacy=!legacy;layout();if(legacy)setView('overview');else display();},'text-button');
  async function refresh(force=false){if(!enabled||!state.token||state.strict)return;const token=state.token,ticket=++seq,keepForm=!force&&session===state.token&&!!panel.querySelector('form[data-user-dirty="1"]');
   try{const o=await api(root+'/options');const access=o.access;const l=access?.enabled&&!access.sales?{items:[],staff:[],incoming:[]}:await api(root);if(access?.market){const m=await api(root+'/market');if(ticket!==seq||token!==state.token)return;marketRows=m.items;}if(ticket!==seq||token!==state.token)return;options=o;rows=l.items;staff=l.staff;incoming=l.incoming;
-   if(session!==token){metricsQuery='';card=null;claim=null;lookupResult=null;lookupPhone='';taskView='day';weekAnchorDay=dayKey(Date.now());myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';savedViews=[];listScrollTop=0;winScrollTop=0;selected=null;detail=null;leadDrafts.clear();if(access?.enabled){view=access.admin?'metrics':access.sales?'tasks':access.market?'leads':access.finance?'finance':'leads';group=access.sales?'sales':'market';}else if(o.can_verify)view='finance';}else{myLeadSearchItems=null;}layout();
+   if(session!==token){metricsQuery='';marketMetricsQuery='';card=null;claim=null;lookupResult=null;lookupPhone='';taskView='day';weekAnchorDay=dayKey(Date.now());myLeadSearch='';myLeadSearchItems=null;myLeadState='all';myLeadSort='default';myLeadView='table';savedViews=[];listScrollTop=0;winScrollTop=0;selected=null;detail=null;leadDrafts.clear();if(access?.enabled){view=access.admin?'metrics':access.sales?'tasks':access.market?'leads':access.finance?'finance':'leads';group=access.sales?'sales':'market';}else if(o.can_verify)view='finance';}else{myLeadSearchItems=null;}layout();
    if(selected){const d=await api(root+'/'+selected);if(ticket!==seq||token!==state.token)return;detail=d;}
    if(view==='metrics'||view==='tasks'){const r=await api(root+'/metrics'+(view==='metrics'?metricsQuery:''));if(ticket!==seq||token!==state.token)return;report=r;}
    if(access?.market_manager&&view==='leads'&&group==='market'){
-    const m=await api(root+'/market-metrics');if(ticket!==seq||token!==state.token)return;marketStats=m;
+    const m=await api(root+'/market-metrics'+marketMetricsQuery);if(ticket!==seq||token!==state.token)return;marketStats=m;
    }
    if(view==='finance'){const q=await api(root+'/finance');if(ticket!==seq||token!==state.token)return;queue=q.items;}
    if(!keepForm&&(force||session!==token&&!legacy||state.view==='sales-workflow'))display();session=token;
@@ -990,11 +990,42 @@
   const section=node('section','panel');
   section.id='v35-market-metrics';
   section.append(node('h3','','市场录入与交接'));
+  const appliedQuery=marketMetricsQuery;
+  const scope=marketStats.filters;
+  const filters=node('form','field-stack');
+  filters.id='v35-market-metrics-filters';
+  const start=input(filters,'市场录入开始日期','start_at','date',scope.start_at?dayKey(new Date(scope.start_at)):'');
+  const end=input(filters,'市场录入结束日期','end_at','date',scope.end_at?shDayShift(dayKey(new Date(scope.end_at)),-1):'');
+  const actions=node('div','filter-group');
+  const apply=node('button','primary','应用市场日期');
+  apply.type='submit';
+  actions.append(apply);
+  btn(actions,'清除市场日期',()=>{marketMetricsQuery='';refresh(true);});
+  const message=node('p','form-hint');
+  message.setAttribute('role','status');
+  filters.append(actions,message);
+  section.append(filters);
+  filters.addEventListener('submit',event=>{
+   event.preventDefault();
+   if(Boolean(start.value)!==Boolean(end.value)||start.value>end.value){
+    message.textContent='请同时选择有效的开始日期和结束日期。';
+    return;
+   }
+   const query=start.value?new URLSearchParams({
+    view_mode:'cohort',start_at:start.value+'T00:00:00+08:00',end_at:shDayShift(end.value,1)+'T00:00:00+08:00',
+   }):null;
+   marketMetricsQuery=query?'?'+query.toString():'';
+   apply.disabled=true;
+   refresh(true);
+  });
+
   const details=node('div');
   let ticket=0;
   async function open(source,page){
    const token=state.token,requested=++ticket;
-   const query=new URLSearchParams({source,page});
+   const query=new URLSearchParams(appliedQuery);
+   query.set('source',source);
+   query.set('page',String(page));
    details.replaceChildren(node('p','','读取市场明细…'));
    try{
     const data=await api(root+'/market-metrics/drilldown?'+query);

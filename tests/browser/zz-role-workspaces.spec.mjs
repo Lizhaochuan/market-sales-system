@@ -22,6 +22,29 @@ test('role UI: market handoff retains one Lead, sales cannot see private notes, 
  await marketMetrics.getByRole('button',{name:/查看市场来源明细/}).first().click();
  await expect(marketMetrics).toContainText(/共 [1-9]\d* 条市场线索/);
  await expect(marketMetrics).not.toContainText(number);
+ const createdOn='2025-02-13';
+ await pool.query("UPDATE ms_workspace.lead_directory SET created_at=$2 WHERE phone=$1 AND department='market'",[number,createdOn+'T23:59:59+08:00']);
+ const start=marketMetrics.getByLabel('市场录入开始日期');
+ const end=marketMetrics.getByLabel('市场录入结束日期');
+ const apply=marketMetrics.getByRole('button',{name:'应用市场日期'});
+ await start.fill(createdOn);
+ await apply.click();
+ await expect(marketMetrics.getByRole('status')).toContainText('同时选择');
+ await end.fill(createdOn);
+ await apply.click();
+ await expect(marketMetrics).toContainText('市场活动 · 录入 1 条 · 已接收 0 条');
+ await marketMetrics.getByRole('button',{name:'查看市场来源明细：市场活动'}).click();
+ await expect(marketMetrics).toContainText('共 1 条市场线索');
+ await expect(marketMetrics).toContainText('2025-02-13 23:59');
+ await start.fill('2025-02-14');
+ await end.fill('2025-02-14');
+ await apply.click();
+ await expect(marketMetrics).toContainText('当前没有市场录入记录');
+ await expect(marketMetrics).not.toContainText('共 1 条市场线索');
+ await marketMetrics.getByRole('button',{name:'清除市场日期'}).click();
+ await expect(start).toHaveValue('');
+ await expect(marketMetrics.getByRole('button',{name:'查看市场来源明细：市场活动'})).toBeVisible();
+
 
  await login(page);await lookup(page,number);await expect(page.locator('#v35-lookup')).toContainText('匹配到市场线索');await expect(page.locator('#sales-workflow')).not.toContainText('市场私有备注');await page.getByRole('button',{name:'接收并安排首次跟进'}).click();const claim=page.locator('#v35-claim');await nextTomorrow(page,claim);await claim.getByRole('button',{name:'接收并保存首次安排'}).click();await expect(page.locator('#v35-actions')).toBeVisible();await expect(page.locator('#sales-workflow')).toContainText('市场活动');
  await login(page,'sales-b');await lookup(page,number);await expect(page.locator('#v35-lookup')).toContainText('已有销售负责');await expect(page.locator('#v35-lookup')).not.toContainText('交接验收学生');await login(page,'general-admin');await expect(page.getByRole('button',{name:'市场 · 市场 Leads',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'销售 · 新建 / 查询 Leads',exact:true})).toBeVisible();
