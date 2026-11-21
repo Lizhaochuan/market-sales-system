@@ -98,6 +98,17 @@ test('V3.2-15 strict auth directory: nonowner function-only, no legacy DB query,
       "INSERT INTO ms.staff_identity_bindings(staff_user_id,issuer,subject,bound_by,approval_request_id) "+
       "VALUES($1,$2,$3,$4,$5)",
       [studentOwner,issuer,subj,reviewer,pending.rows[0].id]);
+    await t.test('approved staff cannot enter the Sales demo workflow or demo sign-in through strict auth',async()=>{
+      const response=await request('/api/v1/isolated-workspace/workflow');
+      assert.equal(response.status,404);
+      assert.equal(response.code,'NOT_FOUND');
+      const demo=await fetch('http://127.0.0.1:'+app.address().port+'/api/v1/dev/login',{
+        method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({account_code:'sales-a',passphrase:'0'})
+      });
+      assert.equal(demo.status,404);
+      assert.equal(ownerTouches,0);
+    });
     await t.test('only approved actual employee roles returned; JWT super_admin/foreign org claims ignored',async()=>{
       const ctx=await resolveStrictDirectoryContext(directory,{issuer,subject:subj});
       assert.equal(ctx.user.id,studentOwner);
