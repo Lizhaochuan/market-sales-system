@@ -40,4 +40,4 @@ PORT=33105 node src/server.mjs
 
 验收覆盖未绑定和跨机构账号拒绝、自审拒绝、绑定后按角色进入工作台、重复或过期登录凭证拒绝、角色降级及解绑后旧会话拒绝、手机清理客户页。先用虚构身份验证这些用例，固定 HTTPS 域名就绪后，再关闭微信调试模式复跑。正式认证保持待接入，保留 HOLD。
 
-严格认证服务可显式配置 `MS_WECHAT_APP_ID`、`MS_WECHAT_APP_SECRET`、`MS_WECHAT_SIGNING_KEY_PEM` 与 `MS_WECHAT_SIGNING_KEY_ID` 以启用 `POST /api/v1/mobile/wechat/session`。签名公钥须匹配已配置的员工 JWT 信任根。服务器使用已获批准的身份目录绑定，凭证有效期为 5 分钟。密钥由服务器进程读取，不能打包进小程序。未配置时接口关闭。当前小程序登录页仍使用隔离演示流程。
+严格认证服务可显式配置 `MS_WECHAT_APP_ID`、`MS_WECHAT_APP_SECRET`、`MS_WECHAT_SIGNING_KEY_PEM` 与 `MS_WECHAT_SIGNING_KEY_ID` 以启用 `POST /api/v1/mobile/wechat/session`。签名公钥须匹配已配置的员工 JWT 信任根。服务器使用已获批准的身份目录绑定，凭证有效期为 5 分钟。密钥由服务器进程读取，不能打包进小程序。未配置时接口关闭。小程序默认使用隔离演示流程。严格员工测试包在 `lib/login-config.js` 中设置 `mode: "wechat"` 并配置获准的 HTTPS `staffOrigin` 后显示「微信员工登录」。登录凭据只留在内存，员工页面当前只支持待办只读。

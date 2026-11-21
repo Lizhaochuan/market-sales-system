@@ -1,6 +1,15 @@
 // This client is confined to the repository's loopback, fictional-data service.
+const loginConfig = require('./login-config');
 const ROOT = '/api/v1/isolated-workspace/workflow';
 const ORIGIN = 'http://127.0.0.1:33105';
+const wechatEnabled = loginConfig.mode === 'wechat';
+function origin() {
+  if (!wechatEnabled) return ORIGIN;
+  const value = loginConfig.staffOrigin;
+  if (typeof value !== 'string' || !/^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::[0-9]{1,5})?$/i.test(value))
+    throw new Error('微信员工登录需要配置 HTTPS 测试服务');
+  return value;
+}
 let token = '';
 let identity = null;
 let staffSession = false;
@@ -43,7 +52,7 @@ function request(path, {body, key, anonymous = false} = {}) {
       return false;
     }
     wx.request({
-      url: ORIGIN + path, method: body === undefined ? 'GET' : 'POST', data: body, header, timeout: 12000,
+      url: origin() + path, method: body === undefined ? 'GET' : 'POST', data: body, header, timeout: 12000,
       success(response) {
         if (!current()) return;
         if (!anonymous && [401, 403].includes(response.statusCode)) return reject(expired());
@@ -59,6 +68,7 @@ function request(path, {body, key, anonymous = false} = {}) {
   });
 }
 async function login(account, passphrase) {
+  if (wechatEnabled) throw new Error('当前版本使用微信员工登录');
   reset();
   const ticket = epoch;
   const session = await request('/api/v1/dev/login', {body: {account_code: account, passphrase}, anonymous: true});
@@ -87,6 +97,24 @@ async function startStaffSession(credential) {
     throw error;
   }
 }
+async function loginWithWeChat() {
+  if (!wechatEnabled) throw new Error('微信员工登录未启用');
+  origin();
+  reset();
+  const ticket = epoch;
+  const code = await new Promise((resolve,reject) => wx.login({
+    success(result) {
+      if (typeof result.code === 'string' && result.code) resolve(result.code);
+      else reject(new Error('微信未返回登录凭证，请重试'));
+    },
+    fail() { reject(new Error('微信员工登录失败，请重试')); },
+  }));
+  const stale = () => Object.assign(new Error('会话已变更'), {stale:true});
+  if (ticket !== epoch) throw stale();
+  const {credential} = await request('/api/v1/mobile/wechat/session', {body:{code},anonymous:true});
+  if (ticket !== epoch) throw stale();
+  return startStaffSession(credential);
+}
 function readStaffTasks() {
   if (!staffSession) return Promise.reject(new Error('需要严格员工会话'));
   return request('/api/v1/mobile/tasks');
@@ -108,4 +136,4 @@ function mutation(path, payload) {
     return request(ROOT + path, {body, key});
   };
 }
-module.exports = {login, startStaffSession, readStaffTasks, isStaffSession: () => staffSession, logout, read, mutation, observeReset, identity: () => identity};
+module.exports = {login, loginWithWeChat, wechatEnabled, startStaffSession, readStaffTasks, isStaffSession: () => staffSession, logout, read, mutation, observeReset, identity: () => identity};

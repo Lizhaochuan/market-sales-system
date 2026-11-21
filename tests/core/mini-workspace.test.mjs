@@ -11,11 +11,12 @@ import {createApp} from '../../src/app.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../miniprogram');
 const workflow='/api/v1/isolated-workspace/workflow';
 const passphrase='0';
-function miniRuntime(wx) {
+function miniRuntime(wx, loginConfig) {
  const sandbox=createContext({wx,Page:page=>{sandbox.page=page;}});
  const modules=new Map();
  function load(path) {
   const file=resolve(root,path.endsWith('.js')?path:path+'.js');
+  if(loginConfig && file===resolve(root,'lib/login-config.js'))return loginConfig;
   if(modules.has(file))return modules.get(file).exports;
   const module={exports:{}};
   modules.set(file,module);
@@ -186,7 +187,7 @@ test('Native project does not persist credentials or private drafts to device st
   assert.ok(settings && typeof settings==='object' && !Array.isArray(settings),page);
  }
  for(const name of ['app.js','lib/session.js','lib/mutation-page.js','lib/presentation.js',...config.pages.map(page=>page+'.js')]){
-  assert.doesNotMatch(readFileSync(resolve(root,name),'utf8'),/wx\.(setStorage|getStorage|uploadFile|requestSubscribeMessage|login)/,name);
+  assert.doesNotMatch(readFileSync(resolve(root,name),'utf8'),/wx\.(setStorage|getStorage|uploadFile|requestSubscribeMessage)/,name);
  }
 });
 
@@ -224,4 +225,42 @@ test('Native strict employee session reads only mobile tasks and clears them aft
  await assert.rejects(session.startStaffSession('fictional-signed-staff'),/未启用严格员工认证/);
  assert.equal(session.identity(),null);
  page.onUnload();
+});
+
+test('Native WeChat login uses the isolated HTTPS strict route and handles failed sign-in',async()=>{
+ const calls=[],navigation=[];
+ let allow=false;
+ const wx={
+  login({success}){success({code:'fictional-wechat-code'});},
+  request(options){
+   const path=new URL(options.url).pathname;
+   calls.push(path);
+   assert.equal(new URL(options.url).origin,'https://fictional-sales.example.invalid');
+   if(path==='/api/v1/mobile/wechat/session'){
+    assert.deepEqual(real(options.data),{code:'fictional-wechat-code'});
+    assert.equal(options.header.Authorization,undefined);
+    options.success({statusCode:allow?200:403,data:allow
+      ?{code:'OK',data:{credential:'fictional-signed-staff'}}
+      :{code:'FORBIDDEN',message:'该员工尚未绑定'}});
+    return;
+   }
+   assert.equal(path,'/api/v1/me');
+   assert.equal(options.header.Authorization,'Bearer fictional-signed-staff');
+   options.success({statusCode:200,data:{code:'OK',data:{display_name:'虚构员工',capabilities:{strict_employee_mode:true}}}});
+  },
+  reLaunch({url}){navigation.push(url);},
+ };
+ const runtime=miniRuntime(wx,{mode:'wechat',staffOrigin:'https://fictional-sales.example.invalid'});
+ const session=runtime.load('lib/session'),page=runtime.page('pages/login/index');
+ assert.equal(page.data.wechatEnabled,true);
+ await page.submitWeChat();
+ assert.equal(page.data.message,'该员工尚未绑定');
+ assert.equal(session.identity(),null);
+ assert.deepEqual(navigation,[]);
+ await assert.rejects(session.login('sales-a','0'),/使用微信员工登录/);
+ allow=true;
+ await page.submitWeChat();
+ assert.deepEqual(calls,['/api/v1/mobile/wechat/session','/api/v1/mobile/wechat/session','/api/v1/me']);
+ assert.deepEqual(navigation,['/pages/workspace/index']);
+ assert.equal(session.isStaffSession(),true);
 });

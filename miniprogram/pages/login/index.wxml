@@ -1,8 +1,9 @@
 <view class="shell">
   <view class="card">
     <text class="heading">员工工作台</text>
-    <text class="meta">隔离演示 · 使用本机虚构账号</text>
-    <form bindsubmit="submit">
+    <button wx:if="{{wechatEnabled}}" class="primary" disabled="{{busy}}" bindtap="submitWeChat">微信员工登录</button>
+    <text wx:else class="meta">隔离演示 · 使用本机虚构账号</text>
+    <form wx:if="{{!wechatEnabled}}" bindsubmit="submit">
       <view class="field">员工账号
         <picker range="{{accounts}}" value="{{account}}" bindchange="changeAccount"><view>{{accounts[account]}}</view></picker>
       </view>
@@ -11,5 +12,5 @@
     </form>
     <view wx:if="{{message}}" class="notice">{{message}}</view>
   </view>
-  <text class="meta">微信员工绑定、合法域名及订阅消息待配置。</text>
+  <text wx:if="{{!wechatEnabled}}" class="meta">微信员工绑定、合法域名及订阅消息待配置。</text>
 </view>
