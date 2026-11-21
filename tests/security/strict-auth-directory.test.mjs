@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSign,generateKeyPairSync,randomUUID} from 'node:crypto';
 import pg from 'pg';
+import {readFile} from 'node:fs/promises';
 import {createApp} from '../../src/app.mjs';
 import {
   assertStrictIdentityDirectory,resolveStrictDirectoryContext
@@ -131,6 +132,49 @@ test('V3.2-15 strict auth directory: nonowner function-only, no legacy DB query,
       assert.equal(c.status,200,JSON.stringify(c));
       assert.equal(ownerTouches,0);
     });
+    await t.test('mobile tasks only expose active rows owned by the authenticated adviser',async()=>{
+      for(const [version,file] of [[34,'039_v34_sales_loop.sql'],[42,'047_scoped_mobile_tasks.sql']]){
+        const table=(await admin.query("SELECT to_regclass('ms_workspace.schema_versions') AS t")).rows[0].t;
+        if(!table||!(await admin.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[version])).rowCount)
+          await admin.query(await readFile(new URL('../../db/workspace-migrations/'+file,import.meta.url),'utf8'));
+      }
+      const client=await admin.connect(),leads=[];
+      let newGrant;
+
+      try{
+        await client.query('BEGIN');
+        await client.query("INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,'sales_staff','虚构销售') ON CONFLICT DO NOTHING",[org]);
+        newGrant=(await client.query(`INSERT INTO ms.user_role_grants(user_id,role_id,granted_by)
+          SELECT $1,r.id,$2 FROM ms.role_templates r
+          WHERE r.organization_id=$3 AND r.role_code='sales_staff'
+           AND NOT EXISTS(SELECT 1 FROM ms.user_role_grants g WHERE g.user_id=$1 AND g.role_id=r.id AND g.revoked_at IS NULL)
+          RETURNING id`,[studentOwner,reviewer,org])).rows[0]?.id;
+        for(const owner of [studentOwner,'20000000-0000-4000-8000-000000000012']){
+          const lead=randomUUID(), task=randomUUID();
+          leads.push(lead);
+          await client.query('INSERT INTO ms.leads(id,organization_id,owner_user_id) VALUES($1,$2,$3)',[lead,org,owner]);
+          await client.query("INSERT INTO ms_workspace.records(id,lead_id,organization_id,owner_user_id,kind,state,body) VALUES($1,$2,$3,$4,'tasks','open',$5)",
+            [task,lead,org,owner,{title:'虚构待办',due_at:'2099-01-01T01:00:00.000Z',method:'phone',action:'call',internal_note:'不应投影'}]);
+          await client.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id) VALUES($1,$2,$3)',[lead,org,task]);
+        }
+        await client.query('COMMIT');
+        const result=await request('/api/v1/mobile/tasks');
+        assert.equal(result.status,200,JSON.stringify(result));
+        const own=result.data.items.find(item=>item.lead_id===leads[0]);
+        assert.ok(own);
+        assert.equal(Object.hasOwn(own,'internal_note'),false);
+        assert.ok(!result.data.items.some(item=>item.lead_id===leads[1]));
+        assert.equal(ownerTouches,0);
+        await assert.rejects(readA.query('SELECT body FROM ms_workspace.records'),error=>error.code==='42501');
+      }finally{
+        await client.query('ROLLBACK');
+        for(const table of ['ms_workspace.lead_workflow','ms_workspace.records'])
+          await client.query('DELETE FROM '+table+' WHERE lead_id=ANY($1::uuid[])',[leads]);
+        await client.query('DELETE FROM ms.leads WHERE id=ANY($1::uuid[])',[leads]);
+        if(newGrant)await client.query('DELETE FROM ms.user_role_grants WHERE id=$1',[newGrant]);
+        client.release();
+      }
+    });
     await t.test('wrong audience/issuer/signature do not reach directory or old pool',async()=>{
       const wrong=await request('/api/v1/me',sign(subj,{aud:'another-api'}));
       assert.equal(wrong.status,401);
@@ -144,6 +188,7 @@ test('V3.2-15 strict auth directory: nonowner function-only, no legacy DB query,
         [issuer,subj]);
       assert.equal((await request('/api/v1/me')).status,403);
       assert.equal((await request('/api/v1/students')).status,403);
+      assert.equal((await request('/api/v1/mobile/tasks')).status,403);
       assert.equal(ownerTouches,0);
     });
   }finally{

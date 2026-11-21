@@ -3,9 +3,11 @@
 // DB SESSION_USER is admin-bound to a single employee, independent of JWT role.
 // Does NOT migrate any POST, family approvals, audit or identity-management API.
 import {fail} from './auth.mjs';
+import {workspaceAccess} from './role-workspaces.mjs';
 import {buildIsolatedChannelCatalog} from './marketing-channel-catalog.mjs';
 
 export const migratedLegacyReads=new Set([
+  'listScopedMobileTasks',
   'listMarketingChannels',
   'listCampaignDrafts',
   'listCampaignSalesReviews',
@@ -31,6 +33,7 @@ export const migratedLegacyReads=new Set([
 ]);
 
 const listQueries={
+  listScopedMobileTasks:'SELECT id,lead_id,kind,state,title,due_at FROM ms.scoped_mobile_tasks ORDER BY due_at,id LIMIT 100',
   listCampaignCompensationPacketFreezeGates:
     'SELECT incident_id,review_id,incident_status,issue_kind,failure_classification,sales_packet_complete,freeze_block_reason,freeze_registry_status,frozen_source_revision,freeze_version,evidence_sha256,evidence_packet_frozen,independent_sales_case_approved,trusted_source_revision_verified,canonical_digest_verified,persistent_idempotency_registry_verified,revision_compare_and_swap_verified,evidence_immutability_verified,external_signature_verified,financial_receipt_verified,academic_receipt_verified,historical_originals_integrity_verified,preserve_original_orders_required,preserve_original_payments_required,preserve_original_sale_events_required,preserve_original_lessons_required,original_records_mutable,packet_handoff_allowed,compensation_write_allowed,hold_active,release_eligible,finance_authorized,execution_allowed,activity_publish_allowed FROM ms.scoped_isolated_campaign_compensation_packet_freeze_gates ORDER BY incident_id LIMIT 101',
   listCampaignCompensationEvidenceApprovalGates:
@@ -169,6 +172,12 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
       x.org_id!==context.user.organization_id)
       fail(403,'STAFF_READ_RESTRICTED','员工账号与数据授权不一致，已拒绝读取');
 
+    if(operation==='listScopedMobileTasks'){
+      if(!workspaceAccess(context).sales)
+        fail(403,'STAFF_READ_RESTRICTED','当前员工没有销售工作台权限');
+      const gate=await client.query("SELECT to_regclass('ms.scoped_mobile_tasks') AS projection");
+      if(!gate.rows[0]?.projection)fail(404,'NOT_FOUND','员工待办尚未配置');
+    }
     let data;
     if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);

@@ -104,6 +104,7 @@ const routeDefs=[
   ['GET',/^\/api\/v1\/family-groups$/,'listFamilyGroups'],
   ['POST',/^\/api\/v1\/family-groups\/([0-9a-f-]+)\/decision$/,'decideFamily'],
   ['GET',/^\/api\/v1\/me$/,'getMe'],
+  ['GET',/^\/api\/v1\/mobile\/tasks$/,'listScopedMobileTasks'],
   ['GET',/^\/api\/v1\/identity\/staff$/,'identityListStaff'],
   ['GET',/^\/api\/v1\/identity\/bindings$/,'identityListBindings'],
   ['GET',/^\/api\/v1\/identity\/change-requests$/,'identityListRequests'],
@@ -634,6 +635,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
         .find(x=>x.method===req.method&&x.match);
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
+      if(route.op==='listScopedMobileTasks'&&!strictStaffMode)fail(404,'NOT_FOUND','员工待办入口未启用');
       if(route.op==='workspace'&&!workspaceEnabled)fail(404,'NOT_FOUND','该隔离业务工作台未启用');
       // Channel maintenance is CI-only and requires approved strict staff logins.
       // Never run this through the broad tenant-level demo connection.
