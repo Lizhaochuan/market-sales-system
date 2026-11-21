@@ -3,6 +3,7 @@ const ROOT = '/api/v1/isolated-workspace/workflow';
 const ORIGIN = 'http://127.0.0.1:33105';
 let token = '';
 let identity = null;
+let staffSession = false;
 let epoch = 0;
 const scrubbers = new Set();
 
@@ -10,6 +11,7 @@ function reset() {
   epoch += 1;
   token = '';
   identity = null;
+  staffSession = false;
   for (const scrub of scrubbers) scrub();
 }
 function observeReset(scrub) {
@@ -67,7 +69,30 @@ async function login(account, passphrase) {
   if (ticket !== epoch) throw Object.assign(new Error('会话已变更'), {stale: true});
   return identity;
 }
+// Accept a short-lived signed credential from the isolated test harness or a future approved identity provider.
+async function startStaffSession(credential) {
+  reset();
+  const ticket = epoch;
+  if (typeof credential !== 'string' || !credential) throw new Error('缺少员工凭据');
+  token = credential;
+  try {
+    const employee = await request('/api/v1/me');
+    if (ticket !== epoch) throw Object.assign(new Error('会话已变更'), {stale: true});
+    if (employee?.capabilities?.strict_employee_mode !== true) throw new Error('该服务未启用严格员工认证');
+    staffSession = true;
+    identity = employee;
+    return employee;
+  } catch (error) {
+    if (ticket === epoch) reset();
+    throw error;
+  }
+}
+function readStaffTasks() {
+  if (!staffSession) return Promise.reject(new Error('需要严格员工会话'));
+  return request('/api/v1/mobile/tasks');
+}
 function read(path = '', query) {
+  if (staffSession) return Promise.reject(new Error('员工会话目前仅支持查看待办'));
   return request(ROOT + path + encode(query));
 }
 function newKey() {
@@ -79,7 +104,8 @@ function mutation(path, payload) {
   const key = newKey();
   return () => {
     if (ticket !== epoch) return Promise.reject(Object.assign(new Error('会话已变更'), {stale: true}));
+    if (staffSession) return Promise.reject(new Error('员工会话目前仅支持查看待办'));
     return request(ROOT + path, {body, key});
   };
 }
-module.exports = {login, logout, read, mutation, observeReset, identity: () => identity};
+module.exports = {login, startStaffSession, readStaffTasks, isStaffSession: () => staffSession, logout, read, mutation, observeReset, identity: () => identity};

@@ -7,7 +7,7 @@
   <view wx:for="{{items}}" wx:key="id" class="card">
     <text class="title">{{item.title}}</text>
     <text class="meta {{item.late ? 'bad' : ''}}">{{item.local}}{{item.late ? ' · 已逾期' : ''}}</text>
-    <button data-id="{{item.lead_id}}" data-record="{{item.id}}" data-mode="{{item.kind === 'appointments' ? 'activity' : 'followup'}}" bindtap="open">处理事项</button>
+    <button wx:if="{{!staffReadOnly}}" data-id="{{item.lead_id}}" data-record="{{item.id}}" data-mode="{{item.kind === 'appointments' ? 'activity' : 'followup'}}" bindtap="open">处理事项</button>
   </view>
   <text wx:if="{{!items.length}}" class="meta">没有待处理事项</text>
 </template>
@@ -28,9 +28,9 @@
       <text class="title">{{section === 'calendar' ? '移动日程' : '销售待办'}}</text>
       <picker mode="date" value="{{date}}" bindchange="selectDate"><view>{{date}} · 上海时间</view></picker>
     </view>
-    <template is="tasks" data="{{items:dayTasks}}"/>
+    <template is="tasks" data="{{items:dayTasks, staffReadOnly:staffReadOnly}}"/>
     <view class="card"><text class="title">其他日期已逾期</text></view>
-    <template is="tasks" data="{{items:overdue}}"/>
+    <template is="tasks" data="{{items:overdue, staffReadOnly:staffReadOnly}}"/>
   </block>
   <block wx:elif="{{section === 'customers'}}">
     <view class="card">

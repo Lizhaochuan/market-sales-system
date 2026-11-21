@@ -2,7 +2,7 @@ const session = require('../../lib/session');
 const mutations = require('../../lib/mutation-page');
 const ui = require('../../lib/presentation');
 const empty = {
-  access:{}, name:'', nav:[], rows:[], staff:[], incoming:[], market:[], marketStats:null, results:[],
+  staffReadOnly:false, access:{}, name:'', nav:[], rows:[], staff:[], incoming:[], market:[], marketStats:null, results:[],
   report:null, dayTasks:[], overdue:[], approvals:[], supervision:[], cards:[], drill:null, searchRows:null,
   sources:[], campuses:[], options:null, filter:{}, filterMode:0, message:'', notice:'',
   date:ui.day(), section:'', busy:false, saving:false, conflict:false, retryable:false, dimension:{},
@@ -34,6 +34,14 @@ Page({
     this.setData({busy:true, conflict:false, message:''});
     try {
       const me = session.identity();
+      if (session.isStaffSession()) {
+        const {items} = await session.readStaffTasks();
+        if (this.ticket !== ticket) return;
+        const schedules = ui.dueItems(items, this.data.date);
+        this.setData({staffReadOnly:true, name:me.display_name, section:'tasks',
+          nav:[{id:'tasks',label:'待办'}], reminders:items, dayTasks:schedules.selected, overdue:schedules.overdue});
+        return;
+      }
       const options = await session.read('/options');
       const access = options.access || {};
       const nav = ui.tabs(access).map(([id,label]) => ({id,label}));

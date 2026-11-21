@@ -189,3 +189,39 @@ test('Native project does not persist credentials or private drafts to device st
   assert.doesNotMatch(readFileSync(resolve(root,name),'utf8'),/wx\.(setStorage|getStorage|uploadFile|requestSubscribeMessage|login)/,name);
  }
 });
+
+test('Native strict employee session reads only mobile tasks and clears them after revocation',async()=>{
+ const calls=[],navigation=[];
+ let revoked=false,strict=true;
+ const wx={
+  request(options){
+   const path=new URL(options.url).pathname;
+   calls.push(path);
+   assert.equal(options.header.Authorization,'Bearer fictional-signed-staff');
+   const data=path==='/api/v1/me'
+    ?{display_name:'虚构员工',capabilities:{strict_employee_mode:strict}}
+    :{items:[{id:'own-task',title:'虚构待办',due_at:new Date().toISOString()}]};
+   options.success({statusCode:revoked?403:200,data:{code:revoked?'FORBIDDEN':'OK',data}});
+  },
+  reLaunch({url}){navigation.push(url);},
+ };
+ const runtime=miniRuntime(wx),session=runtime.load('lib/session');
+ const page=runtime.page('pages/workspace/index');
+ page.onLoad();
+ await session.startStaffSession('fictional-signed-staff');
+ await page.onShow();
+ assert.equal(page.data.staffReadOnly,true);
+ assert.equal(page.data.dayTasks[0].title,'虚构待办');
+ await assert.rejects(session.read('/options'),/仅支持查看待办/);
+ await assert.rejects(session.mutation('/something',{})(),/仅支持查看待办/);
+ revoked=true;
+ await page.refresh();
+ assert.equal(session.identity(),null);
+ assert.equal(page.data.dayTasks.length,0);
+ assert.deepEqual(calls,['/api/v1/me','/api/v1/mobile/tasks','/api/v1/mobile/tasks']);
+ assert.deepEqual(navigation,['/pages/login/index']);
+ revoked=false;strict=false;
+ await assert.rejects(session.startStaffSession('fictional-signed-staff'),/未启用严格员工认证/);
+ assert.equal(session.identity(),null);
+ page.onUnload();
+});
