@@ -106,6 +106,7 @@ const routeDefs=[
   ['POST',/^\/api\/v1\/family-groups\/([0-9a-f-]+)\/decision$/,'decideFamily'],
   ['GET',/^\/api\/v1\/me$/,'getMe'],
   ['GET',/^\/api\/v1\/mobile\/tasks$/,'listScopedMobileTasks'],
+  ['POST',/^\/api\/v1\/mobile\/actions\/(followup|qualification|campus)\/([^/]+)$/,'applyScopedMobileAction'],
   ['GET',/^\/api\/v1\/identity\/staff$/,'identityListStaff'],
   ['GET',/^\/api\/v1\/identity\/bindings$/,'identityListBindings'],
   ['GET',/^\/api\/v1\/identity\/change-requests$/,'identityListRequests'],
@@ -655,7 +656,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       const route=routeDefs.map(([method,re,op])=>({method,match:re.exec(url.pathname),op}))
         .find(x=>x.method===req.method&&x.match);
       if(!route)fail(404,'NOT_FOUND','没有找到该业务接口');
-      if(route.op==='listScopedMobileTasks'&&!strictStaffMode)fail(404,'NOT_FOUND','员工待办入口未启用');
+      if(['listScopedMobileTasks','applyScopedMobileAction'].includes(route.op)&&!strictStaffMode)fail(404,'NOT_FOUND','员工待办入口未启用');
       if(route.op==='workspace'&&!workspaceEnabled)fail(404,'NOT_FOUND','该隔离业务工作台未启用');
       // Channel maintenance is CI-only and requires approved strict staff logins.
       // Never run this through the broad tenant-level demo connection.
@@ -762,6 +763,7 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
             manage_own_leads:false,propose_family_review:false,
             decide_other_person_family_review:false,review_family_audit:false,
             manage_identity_requests:false,
+            strict_mobile_review:workspaceAccess(ctx).sales_manager,
             strict_employee_mode:true
           },
           environment:'isolated-trusted-employee-test'

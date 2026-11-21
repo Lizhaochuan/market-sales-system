@@ -126,14 +126,14 @@ function read(path = '', query) {
 function newKey() {
   return 'mini-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
 }
-function mutation(path, payload) {
+function mutation(path, payload, staffAction = false) {
   const ticket = epoch;
   const body = JSON.parse(JSON.stringify(payload));
   const key = newKey();
   return () => {
     if (ticket !== epoch) return Promise.reject(Object.assign(new Error('会话已变更'), {stale: true}));
-    if (staffSession) return Promise.reject(new Error('员工会话目前仅支持查看待办'));
-    return request(ROOT + path, {body, key});
+    if (staffAction !== staffSession) return Promise.reject(new Error('当前员工会话不支持此操作'));
+    return request((staffAction ? '/api/v1/mobile/actions' : ROOT) + path, {body, key});
   };
 }
 module.exports = {login, loginWithWeChat, wechatEnabled, startStaffSession, readStaffTasks, isStaffSession: () => staffSession, logout, read, mutation, observeReset, identity: () => identity};

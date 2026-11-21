@@ -179,7 +179,21 @@ export async function readLegacyViaStaffPool({pools,context,claims,operation,par
       if(!gate.rows[0]?.projection)fail(404,'NOT_FOUND','员工待办尚未配置');
     }
     let data;
-    if(listQueries[operation]){
+    if(operation==='listScopedMobileTasks'){
+      const base=await client.query(listQueries[operation]);
+      const gate=await client.query("SELECT to_regclass('ms.scoped_mobile_followup_tasks') AS projection");
+      data={items:base.rows,approvals:[]};
+      if(gate.rows[0]?.projection){
+        const followups=await client.query('SELECT id,expected_version FROM ms.scoped_mobile_followup_tasks WHERE id=ANY($1::uuid[])',
+          [base.rows.map(row=>row.id)]);
+        const versions=new Map(followups.rows.map(row=>[row.id,row.expected_version]));
+        data.items=base.rows.map(row=>versions.has(row.id)?{...row,expected_version:versions.get(row.id)}:row);
+        if(workspaceAccess(context).sales_manager){
+          const approvals=await client.query('SELECT * FROM ms.scoped_mobile_approvals ORDER BY happened_at DESC,id LIMIT 100');
+          data.approvals=approvals.rows;
+        }
+      }
+    }else if(listQueries[operation]){
       const r=await client.query(listQueries[operation]);
       if(['listChannelChangeRequests','listChannelAuditHistory','listCampaignDrafts','listCampaignSalesReviews','listCampaignFinanceHandoffs','listCampaignFinanceIncidents','listCampaignFinanceIncidentHistory','listCampaignFinanceEscalationFollowups','listCampaignFinanceEscalationEvidenceGates','listCampaignCrossModuleAcceptancePrerequisites','listCampaignCrossModuleTrustFailureGates','listCampaignCompensationResponsibilityMatrix','listCampaignCompensationEvidenceApprovalGates','listCampaignCompensationPacketFreezeGates'].includes(operation)&&r.rows.length>100)
         throw new TypeError('Channel request list exceeds safe bounded projection');

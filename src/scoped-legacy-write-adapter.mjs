@@ -6,7 +6,7 @@
 import {fail} from './auth.mjs';
 import {assertScopedLowriskWriter} from './scoped-lowrisk-write-api.mjs';
 
-export const migratedLegacyWrites=new Set(['appendCampaignFinanceEscalationFollowup','reportCampaignFinanceIncident','triageCampaignFinanceIncident','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft','createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
+export const migratedLegacyWrites=new Set(['applyScopedMobileAction','appendCampaignFinanceEscalationFollowup','reportCampaignFinanceIncident','triageCampaignFinanceIncident','requestCampaignSalesReview','decideCampaignSalesReview','reviseCampaignDraft','createCampaignDraft','requestChannelChange','reviewChannelChange','createStudent','createContact','linkContact','createEvent','requestContactCustody','decideContactCustody','requestCustodyReview','decideCustodyReview','requestLeadCandidate','decideLeadCandidate','requestConversionReadiness','decideConversionReadiness','revokeConversionReadiness','requestAttributionDispute','decideAttributionDispute','requestFinalLeadConversion','decideFinalLeadConversion','executeFinalLeadConversion','requestLeadStudentAssociation','decideLeadStudentAssociation','requestLeadAdjustment','decideLeadAdjustment','requestLeadStudentLinkReview','decideLeadStudentLinkReview','requestDownstreamStudentCorrection','decideDownstreamStudentCorrection','attestDownstreamReconciliation','resolveDownstreamReconciliation']);
 const MAX=100;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const relationTypes=new Set(['父亲','母亲','其他监护人','其他联系人']);
@@ -39,6 +39,10 @@ function approvalText(v,label,max){
   return v.trim();
 }
 function strictBody(op,body,routeParams){
+  if(op==='applyScopedMobileAction'){
+    only(body,routeParams[0]==='followup'?['expected_version','result','notes','title','due_at']:['approved','evidence']);
+    return {params:[routeParams[0],uuid(routeParams[1],'业务'),JSON.stringify(body)]};
+  }
   if(op==='appendCampaignFinanceEscalationFollowup'){
     only(body,['note_type','evidence_ref','reason_zh']);
     if(!['sales_evidence_addendum','external_finance_requirements_pending'].includes(body.note_type))
@@ -417,6 +421,9 @@ export async function writeLegacyViaStaffPool({
       fail(403,'STAFF_WRITE_RESTRICTED','员工签名身份与专属数据库账号不一致或已失效');
     let result;
     switch(operation){
+      case 'applyScopedMobileAction':
+        result=await client.query('SELECT ms.apply_scoped_mobile_action($1,$2,$3,$4,$5,$6) AS result',
+          [...parsed.params,idempotencyKey,claims.issuer,claims.subject]);break;
       case 'appendCampaignFinanceEscalationFollowup':
         result=await client.query(
           'SELECT ms.append_isolated_campaign_finance_escalation_followup($1,$2,$3,$4,$5) AS result',
@@ -574,7 +581,9 @@ export async function writeLegacyViaStaffPool({
     // Keep a business conflict readable; never expose raw SQL or identities.
     if(e?.code==='23505')
       fail(409,'IDEMPOTENCY_CONFLICT','防重复编号已用于其他操作或不同业务内容');
-    if(e?.code==='23514'||e?.code==='22P02')
+    if(operation==='applyScopedMobileAction'&&e?.code==='P0001')
+      fail(409,'VERSION_CONFLICT','待办或审批已变化，请刷新后再操作');
+    if(e?.code==='23514'||e?.code==='22P02'||operation==='applyScopedMobileAction'&&['22007','22008','22009'].includes(e?.code))
       fail(422,'VALIDATION_ERROR','填写的业务内容不符合保存要求');
     if(e?.code==='42501')
       fail(403,'STAFF_WRITE_RESTRICTED','当前员工没有该项低权限操作的授权');

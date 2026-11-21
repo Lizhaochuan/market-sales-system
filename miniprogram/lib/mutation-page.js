@@ -1,8 +1,8 @@
 const session = require('./session');
 
-async function run(page, path, body) {
+async function run(page, path, body, staffAction) {
   if (page.data.saving || page.retryTask) return;
-  page.retryTask = session.mutation(path, body);
+  page.retryTask = session.mutation(path, body, staffAction);
   await retry(page);
 }
 async function retry(page) {

@@ -16,7 +16,8 @@ try{
  await c.query(await readFile(new URL('../tests/fixtures/fictional_ui_demo_seed.sql',import.meta.url),'utf8'));
  await c.query(await readFile(new URL('../tests/fixtures/isolated-business-workspace.sql',import.meta.url),'utf8'));
  if(process.env.MS_ENABLE_V34_WORKFLOW==='1'){await c.query(await readFile(new URL('../db/workspace-migrations/039_v34_sales_loop.sql',import.meta.url),'utf8'));await c.query(await readFile(new URL('../tests/fixtures/v34-demo-finance.sql',import.meta.url),'utf8'));}
- if(process.env.MS_ENABLE_ROLE_WORKSPACES==='1'){await c.query(await readFile(new URL('../db/workspace-migrations/040_role_workspaces.sql',import.meta.url),'utf8'));await c.query(await readFile(new URL('../tests/fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));}
+ if(process.env.MS_ENABLE_V34_WORKFLOW==='1'||process.env.MS_ENABLE_ROLE_WORKSPACES==='1')await c.query(await readFile(new URL('../db/workspace-migrations/040_role_workspaces.sql',import.meta.url),'utf8'));
+ if(process.env.MS_ENABLE_ROLE_WORKSPACES==='1'){await c.query(await readFile(new URL('../tests/fixtures/role-workspaces-demo.sql',import.meta.url),'utf8'));}
  if(process.env.MS_ENABLE_V34_WORKFLOW==='1')await c.query(await readFile(new URL('../db/workspace-migrations/041_historical_student_links.sql',import.meta.url),'utf8'));
  if(process.env.MS_ENABLE_V34_WORKFLOW==='1')await c.query(await readFile(new URL('../db/workspace-migrations/042_appointment_supervision.sql',import.meta.url),'utf8'));
  if(process.env.MS_ENABLE_V34_WORKFLOW==='1')await c.query(await readFile(new URL('../db/workspace-migrations/043_followup_supervision.sql',import.meta.url),'utf8'));
@@ -24,5 +25,6 @@ try{
  if(process.env.MS_ENABLE_V34_WORKFLOW==='1')await c.query(await readFile(new URL('../db/workspace-migrations/045_appointment_supervision_evidence.sql',import.meta.url),'utf8'));
  if(process.env.MS_ENABLE_V34_WORKFLOW==='1')await c.query(await readFile(new URL('../db/workspace-migrations/046_service_campus_directory.sql',import.meta.url),'utf8'));
  if(process.env.MS_ENABLE_V34_WORKFLOW==='1')await c.query(await readFile(new URL('../db/workspace-migrations/047_scoped_mobile_tasks.sql',import.meta.url),'utf8'));
+ if(process.env.MS_ENABLE_V34_WORKFLOW==='1')await c.query(await readFile(new URL('../db/workspace-migrations/048_scoped_mobile_actions.sql',import.meta.url),'utf8'));
  console.log('Disposable isolated workspace initialized; HOLD remains active.');
 }finally{await c.end();}

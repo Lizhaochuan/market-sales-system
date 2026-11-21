@@ -211,10 +211,10 @@ test('Native strict employee session reads only mobile tasks and clears them aft
  page.onLoad();
  await session.startStaffSession('fictional-signed-staff');
  await page.onShow();
- assert.equal(page.data.staffReadOnly,true);
+ assert.equal(page.data.staffMode,true);
  assert.equal(page.data.dayTasks[0].title,'虚构待办');
  await assert.rejects(session.read('/options'),/仅支持查看待办/);
- await assert.rejects(session.mutation('/something',{})(),/仅支持查看待办/);
+ await assert.rejects(session.mutation('/something',{})(),/当前员工会话不支持此操作/);
  revoked=true;
  await page.refresh();
  assert.equal(session.identity(),null);
@@ -263,4 +263,47 @@ test('Native WeChat login uses the isolated HTTPS strict route and handles faile
  assert.deepEqual(calls,['/api/v1/mobile/wechat/session','/api/v1/mobile/wechat/session','/api/v1/me']);
  assert.deepEqual(navigation,['/pages/workspace/index']);
  assert.equal(session.isStaffSession(),true);
+});
+
+test('Native strict workspace submits scoped follow-up and approval and retries with the same key',async()=>{
+ const sent=[];
+ let failOnce=true;
+ const wx={
+  request(options){
+   const path=new URL(options.url).pathname;
+   const result=data=>options.success({statusCode:200,data:{code:'OK',data}});
+   if(path==='/api/v1/me')return result({display_name:'虚构主管',capabilities:{strict_employee_mode:true,strict_mobile_review:true}});
+   if(path==='/api/v1/mobile/tasks')return result({
+    items:[{id:'own-task',title:'虚构待办',expected_version:4,due_at:new Date().toISOString()}],
+    approvals:[{id:'review',operation:'qualification',evidence:'虚构申请'}],
+   });
+   sent.push({path,body:options.data,key:options.header['Idempotency-Key']});
+   if(failOnce){failOnce=false;return options.fail();}
+   return result({saved:true});
+  },
+  reLaunch(){},
+ };
+ const runtime=miniRuntime(wx),session=runtime.load('lib/session');
+ const page=runtime.page('pages/workspace/index');
+ page.onLoad();
+ await session.startStaffSession('fictional-signed-staff');
+ await page.onShow();
+ const click=dataset=>({currentTarget:{dataset}});
+ const submit=value=>page.submitStaffAction({detail:{value}});
+ page.openStaffAction(click({id:'own-task',operation:'followup'}));
+ await submit({title:'再次联系',notes:'已咨询课程',result:'communicated',date:'2099-01-01',time:'22:37'});
+ assert.equal(page.data.retryable,true);
+ await page.retry();
+ assert.deepEqual(sent[0],sent[1]);
+ assert.equal(sent[1].path,'/api/v1/mobile/actions/followup/own-task');
+ assert.equal(sent[1].body.due_at,'2099-01-01T22:37:00+08:00');
+ assert.equal(sent[1].body.expected_version,4);
+ page.select(click({id:'staff-review'}));
+ page.openStaffAction(click({id:'review',operation:'qualification'}));
+ await submit({decision:'reject',evidence:'证据不足'});
+ assert.equal(page.data.section,'staff-review');
+ assert.equal(sent[2].path,'/api/v1/mobile/actions/qualification/review');
+ assert.deepEqual({...sent[2].body},{approved:false,evidence:'证据不足'});
+ assert.equal(page.data.staffSelection,null);
+ page.onUnload();
 });

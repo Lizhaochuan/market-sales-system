@@ -7,7 +7,8 @@
   <view wx:for="{{items}}" wx:key="id" class="card">
     <text class="title">{{item.title}}</text>
     <text class="meta {{item.late ? 'bad' : ''}}">{{item.local}}{{item.late ? ' · 已逾期' : ''}}</text>
-    <button wx:if="{{!staffReadOnly}}" data-id="{{item.lead_id}}" data-record="{{item.id}}" data-mode="{{item.kind === 'appointments' ? 'activity' : 'followup'}}" bindtap="open">处理事项</button>
+    <button wx:if="{{!staffMode}}" data-id="{{item.lead_id}}" data-record="{{item.id}}" data-mode="{{item.kind === 'appointments' ? 'activity' : 'followup'}}" bindtap="open">处理事项</button>
+    <button wx:if="{{staffMode && item.expected_version}}" data-id="{{item.id}}" data-operation="followup" bindtap="openStaffAction">记电话跟进</button>
   </view>
   <text wx:if="{{!items.length}}" class="meta">没有待处理事项</text>
 </template>
@@ -22,15 +23,41 @@
   <button wx:if="{{retryable}}" disabled="{{saving}}" bindtap="retry">重试原提交</button>
   <button wx:if="{{conflict}}" bindtap="refresh">刷新最新记录</button>
   <view wx:if="{{notice}}" class="notice">{{notice}}</view>
+  <form wx:if="{{staffSelection}}" class="card" bindsubmit="submitStaffAction">
+    <block wx:if="{{staffSelection.operation === 'followup'}}">
+      <text class="title">{{staffSelection.title}}</text>
+      <radio-group name="result"><label><radio value="communicated"/>已沟通</label><label><radio value="failed"/>未联系成功</label></radio-group>
+      <textarea name="notes" maxlength="500" placeholder="记录电话联系情况"/>
+      <template is="schedule"/>
+    </block>
+    <block wx:else>
+      <text class="title">{{staffSelection.operation === 'campus' ? '校区转归审批' : '线索核验审批'}}</text>
+      <radio-group name="decision"><label><radio value="approve"/>批准</label><label><radio value="reject"/>驳回</label></radio-group>
+      <textarea name="evidence" maxlength="500" placeholder="填写审批依据"/>
+    </block>
+    <button form-type="submit" disabled="{{saving || retryable || conflict}}">提交</button>
+    <button bindtap="closeStaffAction" disabled="{{saving || retryable}}">收起</button>
+  </form>
   <view wx:if="{{busy}}" class="meta">正在读取工作台</view>
+  <view wx:elif="{{section === 'staff-review'}}" class="card">
+    <text class="title">待审批</text>
+    <text wx:if="{{!staffApprovals.length}}" class="meta">没有待审批申请</text>
+    <view wx:for="{{staffApprovals}}" wx:key="id" class="card">
+      <text class="title">{{item.operation === 'campus' ? '校区转归' : '线索核验'}}</text>
+      <text wx:if="{{item.operation === 'campus'}}">{{item.from_campus}} → {{item.campus_code}}</text>
+      <text wx:else>{{item.verdict}} {{item.reason}}</text>
+      <text class="meta">{{item.evidence}}</text>
+      <button data-id="{{item.id}}" data-operation="{{item.operation}}" bindtap="openStaffAction">处理审批</button>
+    </view>
+  </view>
   <block wx:elif="{{section === 'tasks' || section === 'calendar'}}">
     <view class="card">
       <text class="title">{{section === 'calendar' ? '移动日程' : '销售待办'}}</text>
       <picker mode="date" value="{{date}}" bindchange="selectDate"><view>{{date}} · 上海时间</view></picker>
     </view>
-    <template is="tasks" data="{{items:dayTasks, staffReadOnly:staffReadOnly}}"/>
+    <template is="tasks" data="{{items:dayTasks, staffMode:staffMode}}"/>
     <view class="card"><text class="title">其他日期已逾期</text></view>
-    <template is="tasks" data="{{items:overdue, staffReadOnly:staffReadOnly}}"/>
+    <template is="tasks" data="{{items:overdue, staffMode:staffMode}}"/>
   </block>
   <block wx:elif="{{section === 'customers'}}">
     <view class="card">

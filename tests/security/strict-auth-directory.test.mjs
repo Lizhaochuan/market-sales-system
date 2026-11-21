@@ -53,6 +53,13 @@ test('V3.2-15 strict auth directory: nonowner function-only, no legacy DB query,
     });
     return {status:r.status,...await r.json()};
   };
+  const post=async(operation,target,body,key=randomUUID())=>{
+    const r=await fetch('http://127.0.0.1:'+app.address().port+'/api/v1/mobile/actions/'+operation+'/'+target,{
+      method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json','Idempotency-Key':key},
+      body:JSON.stringify(body)
+    });
+    return {status:r.status,...await r.json()};
+  };
   try{
     await t.test('real function-only auth login cannot SELECT staff, grants, bindings, finance, customer, or UPDATE audit',async()=>{
       const ok=await assertStrictIdentityDirectory(directory);
@@ -133,7 +140,7 @@ test('V3.2-15 strict auth directory: nonowner function-only, no legacy DB query,
       assert.equal(ownerTouches,0);
     });
     await t.test('mobile tasks only expose active rows owned by the authenticated adviser',async()=>{
-      for(const [version,file] of [[34,'039_v34_sales_loop.sql'],[42,'047_scoped_mobile_tasks.sql']]){
+      for(const [version,file] of [[34,'039_v34_sales_loop.sql'],[35,'040_role_workspaces.sql'],[41,'046_service_campus_directory.sql'],[42,'047_scoped_mobile_tasks.sql'],[43,'048_scoped_mobile_actions.sql']]){
         const table=(await admin.query("SELECT to_regclass('ms_workspace.schema_versions') AS t")).rows[0].t;
         if(!table||!(await admin.query('SELECT 1 FROM ms_workspace.schema_versions WHERE version=$1',[version])).rowCount)
           await admin.query(await readFile(new URL('../../db/workspace-migrations/'+file,import.meta.url),'utf8'));
@@ -173,6 +180,82 @@ test('V3.2-15 strict auth directory: nonowner function-only, no legacy DB query,
         await client.query('DELETE FROM ms.leads WHERE id=ANY($1::uuid[])',[leads]);
         if(newGrant)await client.query('DELETE FROM ms.user_role_grants WHERE id=$1',[newGrant]);
         client.release();
+      }
+    });
+    await t.test('strict mobile writes preserve workflow history, campus authorization and independent decisions',async()=>{
+      const other='20000000-0000-4000-8000-000000000012';
+      const lead=randomUUID(), task=randomUUID(), foreign=randomUUID(), foreignTask=randomUUID();
+      const newRoleGrants=[];
+      try{
+        const c=await admin.connect();
+        try{
+          await c.query('BEGIN');
+          await c.query("INSERT INTO ms.role_templates(organization_id,role_code,label_zh) VALUES($1,'sales_staff','虚构销售'),($1,'sales_manager','虚构主管') ON CONFLICT DO NOTHING",[org]);
+          newRoleGrants.push(...(await c.query(`INSERT INTO ms.user_role_grants(user_id,role_id,granted_by)
+            SELECT $1,r.id,$2 FROM ms.role_templates r WHERE r.organization_id=$3 AND r.role_code='sales_staff'
+            AND NOT EXISTS(SELECT 1 FROM ms.user_role_grants g WHERE g.user_id=$1 AND g.role_id=r.id AND g.revoked_at IS NULL) RETURNING id`,
+            [studentOwner,reviewer,org])).rows.map(row=>row.id));
+          for(const [id,activity,owner] of [[lead,task,studentOwner],[foreign,foreignTask,other]]){
+            await c.query('INSERT INTO ms.leads(id,organization_id,owner_user_id) VALUES($1,$2,$3)',[id,org,owner]);
+            await c.query("INSERT INTO ms_workspace.records(id,lead_id,organization_id,owner_user_id,kind,state,body) VALUES($1,$2,$3,$4,'tasks','open',$5)",
+              [activity,id,org,owner,{title:'虚构待办',due_at:'2099-01-01T01:00:00.000Z',method:'phone',action:'call'}]);
+            await c.query('INSERT INTO ms_workspace.lead_workflow(lead_id,organization_id,primary_activity_id) VALUES($1,$2,$3)',[id,org,activity]);
+          }
+          await c.query('COMMIT');
+        }finally{c.release();}
+        const body={expected_version:1,result:'communicated',notes:'模拟已咨询课程',title:'再次联系家长',due_at:'2099-01-02T22:37:00+08:00'};
+        const key=randomUUID();
+        assert.equal((await post('followup',foreignTask,body)).status,403);
+        assert.equal((await post('followup',task,{...body,expected_version:9})).status,409);
+        assert.equal((await post('followup',task,{...body,due_at:'2099-02-31T22:37:00+08:00'})).status,422);
+        const before=await request('/api/v1/mobile/tasks');
+        assert.equal(before.data.items.find(item=>item.id===task)?.expected_version,1);
+        const saved=await post('followup',task,body,key);
+        assert.equal(saved.status,200,JSON.stringify(saved));
+        assert.equal((await post('followup',task,body,key)).status,200);
+        assert.equal((await post('followup',task,{...body,notes:'不同内容'},key)).status,409);
+        assert.equal((await post('followup',task,body)).status,409);
+        const after=await request('/api/v1/mobile/tasks');
+        const next=after.data.items.find(item=>item.lead_id===lead);
+        assert.equal(next.expected_version,2);
+        assert.equal(Date.parse(next.due_at),Date.parse(body.due_at));
+        assert.equal((await admin.query("SELECT count(*)::int AS n FROM ms.audit_events WHERE target_id=$1 AND event_name='V34_COMMUNICATION'",[lead])).rows[0].n,1);
+        assert.equal((await admin.query("SELECT count(*)::int AS n FROM ms_workspace.history WHERE record_id IN ($1,$2)",[task,next.id])).rows[0].n,2);
+        const addEvent=async(id,actor,event,facts,organization=org)=>(await admin.query(
+          "INSERT INTO ms.audit_events(organization_id,actor_user_id,target_type,target_id,event_name,after_business_json,reason_zh) VALUES($1,$2,'lead',$3,$4,$5,'虚构测试') RETURNING id",
+          [organization,actor,id,event,facts])).rows[0].id;
+        const approval=await addEvent(foreign,other,'V34_LEAD_QUALIFICATION_REQUESTED',{verdict:'invalid',reason:'test',evidence:'虚构核验'});
+        const self=await addEvent(lead,studentOwner,'V34_LEAD_QUALIFICATION_REQUESTED',{verdict:'invalid',reason:'test',evidence:'虚构自审'});
+        const decision={approved:true,evidence:'核对后确认'};
+        assert.equal((await post('qualification',approval,decision)).status,403);
+        newRoleGrants.push(...(await admin.query(`INSERT INTO ms.user_role_grants(user_id,role_id,granted_by)
+          SELECT $1,r.id,$2 FROM ms.role_templates r WHERE r.organization_id=$3 AND r.role_code='sales_manager' RETURNING id`,[studentOwner,reviewer,org])).rows.map(row=>row.id));
+        await admin.query("INSERT INTO ms_workspace.service_campuses(organization_id,code,display_name) VALUES($1,'MOBILE_A','虚构校区 A'),($1,'MOBILE_B','虚构校区 B')",[org]);
+        assert.equal((await post('qualification',approval,decision)).status,403);
+        assert.deepEqual((await request('/api/v1/mobile/tasks')).data.approvals,[]);
+        await admin.query("INSERT INTO ms_workspace.service_campus_grants(organization_id,staff_id,campus_code) VALUES($1,$2,'@unassigned'),($1,$2,'MOBILE_A')",[org,studentOwner]);
+        assert.equal((await post('qualification',self,decision)).status,403);
+        assert.equal((await post('qualification',randomUUID(),decision)).status,403);
+        const queue=(await request('/api/v1/mobile/tasks')).data.approvals;
+        assert.ok(queue.some(row=>row.id===approval));
+        assert.ok(!queue.some(row=>row.id===self));
+        const approved=await post('qualification',approval,decision);
+        assert.equal(approved.status,200,JSON.stringify(approved));
+        assert.equal((await post('qualification',approval,decision)).status,409);
+        assert.ok(!(await request('/api/v1/mobile/tasks')).data.approvals.some(row=>row.id===approval));
+        await addEvent(foreign,other,'V34_SERVICE_CAMPUS_EFFECTIVE',{campus_code:'MOBILE_A',effective_at:'2022-01-01T00:00:00Z'});
+        const transfer=await addEvent(foreign,other,'V34_CAMPUS_TRANSFER_REQUESTED',{from_campus:'MOBILE_A',campus_code:'MOBILE_B',evidence:'虚构移交'});
+        assert.equal((await post('campus',transfer,decision)).status,403);
+        await admin.query("INSERT INTO ms_workspace.service_campus_grants(organization_id,staff_id,campus_code) VALUES($1,$2,'MOBILE_B')",[org,studentOwner]);
+        const moved=await post('campus',transfer,decision);
+        assert.equal(moved.status,200,JSON.stringify(moved));
+        assert.equal((await admin.query("SELECT after_business_json->>'campus_code' AS campus FROM ms.audit_events WHERE target_id=$1 AND event_name='V34_SERVICE_CAMPUS_EFFECTIVE' ORDER BY happened_at DESC LIMIT 1",[foreign])).rows[0].campus,'MOBILE_B');
+        assert.equal(ownerTouches,0);
+        await assert.rejects(writeA.query('SELECT * FROM ms_workspace.mobile_action_receipts'),error=>error.code==='42501');
+      }finally{
+        await admin.query("UPDATE ms.user_role_grants SET revoked_at=now() WHERE id=ANY($1::uuid[])",[newRoleGrants]);
+        await admin.query("DELETE FROM ms_workspace.service_campus_grants WHERE organization_id=$1 AND staff_id=$2 AND campus_code IN ('@unassigned','MOBILE_A','MOBILE_B')",[org,studentOwner]);
+        await admin.query("DELETE FROM ms_workspace.service_campuses WHERE organization_id=$1 AND code IN ('MOBILE_A','MOBILE_B')",[org]);
       }
     });
     await t.test('wrong audience/issuer/signature do not reach directory or old pool',async()=>{

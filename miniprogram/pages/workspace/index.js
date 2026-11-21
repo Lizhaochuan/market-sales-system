@@ -2,7 +2,7 @@ const session = require('../../lib/session');
 const mutations = require('../../lib/mutation-page');
 const ui = require('../../lib/presentation');
 const empty = {
-  staffReadOnly:false, access:{}, name:'', nav:[], rows:[], staff:[], incoming:[], market:[], marketStats:null, results:[],
+  staffMode:false, staffApprovals:[], staffSelection:null, access:{}, name:'', nav:[], rows:[], staff:[], incoming:[], market:[], marketStats:null, results:[],
   report:null, dayTasks:[], overdue:[], approvals:[], supervision:[], cards:[], drill:null, searchRows:null,
   sources:[], campuses:[], options:null, filter:{}, filterMode:0, message:'', notice:'',
   date:ui.day(), section:'', busy:false, saving:false, conflict:false, retryable:false, dimension:{},
@@ -35,11 +35,13 @@ Page({
     try {
       const me = session.identity();
       if (session.isStaffSession()) {
-        const {items} = await session.readStaffTasks();
+        const {items, approvals = []} = await session.readStaffTasks();
         if (this.ticket !== ticket) return;
         const schedules = ui.dueItems(items, this.data.date);
-        this.setData({staffReadOnly:true, name:me.display_name, section:'tasks',
-          nav:[{id:'tasks',label:'待办'}], reminders:items, dayTasks:schedules.selected, overdue:schedules.overdue});
+        const manager = me.capabilities?.strict_mobile_review === true;
+        this.setData({staffMode:true, name:me.display_name, section:manager && this.data.section === 'staff-review' ? 'staff-review' : 'tasks',
+          nav:[{id:'tasks',label:'待办'}, ...(manager ? [{id:'staff-review',label:'审批'}] : [])],
+          staffApprovals:approvals, reminders:items, dayTasks:schedules.selected, overdue:schedules.overdue});
         return;
       }
       const options = await session.read('/options');
@@ -100,7 +102,7 @@ Page({
       firstResponse:first ? first.on_time+' 准时 · '+first.overdue+' 超时' : '', connection:report?.connection_24h ? ui.percent(report.connection_24h.rate) : '', costMissing:report?.channel_cost_status === 'COST_NOT_CONFIGURED',
       financeCoverage:report?.snapshot_cash?.status || ''};
   },
-  select(event) { this.setData({section:event.currentTarget.dataset.id, drill:null, message:'', notice:''}); },
+  select(event) { this.setData({section:event.currentTarget.dataset.id, drill:null, staffSelection:null, message:'', notice:''}); },
   selectDate(event) {
     const date = event.detail.value;
     const due = ui.dueItems(this.data.reminders || [], date);
@@ -140,9 +142,32 @@ Page({
     const item = this.data.incoming.find(row=>row.id===event.currentTarget.dataset.id);
     if (item) return this.change(() => ['/'+item.lead_id+'/accept-transfer',{record_id:item.id,expected_version:item.version}]);
   },
+  openStaffAction(event) {
+    if (this.data.saving || this.retryTask) return;
+    const {id, operation} = event.currentTarget.dataset;
+    const item = (operation === 'followup' ? this.data.reminders : this.data.staffApprovals).find(row => row.id === id);
+    if (item) this.setData({staffSelection:{...item, operation}, message:'', notice:''});
+  },
+  closeStaffAction() {
+    if (!this.data.saving && !this.retryTask) this.setData({staffSelection:null});
+  },
+  submitStaffAction(event) {
+    const item = this.data.staffSelection;
+    if (!item) return;
+    const form = event.detail.value;
+    return this.change(() => {
+      const path = '/' + item.operation + '/' + item.id;
+      if (item.operation === 'followup') {
+        const next = ui.action(form.title, form.date, form.time);
+        return [path,{expected_version:item.expected_version,result:form.result,notes:form.notes,title:next.title,due_at:next.due_at},true];
+      }
+      if (!['approve','reject'].includes(form.decision)) throw new Error('请选择审批结果');
+      return [path,{approved:form.decision === 'approve',evidence:form.evidence},true];
+    });
+  },
   async change(build) {
     if (this.data.conflict) return;
-    try { const [path,body] = build(); await mutations.run(this,path,body); }
+    try { const [path,body,staffAction] = build(); await mutations.run(this,path,body,staffAction); }
     catch (error) { this.setData({message:error.message}); }
   },
   retry() { return mutations.retry(this); },
@@ -152,7 +177,7 @@ Page({
       return;
     }
     this.phoneForLookup = '';
-    this.setData({results:[], noMatch:false, notice:'已保存'});
+    this.setData({results:[], noMatch:false, staffSelection:null, notice:'已保存'});
     await this.refresh();
     if (result?.lead_id && this.data.access.sales && this.data.section==='customers') this.openById(result.lead_id);
   },
