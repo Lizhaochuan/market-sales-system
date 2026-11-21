@@ -1,5 +1,6 @@
 // V3.2-01: isolated-test-only process. NEVER expose on the public Internet.
 import pg from 'pg';
+import {createPrivateKey,createPublicKey,sign} from 'node:crypto';
 import { createApp } from './app.mjs';
 import { assertRestrictedRuntime } from './runtime-preflight.mjs';
 import { initializeStrictStaffPools } from './strict-staff-pools.mjs';
@@ -51,6 +52,26 @@ if(strictStaffMode&&!externalIdentity)
 if(strictStaffMode&&(!process.env.MS_STAFF_READ_URLS_JSON||
   !process.env.MS_STAFF_WRITE_URLS_JSON))
   throw new Error('Strict mode requires both per-employee read and write database pools');
+const wechatKeys=['MS_WECHAT_APP_ID','MS_WECHAT_APP_SECRET','MS_WECHAT_SIGNING_KEY_PEM','MS_WECHAT_SIGNING_KEY_ID'];
+let wechatStaff;
+if(wechatKeys.some(name=>process.env[name])){
+  if(!strictStaffMode||!wechatKeys.every(name=>process.env[name]))
+    throw Error('WeChat sign-in requires strict mode and all WeChat settings');
+  const [appId,appSecret,pem,kid]=wechatKeys.map(name=>process.env[name]);
+  const privateKey=createPrivateKey(pem);
+  const publicKey=createPublicKey(privateKey).export({format:'jwk'});
+  const trusted=externalIdentity.jwks.keys.find(key=>key.kid===kid);
+  if(!trusted||trusted.kty!=='RSA'||publicKey.n!==trusted.n||publicKey.e!==trusted.e)
+    throw Error('WeChat signing key does not match the configured trusted key');
+  const pack=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
+  wechatStaff={appId,appSecret,issueCredential({subject}){
+    const iat=Math.floor(Date.now()/1000);
+    const message=pack({alg:'RS256',kid,typ:'JWT'})+'.'+pack({
+      iss:externalIdentity.issuer,aud:externalIdentity.audience,sub:subject,iat,exp:iat+300,
+    });
+    return message+'.'+sign('RSA-SHA256',Buffer.from(message),privateKey).toString('base64url');
+  }};
+}
 let strictPools,identityDirectoryPool;
 if(strictStaffMode){
   if(!process.env.DATABASE_URL_AUTH_DIRECTORY)
@@ -75,6 +96,7 @@ const server=createApp(pool,{
   secret,issuer:process.env.AUTH_ISSUER||'market-sales-test-issuer',
   devLoginSecret:strictStaffMode?undefined:process.env.DEV_LOGIN_SECRET,
   externalIdentity,
+  wechatStaff,
   strictStaffMode,
   identityDirectoryPool,
   ...(strictPools?{

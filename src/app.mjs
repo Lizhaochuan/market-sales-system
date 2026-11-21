@@ -4,6 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { demoLogin } from './dev-login.mjs';
 import { serveUi } from './ui-assets.mjs';
 import { identityOperation } from './identity-governance.mjs';
+import { createWeChatStaffSession } from './wechat-staff-session.mjs';
 import { createExternalTokenVerifier, resolveExternalStaff } from './external-identity.mjs';
 import { resolveStrictDirectoryContext } from './strict-auth-directory.mjs';
 import { migratedLegacyReads, readLegacyViaStaffPool } from './scoped-legacy-read-adapter.mjs';
@@ -593,7 +594,7 @@ const send=(res,status,json,requestId)=>{
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(data);
 };
-export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false,workspaceEnabled=false,v34Enabled=false,roleWorkspaces=false}={}) {
+export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLoginSecret,externalIdentity,wechatStaff,scopedReadPools,scopedWritePools,identityDirectoryPool,strictStaffMode=false,workspaceEnabled=false,v34Enabled=false,roleWorkspaces=false}={}) {
   if(process.env.MS_STAGE!=='isolated-test'||typeof secret!=='string'||secret.length<32)
     throw new Error('Isolated-test mode and strong test-only signing secret required; production auth is not implemented');
   if(roleWorkspaces&&!v34Enabled)throw new Error('Role workspaces require V3.4');
@@ -613,12 +614,31 @@ export function createApp(pool,{secret,issuer='market-sales-test-issuer',devLogi
       !(scopedWritePools instanceof Map)||!identityDirectoryPool?.connect))
     throw new Error('Strict employee mode requires trusted RS256, read/write pools and function-only identity directory');
   const externalVerifier=externalIdentity?createExternalTokenVerifier(externalIdentity):null;
+  if(wechatStaff&&!strictStaffMode)throw new Error('WeChat staff sign-in requires strict employee mode');
+  const wechatLogin=wechatStaff?createWeChatStaffSession({
+    ...wechatStaff,issuer:externalIdentity.issuer,
+    resolveStaff:claims=>resolveStrictDirectoryContext(identityDirectoryPool,claims),
+    issueCredential:async claims=>{
+      const credential=await wechatStaff.issueCredential(claims);
+      const verified=externalVerifier(credential);
+      if(verified.issuer!==claims.issuer||verified.subject!==claims.subject)
+        throw new Error('WeChat credential signer returned a different identity');
+      return credential;
+    }
+  }):null;
   return createServer(async(req,res)=>{
     const requestId=randomUUID();
     let c;
     try {
       const url=new URL(req.url,'http://localhost');
       if(req.method==='GET'&&await serveUi(url.pathname,res))return;
+      if(url.pathname==='/api/v1/mobile/wechat/session'&&req.method==='POST'){
+        if(!wechatLogin)fail(404,'NOT_FOUND','微信员工登录入口未配置');
+        const result=await wechatLogin(await readJson(req,2048));
+        res.setHeader('Cache-Control','no-store');
+        send(res,200,{code:'OK',message:'微信员工身份已验证',data:result},requestId);
+        return;
+      }
       if(url.pathname==='/api/v1/dev/login'&&req.method==='POST'){
         if(strictStaffMode)fail(404,'NOT_FOUND','严格员工模式不允许演示口令登录');
         if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))
